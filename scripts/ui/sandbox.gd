@@ -90,14 +90,15 @@ func _build() -> void:
 func _refresh() -> void:
 	_turn_label.text = _clock.status_text()
 	var gen_note := "WFC 已生成" if _map_model.generation_ok else "WFC 失败已回退"
-	_hint_label.text = "%s · 拖拽浏览 · 点相邻雾格揭开 · 种子 %d" % [gen_note, _map_model.seed_used]
+	_hint_label.text = "%s · 拖拽平移 · 滚轮缩放 · 点相邻雾格揭开 · 种子 %d" % [
+		gen_note, _map_model.seed_used
+	]
 
 
 func _on_cell_clicked(cell: Vector2i) -> void:
 	if _map_model.config.reveal_only_on_player_turn and not _clock.player_active:
 		return
-	if _map_model.try_player_reveal(cell):
-		_map_view.queue_redraw()
+	_map_model.try_player_reveal(cell)
 
 
 func _on_end_turn_pressed() -> void:

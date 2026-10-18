@@ -43,7 +43,32 @@ static func display_name(id: int) -> String:
 			return "未知"
 
 
-## 占位色块：可读区分即可，非最终美术。
+## 3D 占位挤出高度（逻辑单位，相对 hex_size）。可读分层，非最终美术。
+static func placeholder_height(id: int) -> float:
+	match id:
+		Id.OCEAN:
+			return 0.18
+		Id.BEACH:
+			return 0.32
+		Id.GRASSLAND:
+			return 0.55
+		Id.FOREST:
+			return 0.85
+		Id.HILLS:
+			return 1.15
+		Id.MOUNTAIN:
+			return 1.85
+		Id.DESERT:
+			return 0.5
+		Id.MARSH:
+			return 0.4
+		Id.SNOW:
+			return 0.7
+		_:
+			return 0.5
+
+
+## 占位色：可读区分即可，非最终美术。
 static func placeholder_color(id: int) -> Color:
 	match id:
 		Id.OCEAN:
