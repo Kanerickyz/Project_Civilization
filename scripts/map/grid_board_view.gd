@@ -27,8 +27,8 @@ var _press_pos: Vector2 = Vector2.ZERO
 var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
-const TEX_PLAYER := preload("res://assets/sprites/units/wolf.png")
-const TEX_OPPONENT := preload("res://assets/sprites/units/pyre_guard.png")
+const TEX_PLAYER := preload("res://assets/autochess/sprites/units/wolf.png")
+const TEX_OPPONENT := preload("res://assets/autochess/sprites/units/pyre_guard.png")
 
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {} # int index -> Vector2 position
