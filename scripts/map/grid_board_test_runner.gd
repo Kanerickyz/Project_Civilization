@@ -16,8 +16,54 @@ func _initialize() -> void:
 	if not _test_view_builds():
 		quit(1)
 		return
+	if not _test_unit_scale_vs_cell():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
+
+
+func _test_unit_scale_vs_cell() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 4
+	cfg.grid_height = 4
+	cfg.cell_size = 1.0
+	cfg.unit_world_height = 0.88
+	var host := Control.new()
+	host.custom_minimum_size = Vector2(480, 360)
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var UnitDefScript := preload("res://scripts/units/tactical_unit_def.gd")
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var def_path := "res://resources/units/knight.tres"
+	if not ResourceLoader.exists(def_path):
+		return true
+	var def: TacticalUnitDef = load(def_path) as TacticalUnitDef
+	if def == null or def.texture_blue == null:
+		return true
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [])
+	if not view._unit_sprites.has(unit):
+		push_error("GridBoardView: unit sprite missing after sync")
+		return false
+	var spr: Sprite3D = view._unit_sprites[unit] as Sprite3D
+	var expected_h := cfg.unit_world_height
+	var tex_h := float(def.texture_blue.get_height())
+	var expected_pixel := expected_h / tex_h
+	if absf(spr.pixel_size - expected_pixel) > 0.0001:
+		push_error(
+			"GridBoardView: unit pixel_size %.5f != expected %.5f"
+			% [spr.pixel_size, expected_pixel]
+		)
+		return false
+	if expected_h > cfg.cell_size * cfg.tile_inset:
+		push_error("GridBoardView: unit_world_height should fit inside cell inset")
+		return false
+	return true
 
 
 func _test_pan_vertical_intuitive() -> bool:
