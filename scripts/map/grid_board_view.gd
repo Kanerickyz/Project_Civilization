@@ -202,9 +202,38 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	_update_hp_bar(unit)
 
 
+const UNIT_MOVE_TWEEN_SEC := 0.26
+
+
+func unit_move_duration_sec() -> float:
+	return UNIT_MOVE_TWEEN_SEC
+
+
 func _tween_unit_to(spr: Sprite3D, target_pos: Vector3) -> void:
 	var tw := create_tween()
-	tw.tween_property(spr, "position", target_pos, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "position", target_pos, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
+		Tween.EASE_OUT
+	)
+
+
+func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> Tween:
+	if config == null or not _unit_sprites.has(attacker):
+		return null
+	var spr := _unit_sprites[attacker] as Sprite3D
+	var home := spr.position
+	var world := _cell_to_world(target_cell, config.cell_size)
+	var flat := Vector3(world.x - home.x, 0.0, world.z - home.z)
+	var lunge := home
+	if flat.length_squared() > 0.0001:
+		lunge = home + flat.normalized() * minf(flat.length() * 0.42, config.cell_size * 0.55)
+	var tw := create_tween()
+	tw.tween_property(spr, "position", lunge, 0.09).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "position", home, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	return tw
+
+
+func attack_tween_duration_sec() -> float:
+	return 0.28
 
 
 func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
@@ -243,9 +272,13 @@ func play_unit_hit(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
 		return
 	var spr := _unit_sprites[unit] as Sprite3D
+	var base := spr.position
 	spr.modulate = Color("ff8888")
 	var tw := create_tween()
-	tw.tween_property(spr, "modulate", Color.WHITE, 0.28)
+	tw.set_parallel(true)
+	tw.tween_property(spr, "modulate", Color.WHITE, 0.32)
+	tw.tween_property(spr, "position:x", base.x + 0.06, 0.06).set_trans(Tween.TRANS_SINE)
+	tw.chain().tween_property(spr, "position", base, 0.12).set_trans(Tween.TRANS_SINE)
 
 
 func play_unit_death(unit: TacticalUnitInstance) -> void:

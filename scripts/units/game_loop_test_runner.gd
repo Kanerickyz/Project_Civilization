@@ -20,6 +20,9 @@ func _initialize() -> void:
 	if not _test_opponent_ai_runs():
 		quit(1)
 		return
+	if not _test_attack_flag_resets_with_side_turn():
+		quit(1)
+		return
 	print("GAME_LOOP_OK")
 	quit(0)
 
@@ -89,5 +92,33 @@ func _test_opponent_ai_runs() -> bool:
 	var events := TacticalEnemyAiScript.run_opponent_turn(board)
 	if events == null:
 		push_error("GameLoop: AI should return event array")
+		return false
+	return true
+
+
+func _test_attack_flag_resets_with_side_turn() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	foe.cell = player.cell + Vector2i(1, 0)
+	var res := TacticalCombatScript.try_basic_attack(
+		board, player, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"]:
+		push_error("GameLoop: attack setup failed")
+		return false
+	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+	var res2 := TacticalCombatScript.try_basic_attack(
+		board, player, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res2["ok"]:
+		push_error("GameLoop: should attack on new side turn after reset")
 		return false
 	return true

@@ -226,7 +226,7 @@ func _refresh_all() -> void:
 		_board_config.grid_width,
 		_board_config.grid_height,
 		mode,
-		_last_log if _last_log != "" else "点选己方单位 · 绿=可移动 · 红=攻击距离",
+		_last_log if _last_log != "" else "点选己方单位 · 绿=剩余移动力可达 · 红=攻击距离",
 	]
 	_refresh_unit_panel()
 	_refresh_action_buttons()
@@ -259,14 +259,15 @@ func _refresh_unit_panel() -> void:
 	var skill_line := ab.display_name if ab != null else "—"
 	var skill_rules := ab.rules_hint if ab != null else ""
 	_unit_panel.text = (
-		"%s · %s\nHP %d/%d · 攻 %d · 移 %d · 射程 %d\n%s\n%s"
+		"%s · %s\nHP %d/%d · 攻 %d · 移力 %d/%d · 射程 %d\n%s\n%s"
 		% [
 			u.def.display_name,
 			TacticalFactionScript.label(u.faction),
 			u.hp,
 			u.def.max_hp,
 			u.effective_attack(),
-			u.def.move_range,
+			u.remaining_move_budget,
+			u.def.action_move_budget(),
 			u.def.attack_range,
 			skill_line,
 			skill_rules,
@@ -299,21 +300,41 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_selected_unit != null
 			and _selected_unit.faction == TacticalFactionScript.Id.PLAYER
 		):
-			var atk := TacticalCombatScript.try_basic_attack(
-				_board, _selected_unit, cell, TacticalFactionScript.Id.PLAYER
-			)
-			_last_log = atk["log"]
-			if atk["ok"]:
-				_feedback_from_attack(clicked, atk)
-				_check_victory()
+			_run_player_attack_async(cell, clicked)
+			return
 		_refresh_all()
 		return
 
 	if _selected_unit != null and _selected_unit.faction == TacticalFactionScript.Id.PLAYER:
 		if _board.try_move(_selected_unit, cell):
-			_last_log = "%s 移动至 (%d,%d)" % [
-				_selected_unit.def.display_name, cell.x, cell.y
+			_last_log = "%s 移动至 (%d,%d) · 剩余移力 %d" % [
+				_selected_unit.def.display_name,
+				cell.x,
+				cell.y,
+				_selected_unit.remaining_move_budget,
 			]
+	_refresh_all()
+
+
+func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstance) -> void:
+	if _input_locked:
+		return
+	var attacker := _selected_unit
+	var atk := TacticalCombatScript.try_basic_attack(
+		_board, attacker, target_cell, TacticalFactionScript.Id.PLAYER
+	)
+	_last_log = atk["log"]
+	if not atk["ok"]:
+		_refresh_all()
+		return
+	_input_locked = true
+	_refresh_action_buttons()
+	var tw := _board_view.play_unit_attack(attacker, target_cell)
+	if tw != null:
+		await tw.finished
+	_feedback_from_attack(target, atk)
+	_check_victory()
+	_input_locked = false
 	_refresh_all()
 
 
@@ -343,25 +364,40 @@ func _run_opponent_turn_async() -> void:
 	_input_locked = true
 	_refresh_action_buttons()
 	await get_tree().process_frame
-	var events := TacticalEnemyAiScript.run_opponent_turn(_board)
-	for ev in events:
-		var kind: String = ev.get("kind", "")
-		if kind == "attack":
-			var res: Dictionary = ev["result"]
-			var cell: Vector2i = ev["cell"]
-			var target := _board.unit_at(cell)
-			if target != null:
-				_board_view.play_damage_popup(cell, int(res.get("damage", 0)))
-				_board_view.play_unit_hit(target)
-				if res.get("killed", false):
-					await get_tree().create_timer(0.25).timeout
-					_board_view.play_unit_death(target)
-		elif kind == "move":
-			_last_log = "对手 %s 移动" % (ev["unit"] as TacticalUnitInstance).def.display_name
-		_refresh_all()
-		await get_tree().create_timer(0.32).timeout
-		if _check_victory():
-			return
+	var opponents := TacticalEnemyAiScript.sorted_opponents(_board)
+	for unit in opponents:
+		if not unit.is_alive():
+			continue
+		var events := TacticalEnemyAiScript.run_opponent_unit_actions(_board, unit)
+		for ev in events:
+			var kind: String = ev.get("kind", "")
+			if kind == "move":
+				var mover := ev["unit"] as TacticalUnitInstance
+				_last_log = "对手 %s 移动 · 剩余移力 %d" % [
+					mover.def.display_name, mover.remaining_move_budget
+				]
+				_refresh_all()
+				await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+			elif kind == "attack":
+				var res: Dictionary = ev["result"]
+				var cell: Vector2i = ev["cell"]
+				var attacker := ev["unit"] as TacticalUnitInstance
+				var tw := _board_view.play_unit_attack(attacker, cell)
+				if tw != null:
+					await tw.finished
+				var target := _board.unit_at(cell)
+				if target != null:
+					_board_view.play_damage_popup(cell, int(res.get("damage", 0)))
+					_board_view.play_unit_hit(target)
+					_last_log = res.get("log", "对手攻击")
+					if res.get("killed", false):
+						await get_tree().create_timer(0.22).timeout
+						_board_view.play_unit_death(target)
+				_refresh_all()
+				await get_tree().create_timer(0.28).timeout
+			if _check_victory():
+				return
+		await get_tree().create_timer(0.18).timeout
 
 	_clock.end_turn()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
