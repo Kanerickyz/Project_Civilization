@@ -31,7 +31,8 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 
 var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite3D
 var _overlay_selected: Vector2i = Vector2i(-1, -1)
-var _overlay_targets: Dictionary = {}
+var _overlay_move: Dictionary = {}
+var _overlay_attack: Dictionary = {}
 
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {} # int index -> Vector2 position
@@ -153,13 +154,21 @@ func _rebuild_board() -> void:
 			_apply_tile_visual(cell)
 
 
-func sync_tactical_units(units: Array, selected_cell: Vector2i, target_cells: Array) -> void:
+func sync_tactical_units(
+	units: Array,
+	selected_cell: Vector2i,
+	move_cells: Array,
+	attack_cells: Array
+) -> void:
 	if config == null or _units_root == null:
 		return
 	_overlay_selected = selected_cell
-	_overlay_targets.clear()
-	for c in target_cells:
-		_overlay_targets[c] = true
+	_overlay_move.clear()
+	_overlay_attack.clear()
+	for c in move_cells:
+		_overlay_move[c] = true
+	for c in attack_cells:
+		_overlay_attack[c] = true
 	var alive: Dictionary = {}
 	for u in units:
 		if u is TacticalUnitInstance and (u as TacticalUnitInstance).is_alive():
@@ -212,9 +221,11 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	var checker := (cell.x + cell.y) % 2 == 0
 	var color := config.color_light if checker else config.color_dark
 	if cell == _overlay_selected:
-		color = color.lerp(Color("5a8fd4"), 0.45)
-	elif _overlay_targets.has(cell):
-		color = color.lerp(Color("c46a5a"), 0.42)
+		color = color.lerp(Color("5a8fd4"), 0.52)
+	elif _overlay_attack.has(cell):
+		color = color.lerp(Color("c46a5a"), 0.48)
+	elif _overlay_move.has(cell):
+		color = color.lerp(Color("5ab88a"), 0.44)
 	mi.material_override = _material_for("tile_%d_%d_%d" % [int(checker), cell.x, cell.y], color)
 
 

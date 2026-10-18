@@ -46,7 +46,7 @@ func _test_unit_scale_vs_cell() -> bool:
 	if def == null or def.texture_blue == null:
 		return true
 	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
-	view.sync_tactical_units([unit], Vector2i(-1, -1), [])
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
 	if not view._unit_sprites.has(unit):
 		push_error("GridBoardView: unit sprite missing after sync")
 		return false

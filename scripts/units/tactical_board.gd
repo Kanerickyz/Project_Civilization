@@ -40,9 +40,59 @@ func living_units() -> Array[TacticalUnitInstance]:
 func reset_side_turn_flags(active_faction: TacticalFaction.Id) -> void:
 	for u in units:
 		if u.faction == active_faction:
-			u.skill_used_this_side_turn = false
 			u.moved_this_side_turn = false
 	changed.emit()
+
+
+func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if unit == null or not unit.is_alive() or unit.moved_this_side_turn:
+		return out
+	for gx in range(grid_width):
+		for gy in range(grid_height):
+			var cell := Vector2i(gx, gy)
+			if cell == unit.cell:
+				continue
+			if unit_at(cell) != null:
+				continue
+			if GridMathScript.chebyshev(unit.cell, cell) > unit.def.move_range:
+				continue
+			out.append(cell)
+	return out
+
+
+func attack_range_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if unit == null or not unit.is_alive():
+		return out
+	var r := unit.def.attack_range
+	for gx in range(grid_width):
+		for gy in range(grid_height):
+			var cell := Vector2i(gx, gy)
+			if GridMathScript.chebyshev(unit.cell, cell) > r:
+				continue
+			if cell == unit.cell:
+				continue
+			out.append(cell)
+	return out
+
+
+func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUnitInstance = null) -> Dictionary:
+	var result := {"ok": false, "log": "", "killed": false}
+	if target == null or not target.is_alive() or amount <= 0:
+		result["log"] = "无效伤害"
+		return result
+	target.hp -= amount
+	var hurt_logs := TacticalAbilitySystem.process_unit_hurt(self, target, amount)
+	if not target.is_alive():
+		result["killed"] = true
+		if source != null and source != target:
+			var kill_logs := TacticalAbilitySystem.process_unit_kill(self, source, target)
+			hurt_logs.append_array(kill_logs)
+	result["ok"] = true
+	result["log"] = " · ".join(hurt_logs) if hurt_logs.size() > 0 else ""
+	changed.emit()
+	return result
 
 
 func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:

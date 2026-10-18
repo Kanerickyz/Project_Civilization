@@ -4,102 +4,102 @@ extends RefCounted
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
-## 释放主动技：每单位每「方行动段」最多一次；不替代 TurnClock.end_turn。
+## 时机触发战术能力；不替代 TurnClock.end_turn，无玩家点按释放。
 
 
-static func can_cast(caster: TacticalUnitInstance, active_faction: TacticalFaction.Id) -> bool:
-	if caster == null or not caster.is_alive():
-		return false
-	if caster.faction != active_faction:
-		return false
-	if caster.skill_used_this_side_turn:
-		return false
-	return caster.def.active_ability != null
+static func process_battle_start(board: TacticalBoard) -> Array[String]:
+	var logs: Array[String] = []
+	for u in board.living_units():
+		logs.append_array(_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_SELF_DEPLOY))
+	return logs
 
 
-static func valid_target_cells(
+static func process_side_turn_start(board: TacticalBoard, faction: TacticalFaction.Id) -> Array[String]:
+	var logs: Array[String] = []
+	for u in board.living_units():
+		if u.faction != faction:
+			continue
+		logs.append_array(
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_SIDE_TURN_START)
+		)
+	return logs
+
+
+static func process_unit_hurt(board: TacticalBoard, unit: TacticalUnitInstance, _damage: int) -> Array[String]:
+	if unit == null or not unit.is_alive():
+		return []
+	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_HURT)
+
+
+static func process_unit_kill(
 	board: TacticalBoard,
-	caster: TacticalUnitInstance,
-	active_faction: TacticalFaction.Id
-) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	var ab := caster.def.active_ability
-	if ab == null:
-		return out
-	match ab.target_kind:
-		TacticalActiveAbility.TargetKind.ENEMY_UNIT:
-			for u in board.living_units():
-				if u.faction == caster.faction:
-					continue
-				if GridMathScript.chebyshev(caster.cell, u.cell) <= ab.range_chebyshev:
-					out.append(u.cell)
-		TacticalActiveAbility.TargetKind.SELF_CENTER_ALLIES:
-			out.append(caster.cell)
-	return out
+	killer: TacticalUnitInstance,
+	_victim: TacticalUnitInstance
+) -> Array[String]:
+	if killer == null or not killer.is_alive():
+		return []
+	return _try_trigger(board, killer, TacticalActiveAbility.TriggerKind.ON_SELF_KILL)
 
 
-static func cast(
+static func _try_trigger(
 	board: TacticalBoard,
-	caster: TacticalUnitInstance,
-	target_cell: Vector2i,
-	active_faction: TacticalFaction.Id
-) -> Dictionary:
-	var result := {"ok": false, "log": ""}
-	if not can_cast(caster, active_faction):
-		result["log"] = "本段行动已用过技能或无法释放"
-		return result
-	var ab := caster.def.active_ability
-	if ab == null:
-		result["log"] = "无主动技"
-		return result
-	var valid := valid_target_cells(board, caster, active_faction)
-	if target_cell not in valid:
-		result["log"] = "目标不在范围内"
-		return result
-
-	match ab.target_kind:
-		TacticalActiveAbility.TargetKind.ENEMY_UNIT:
-			var target := board.unit_at(target_cell)
-			if target == null or target.faction == caster.faction:
-				result["log"] = "需要敌方单位"
-				return result
-			var dmg := caster.effective_attack() + ab.damage_add
-			target.hp -= dmg
-			var killed := not target.is_alive()
-			if ab.self_atk_on_cast != 0:
-				caster.atk_bonus += ab.self_atk_on_cast
-			if killed and ab.self_atk_on_kill != 0:
-				caster.atk_bonus += ab.self_atk_on_kill
-			result["ok"] = true
-			result["log"] = "%s 对 %s 造成 %d 伤害" % [
-				caster.def.display_name,
-				target.def.display_name,
-				dmg,
-			]
-			if killed:
-				result["log"] += "（击杀）"
-		TacticalActiveAbility.TargetKind.SELF_CENTER_ALLIES:
-			var allies := board.allies_in_radius(
-				caster.cell, caster.faction, ab.ally_buff_radius, Vector2i(-999, -999)
-			)
-			var buffed := 0
-			for ally in allies:
-				if ally == caster:
-					continue
-				ally.atk_bonus += ab.ally_atk_buff
-				buffed += 1
-			if ab.self_atk_on_cast != 0:
-				caster.atk_bonus += ab.self_atk_on_cast
-			result["ok"] = true
-			result["log"] = "%s 鸣鼓，%d 名友军攻击+%d" % [
-				caster.def.display_name,
-				buffed,
-				ab.ally_atk_buff,
-			]
+	unit: TacticalUnitInstance,
+	kind: TacticalActiveAbility.TriggerKind
+) -> Array[String]:
+	var ab := unit.def.triggered_ability
+	if ab == null or ab.trigger_kind != kind:
+		return []
+	match kind:
+		TacticalActiveAbility.TriggerKind.ON_SELF_DEPLOY:
+			if unit.deploy_trigger_fired:
+				return []
+			unit.deploy_trigger_fired = true
+			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "入阵")
+		TacticalActiveAbility.TriggerKind.ON_SELF_HURT:
+			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "铁壁")
+		TacticalActiveAbility.TriggerKind.ON_SELF_KILL:
+			return _apply_self_atk(board, unit, ab.self_atk_on_kill, "猎杀")
+		TacticalActiveAbility.TriggerKind.ON_SIDE_TURN_START:
+			return _apply_ally_buff(board, unit, ab)
 		_:
-			result["log"] = "未知技能类型"
-			return result
+			return []
 
-	caster.skill_used_this_side_turn = true
+
+static func _apply_self_atk(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	amount: int,
+	tag: String
+) -> Array[String]:
+	if amount == 0:
+		return []
+	unit.atk_bonus += amount
 	board.changed.emit()
-	return result
+	return [
+		"%s %s：攻击+%d（本场）" % [unit.def.display_name, tag, amount],
+	]
+
+
+static func _apply_ally_buff(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility
+) -> Array[String]:
+	if ab.ally_atk_buff == 0:
+		return []
+	var allies := board.allies_in_radius(
+		unit.cell, unit.faction, ab.ally_buff_radius, Vector2i(-999, -999)
+	)
+	var buffed := 0
+	for ally in allies:
+		if ally == unit:
+			continue
+		ally.atk_bonus += ab.ally_atk_buff
+		buffed += 1
+	if buffed == 0:
+		return []
+	board.changed.emit()
+	return [
+		"%s 鸣鼓：%d 名友军攻击+%d（本场）"
+		% [unit.def.display_name, buffed, ab.ally_atk_buff],
+	]

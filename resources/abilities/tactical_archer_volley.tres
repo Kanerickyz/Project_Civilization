@@ -4,14 +4,13 @@
 
 [resource]
 script = ExtResource("1_ab")
-id = "volley"
+id = "volley_spirit"
 display_name = "援军齐射"
 autochess_ability_id = "deploy_self_atk_small"
-rules_hint = "对 3 格内敌方造成攻击伤害；释放后自身攻击+1（本场）。每段玩家行动每单位一次。"
-target_kind = 0
+rules_hint = "入阵（开战在场）：自身攻击+1（本场）。"
+trigger_kind = 2
 range_chebyshev = 3
-damage_add = 0
-self_atk_on_cast = 1
+self_atk_on_trigger = 1
 self_atk_on_kill = 0
 ally_atk_buff = 0
 ally_buff_radius = 2

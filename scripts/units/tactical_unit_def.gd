@@ -9,4 +9,4 @@ extends Resource
 @export var attack_range: int = 1
 @export var texture_blue: Texture2D
 @export var texture_red: Texture2D
-@export var active_ability: TacticalActiveAbility
+@export var triggered_ability: TacticalActiveAbility

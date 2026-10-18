@@ -6,8 +6,8 @@ var faction: TacticalFaction.Id = TacticalFaction.Id.PLAYER
 var cell: Vector2i = Vector2i.ZERO
 var hp: int = 1
 var atk_bonus: int = 0
-var skill_used_this_side_turn: bool = false
 var moved_this_side_turn: bool = false
+var deploy_trigger_fired: bool = false
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:

@@ -14,12 +14,10 @@ var _clock: TurnClock
 var _turn_label: Label
 var _hint_label: Label
 var _unit_panel: Label
-var _skill_button: Button
 var _board_config: BoardConfig
 var _board_view: GridBoardView
 var _board: TacticalBoard
 var _selected_unit: TacticalUnitInstance
-var _skill_targeting: bool = false
 var _last_log: String = ""
 
 
@@ -32,6 +30,8 @@ func _ready() -> void:
 	)
 	_board.changed.connect(_on_board_changed)
 	_build()
+	_fire_battle_start_triggers()
+	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_refresh_all()
 
 
@@ -41,6 +41,18 @@ func _load_board_config() -> BoardConfig:
 		return (loaded as BoardConfig).duplicate(true) as BoardConfig
 	push_warning("Sandbox: missing %s, using defaults" % BOARD_CONFIG_PATH)
 	return BoardConfigScript.new()
+
+
+func _fire_battle_start_triggers() -> void:
+	var logs := TacticalAbilitySystemScript.process_battle_start(_board)
+	if logs.size() > 0:
+		_last_log = logs[logs.size() - 1]
+
+
+func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
+	var logs := TacticalAbilitySystemScript.process_side_turn_start(_board, faction)
+	if logs.size() > 0:
+		_last_log = logs[logs.size() - 1]
 
 
 func _build() -> void:
@@ -106,12 +118,6 @@ func _build() -> void:
 	_unit_panel.add_theme_font_size_override("font_size", 13)
 	side_box.add_child(_unit_panel)
 
-	_skill_button = Button.new()
-	_skill_button.text = "释放技能"
-	_skill_button.custom_minimum_size = Vector2(140, 32)
-	_skill_button.pressed.connect(_on_skill_pressed)
-	side_box.add_child(_skill_button)
-
 	var bottom_bar := MarginContainer.new()
 	bottom_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -148,27 +154,26 @@ func _on_board_changed() -> void:
 func _refresh_all() -> void:
 	_turn_label.text = "对战 · %s" % _clock.status_text()
 	var mode := ""
-	if _skill_targeting:
-		mode = " · 选技能目标"
-	elif _selected_unit != null:
+	if _selected_unit != null:
 		mode = " · 已选 %s" % _selected_unit.def.display_name
 	_hint_label.text = "%dx%d 方格%s · %s" % [
 		_board_config.grid_width,
 		_board_config.grid_height,
 		mode,
-		_last_log if _last_log != "" else "点选己方单位 · 邻格移动 · 技能每段行动一次",
+		_last_log if _last_log != "" else "点选己方单位 · 绿=可移动 · 红=攻击距离",
 	]
 	_refresh_unit_panel()
-	_refresh_skill_button()
-	var targets: Array = []
-	if _skill_targeting and _selected_unit != null and _clock.player_active:
-		targets = TacticalAbilitySystemScript.valid_target_cells(
-			_board, _selected_unit, TacticalFactionScript.Id.PLAYER
-		)
+	var move_cells: Array = []
+	var attack_cells: Array = []
 	var sel_cell := Vector2i(-1, -1)
-	if _selected_unit != null:
+	if _selected_unit != null and _clock.player_active:
 		sel_cell = _selected_unit.cell
-	_board_view.sync_tactical_units(_board.living_units(), sel_cell, targets)
+		if _selected_unit.faction == TacticalFactionScript.Id.PLAYER:
+			move_cells = _board.reachable_move_cells(_selected_unit)
+			attack_cells = _board.attack_range_cells(_selected_unit)
+	elif _selected_unit != null:
+		sel_cell = _selected_unit.cell
+	_board_view.sync_tactical_units(_board.living_units(), sel_cell, move_cells, attack_cells)
 
 
 func _refresh_unit_panel() -> void:
@@ -176,68 +181,33 @@ func _refresh_unit_panel() -> void:
 		_unit_panel.text = "未选中单位\n（玩家回合可点蓝方）"
 		return
 	var u := _selected_unit
-	var ab := u.def.active_ability
+	var ab := u.def.triggered_ability
 	var skill_line := ab.display_name if ab != null else "—"
 	var skill_rules := ab.rules_hint if ab != null else ""
 	_unit_panel.text = (
-		"%s · %s\nHP %d/%d · 攻 %d\n%s\n%s"
+		"%s · %s\nHP %d/%d · 攻 %d · 移 %d · 射程 %d\n%s\n%s"
 		% [
 			u.def.display_name,
 			TacticalFactionScript.label(u.faction),
 			u.hp,
 			u.def.max_hp,
 			u.effective_attack(),
+			u.def.move_range,
+			u.def.attack_range,
 			skill_line,
 			skill_rules,
 		]
 	)
 
 
-func _refresh_skill_button() -> void:
-	var can := false
-	if _clock.player_active and _selected_unit != null:
-		can = TacticalAbilitySystemScript.can_cast(
-			_selected_unit, TacticalFactionScript.Id.PLAYER
-		)
-	_skill_button.disabled = not can and not _skill_targeting
-	if _skill_targeting:
-		_skill_button.text = "取消瞄准"
-	else:
-		_skill_button.text = "释放技能"
-
-
-func _on_skill_pressed() -> void:
-	if _skill_targeting:
-		_skill_targeting = false
-		_refresh_all()
-		return
-	if not _clock.player_active or _selected_unit == null:
-		return
-	if not TacticalAbilitySystemScript.can_cast(
-		_selected_unit, TacticalFactionScript.Id.PLAYER
-	):
-		return
-	_skill_targeting = true
-	_refresh_all()
-
-
 func _on_cell_clicked(cell: Vector2i) -> void:
 	if not _clock.player_active:
-		return
-	if _skill_targeting and _selected_unit != null:
-		var res := TacticalAbilitySystemScript.cast(
-			_board, _selected_unit, cell, TacticalFactionScript.Id.PLAYER
-		)
-		_last_log = res["log"]
-		_skill_targeting = false
-		_refresh_all()
 		return
 
 	var clicked := _board.unit_at(cell)
 	if clicked != null:
 		if clicked.faction == TacticalFactionScript.Id.PLAYER:
 			_selected_unit = clicked
-			_skill_targeting = false
 			_refresh_all()
 		return
 
@@ -253,11 +223,21 @@ func _on_end_turn_pressed() -> void:
 	_clock.end_turn()
 	if _clock.player_active:
 		_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+		_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	else:
 		_board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
-	_skill_targeting = false
+		_apply_side_turn_start_triggers(TacticalFactionScript.Id.OPPONENT)
 	_refresh_all()
 
 
 func _on_back_pressed() -> void:
 	get_tree().change_scene_to_file(MAIN_MENU_SCENE_PATH)
+
+
+## GUI 验收：按 id 选中玩家单位（knight/archer/mini_pekka/wardrum）。
+func capture_select_player_unit(unit_id: String) -> void:
+	for u in _board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == unit_id:
+			_selected_unit = u
+			_refresh_all()
+			return
