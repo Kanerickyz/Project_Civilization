@@ -34,6 +34,9 @@ var _overlay_selected: Vector2i = Vector2i(-1, -1)
 var _overlay_move: Dictionary = {}
 var _overlay_attack: Dictionary = {}
 
+var _last_unit_cells: Dictionary = {} # TacticalUnitInstance -> Vector2i
+var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label3D
+
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {} # int index -> Vector2 position
 var _pinch_last_distance: float = 0.0
@@ -100,7 +103,7 @@ func _ensure_viewport_tree() -> void:
 	_camera = Camera3D.new()
 	_camera.current = true
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_camera.size = 5.4
+	_camera.size = 10.5
 	_camera.near = 0.05
 	_camera.far = 200.0
 	_pivot.add_child(_camera)
@@ -162,25 +165,97 @@ func sync_tactical_units(
 ) -> void:
 	if config == null or _units_root == null:
 		return
+	_mat_cache.clear()
 	_overlay_selected = selected_cell
 	_overlay_move.clear()
-	_overlay_attack.clear()
 	for c in move_cells:
-		_overlay_move[c] = true
+		if c is Vector2i:
+			_overlay_move[c] = true
+	_overlay_attack.clear()
 	for c in attack_cells:
-		_overlay_attack[c] = true
+		if c is Vector2i:
+			_overlay_attack[c] = true
 	var alive: Dictionary = {}
 	for u in units:
 		if u is TacticalUnitInstance and (u as TacticalUnitInstance).is_alive():
 			alive[u] = true
 			_ensure_unit_sprite(u as TacticalUnitInstance)
+			_sync_unit_position(u as TacticalUnitInstance)
 	for key in _unit_sprites.keys():
 		if not alive.has(key):
-			var spr: Sprite3D = _unit_sprites[key] as Sprite3D
-			spr.queue_free()
-			_unit_sprites.erase(key)
+			_remove_unit_visual(key)
 	for cell in _tile_nodes.keys():
 		_apply_tile_visual(cell)
+
+
+func _sync_unit_position(unit: TacticalUnitInstance) -> void:
+	var spr := _unit_sprites[unit] as Sprite3D
+	var world := _cell_to_world(unit.cell, config.cell_size)
+	var unit_h: float = config.unit_world_height if config != null else 0.88
+	var target_pos := Vector3(world.x, config.tile_height + unit_h * 0.5, world.z)
+	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
+	_last_unit_cells[unit] = unit.cell
+	if prev is Vector2i and prev != unit.cell and is_inside_tree():
+		_tween_unit_to(spr, target_pos)
+	else:
+		spr.position = target_pos
+	_update_hp_bar(unit)
+
+
+func _tween_unit_to(spr: Sprite3D, target_pos: Vector3) -> void:
+	var tw := create_tween()
+	tw.tween_property(spr, "position", target_pos, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
+	if _unit_sprites.has(unit):
+		var spr: Sprite3D = _unit_sprites[unit] as Sprite3D
+		spr.queue_free()
+		_unit_sprites.erase(unit)
+	if _hp_bars.has(unit):
+		var bar: Label3D = _hp_bars[unit] as Label3D
+		bar.queue_free()
+		_hp_bars.erase(unit)
+	_last_unit_cells.erase(unit)
+
+
+func play_damage_popup(cell: Vector2i, amount: int) -> void:
+	if config == null or _units_root == null:
+		return
+	var world := _cell_to_world(cell, config.cell_size)
+	var lbl := Label3D.new()
+	lbl.text = "-%d!" % amount
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 24
+	lbl.modulate = Color("ff6644")
+	lbl.outline_modulate = Color("1a0808")
+	var lift: float = config.tile_height + config.unit_world_height * 0.85
+	lbl.position = Vector3(world.x, lift, world.z)
+	_units_root.add_child(lbl)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(lbl, "position:y", lbl.position.y + 0.75, 0.5).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.45).set_delay(0.12)
+	tw.finished.connect(lbl.queue_free)
+
+
+func play_unit_hit(unit: TacticalUnitInstance) -> void:
+	if not _unit_sprites.has(unit):
+		return
+	var spr := _unit_sprites[unit] as Sprite3D
+	spr.modulate = Color("ff8888")
+	var tw := create_tween()
+	tw.tween_property(spr, "modulate", Color.WHITE, 0.28)
+
+
+func play_unit_death(unit: TacticalUnitInstance) -> void:
+	if not _unit_sprites.has(unit):
+		return
+	var spr := _unit_sprites[unit] as Sprite3D
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(spr, "scale", Vector3(0.05, 0.05, 0.05), 0.32)
+	tw.tween_property(spr, "modulate:a", 0.0, 0.32)
 
 
 func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
@@ -196,14 +271,43 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	var tex := unit.def.texture_blue
 	if unit.faction == TacticalFactionScript.Id.OPPONENT:
 		tex = unit.def.texture_red
-	var unit_h := config.unit_world_height
+	var unit_h: float = config.unit_world_height
 	var tex_h := float(tex.get_height())
 	if tex_h > 0.0:
 		spr.pixel_size = unit_h / tex_h
 	spr.texture = tex
-	var world := _cell_to_world(unit.cell, config.cell_size)
-	spr.position = Vector3(world.x, config.tile_height + unit_h * 0.5, world.z)
 	spr.modulate = Color.WHITE if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
+	spr.scale = Vector3.ONE
+	_ensure_hp_bar(unit)
+
+
+func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
+	var bar: Label3D
+	if _hp_bars.has(unit):
+		bar = _hp_bars[unit] as Label3D
+	else:
+		bar = Label3D.new()
+		bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		bar.font_size = 14
+		bar.outline_size = 4
+		bar.outline_modulate = Color("0a1018")
+		_units_root.add_child(bar)
+		_hp_bars[unit] = bar
+	_update_hp_bar(unit)
+
+
+func _update_hp_bar(unit: TacticalUnitInstance) -> void:
+	if not _hp_bars.has(unit) or not _unit_sprites.has(unit):
+		return
+	var bar := _hp_bars[unit] as Label3D
+	var spr := _unit_sprites[unit] as Sprite3D
+	bar.text = "%d/%d" % [unit.hp, unit.def.max_hp]
+	var bar_lift: float = config.unit_world_height * 0.48
+	bar.position = spr.position + Vector3(0.0, bar_lift, 0.0)
+	if unit.hp <= unit.def.max_hp / 3:
+		bar.modulate = Color("ff6666")
+	else:
+		bar.modulate = Color("e8f0ff")
 
 
 func _apply_tile_visual(cell: Vector2i) -> void:
@@ -223,10 +327,19 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	if cell == _overlay_selected:
 		color = color.lerp(Color("5a8fd4"), 0.52)
 	elif _overlay_attack.has(cell):
-		color = color.lerp(Color("c46a5a"), 0.48)
+		color = color.lerp(Color("d04850"), 0.58)
 	elif _overlay_move.has(cell):
-		color = color.lerp(Color("5ab88a"), 0.44)
-	mi.material_override = _material_for("tile_%d_%d_%d" % [int(checker), cell.x, cell.y], color)
+		color = color.lerp(Color("40c870"), 0.55)
+	var overlay_tag := "n"
+	if cell == _overlay_selected:
+		overlay_tag = "s"
+	elif _overlay_attack.has(cell):
+		overlay_tag = "a"
+	elif _overlay_move.has(cell):
+		overlay_tag = "m"
+	mi.material_override = _material_for(
+		"tile_%d_%d_%d_%s" % [int(checker), cell.x, cell.y, overlay_tag], color
+	)
 
 
 func _material_for(key: String, color: Color) -> StandardMaterial3D:
@@ -410,8 +523,9 @@ func _handle_click(local_pos: Vector2) -> void:
 func _pick_cell(local_pos: Vector2) -> Variant:
 	if _camera == null or size.y <= 0.0 or not _camera.is_inside_tree():
 		return null
-	var from := _camera.project_ray_origin(local_pos)
-	var dir := _camera.project_ray_normal(local_pos)
+	var vp_pos := _pick_viewport_pos(local_pos)
+	var from := _camera.project_ray_origin(vp_pos)
+	var dir := _camera.project_ray_normal(vp_pos)
 	if absf(dir.y) < 0.0001:
 		return null
 	var t := -from.y / dir.y
@@ -430,6 +544,18 @@ func _world_to_cell(world: Vector3) -> Variant:
 	if gx < 0 or gy < 0 or gx >= config.grid_width or gy >= config.grid_height:
 		return null
 	return Vector2i(gx, gy)
+
+
+func _pick_viewport_pos(local_pos: Vector2) -> Vector2:
+	if _viewport == null or _viewport_container == null:
+		return local_pos
+	var container_size := _viewport_container.size
+	if container_size.x <= 0.0 or container_size.y <= 0.0:
+		return local_pos
+	var vs := _viewport.size
+	if vs.x <= 0 or vs.y <= 0:
+		return local_pos
+	return Vector2(local_pos.x * vs.x / container_size.x, local_pos.y * vs.y / container_size.y)
 
 
 func _clamp_target() -> void:

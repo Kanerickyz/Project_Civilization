@@ -7,6 +7,7 @@ var cell: Vector2i = Vector2i.ZERO
 var hp: int = 1
 var atk_bonus: int = 0
 var moved_this_side_turn: bool = false
+var attacked_this_side_turn: bool = false
 var deploy_trigger_fired: bool = false
 
 

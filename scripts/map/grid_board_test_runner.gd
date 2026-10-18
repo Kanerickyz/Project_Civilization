@@ -19,6 +19,9 @@ func _initialize() -> void:
 	if not _test_unit_scale_vs_cell():
 		quit(1)
 		return
+	if not _test_overlay_recolors_tiles():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -62,6 +65,36 @@ func _test_unit_scale_vs_cell() -> bool:
 		return false
 	if expected_h > cfg.cell_size * cfg.tile_inset:
 		push_error("GridBoardView: unit_world_height should fit inside cell inset")
+		return false
+	return true
+
+
+func _test_overlay_recolors_tiles() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 4
+	cfg.grid_height = 4
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var cell := Vector2i(1, 1)
+	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
+	var mi: MeshInstance3D = view._tile_nodes[cell] as MeshInstance3D
+	var base_mat := mi.material_override as StandardMaterial3D
+	var base_color: Color = base_mat.albedo_color
+	view.sync_tactical_units([], Vector2i(-1, -1), [cell], [Vector2i(2, 1)])
+	mi = view._tile_nodes[cell] as MeshInstance3D
+	var move_mat := mi.material_override as StandardMaterial3D
+	if move_mat.albedo_color.is_equal_approx(base_color):
+		push_error("GridBoardView: move overlay should change tile color")
+		return false
+	view.sync_tactical_units([], Vector2i(-1, -1), [], [Vector2i(2, 1)])
+	mi = view._tile_nodes[Vector2i(2, 1)] as MeshInstance3D
+	var atk_mat := mi.material_override as StandardMaterial3D
+	if atk_mat.albedo_color.is_equal_approx(base_color):
+		push_error("GridBoardView: attack overlay should change tile color")
 		return false
 	return true
 

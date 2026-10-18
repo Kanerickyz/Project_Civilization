@@ -4,6 +4,7 @@ const TacticalSandboxRosterScript := preload("res://scripts/units/tactical_sandb
 const TacticalAbilitySystemScript := preload("res://scripts/units/tactical_ability_system.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
+const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 
 
 func _initialize() -> void:
@@ -23,6 +24,9 @@ func _initialize() -> void:
 		quit(1)
 		return
 	if not _test_pekka_kill_stack():
+		quit(1)
+		return
+	if not _test_basic_attack_flag():
 		quit(1)
 		return
 	print("TACTICAL_UNITS_OK")
@@ -145,5 +149,30 @@ func _test_pekka_kill_stack() -> bool:
 		return false
 	if pekka.effective_attack() != before + 2:
 		push_error("TacticalUnits: pekka kill should +2 atk")
+		return false
+	return true
+
+
+func _test_basic_attack_flag() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	var foe := _opponent_unit(board, "archer")
+	if knight == null or foe == null:
+		return false
+	foe.cell = knight.cell + Vector2i(0, 1)
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"]:
+		push_error("TacticalUnits: basic attack failed")
+		return false
+	if not knight.attacked_this_side_turn:
+		push_error("TacticalUnits: attack should set flag")
+		return false
+	var again := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if again["ok"]:
+		push_error("TacticalUnits: should not attack twice per side turn")
 		return false
 	return true

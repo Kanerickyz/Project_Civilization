@@ -1,0 +1,77 @@
+class_name TacticalEnemyAi
+extends RefCounted
+
+const GridMathScript := preload("res://scripts/units/grid_math.gd")
+const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
+const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+
+## 对手行动段最小启发式：能攻则攻，否则向最近玩家单位靠近一步。
+
+
+static func run_opponent_turn(board: TacticalBoard) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	var opponents: Array[TacticalUnitInstance] = []
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT:
+			opponents.append(u)
+	opponents.sort_custom(func(a, b): return a.def.id < b.def.id)
+
+	for unit in opponents:
+		if not unit.is_alive():
+			continue
+		var atk_cells := TacticalCombatScript.attackable_cells(board, unit)
+		if not atk_cells.is_empty():
+			var best_cell := _pick_attack_target(board, unit, atk_cells)
+			var res := TacticalCombatScript.try_basic_attack(
+				board, unit, best_cell, TacticalFactionScript.Id.OPPONENT
+			)
+			if res["ok"]:
+				events.append({"kind": "attack", "result": res, "unit": unit, "cell": best_cell})
+				continue
+		if unit.moved_this_side_turn:
+			continue
+		var dest: Vector2i = _best_step_toward_player(board, unit)
+		if dest.x >= 0 and board.try_move(unit, dest):
+			events.append({"kind": "move", "unit": unit, "dest": dest})
+	return events
+
+
+static func _pick_attack_target(
+	board: TacticalBoard, attacker: TacticalUnitInstance, cells: Array[Vector2i]
+) -> Vector2i:
+	var best: TacticalUnitInstance = null
+	var best_cell := cells[0]
+	for c in cells:
+		var t := board.unit_at(c)
+		if t == null:
+			continue
+		if best == null or t.hp < best.hp:
+			best = t
+			best_cell = c
+	return best_cell
+
+
+static func _best_step_toward_player(
+	board: TacticalBoard, unit: TacticalUnitInstance
+) -> Vector2i:
+	var unreachable := Vector2i(-1, -1)
+	var reachable := board.reachable_move_cells(unit)
+	if reachable.is_empty():
+		return unreachable
+	var players: Array[TacticalUnitInstance] = []
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER:
+			players.append(u)
+	if players.is_empty():
+		return reachable[0]
+
+	var best_dest: Vector2i = reachable[0]
+	var best_dist := 999999
+	for dest in reachable:
+		var min_d := 999999
+		for p in players:
+			min_d = mini(min_d, GridMathScript.chebyshev(dest, p.cell))
+		if min_d < best_dist:
+			best_dist = min_d
+			best_dest = dest
+	return best_dest

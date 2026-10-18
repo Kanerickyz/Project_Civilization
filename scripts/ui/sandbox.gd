@@ -8,17 +8,26 @@ const GridBoardViewScript := preload("res://scripts/map/grid_board_view.gd")
 const BoardConfigScript := preload("res://scripts/map/board_config.gd")
 const TacticalSandboxRosterScript := preload("res://scripts/units/tactical_sandbox_roster.gd")
 const TacticalAbilitySystemScript := preload("res://scripts/units/tactical_ability_system.gd")
+const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
+const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
 var _clock: TurnClock
 var _turn_label: Label
 var _hint_label: Label
 var _unit_panel: Label
+var _end_turn_button: Button
 var _board_config: BoardConfig
 var _board_view: GridBoardView
 var _board: TacticalBoard
 var _selected_unit: TacticalUnitInstance
 var _last_log: String = ""
+var _input_locked: bool = false
+var _game_over: bool = false
+var _turn_banner_panel: PanelContainer
+var _turn_banner: Label
+var _game_over_panel: PanelContainer
+var _game_over_title: Label
 
 
 func _ready() -> void:
@@ -33,6 +42,7 @@ func _ready() -> void:
 	_fire_battle_start_triggers()
 	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_refresh_all()
+	_show_turn_banner()
 
 
 func _load_board_config() -> BoardConfig:
@@ -134,11 +144,11 @@ func _build() -> void:
 	actions.alignment = BoxContainer.ALIGNMENT_BEGIN
 	bottom_bar.add_child(actions)
 
-	var end_turn := Button.new()
-	end_turn.text = "结束行动"
-	end_turn.custom_minimum_size = Vector2(96, 32)
-	end_turn.pressed.connect(_on_end_turn_pressed)
-	actions.add_child(end_turn)
+	_end_turn_button = Button.new()
+	_end_turn_button.text = "结束行动"
+	_end_turn_button.custom_minimum_size = Vector2(96, 32)
+	_end_turn_button.pressed.connect(_on_end_turn_pressed)
+	actions.add_child(_end_turn_button)
 
 	var back := Button.new()
 	back.text = "返回"
@@ -146,9 +156,65 @@ func _build() -> void:
 	back.pressed.connect(_on_back_pressed)
 	actions.add_child(back)
 
+	_turn_banner_panel = PanelContainer.new()
+	_turn_banner_panel.anchor_left = 0.0
+	_turn_banner_panel.anchor_right = 1.0
+	_turn_banner_panel.anchor_top = 0.36
+	_turn_banner_panel.anchor_bottom = 0.36
+	_turn_banner_panel.offset_left = 28.0
+	_turn_banner_panel.offset_right = -28.0
+	_turn_banner_panel.offset_top = -22.0
+	_turn_banner_panel.offset_bottom = 22.0
+	_turn_banner_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_turn_banner_panel.modulate.a = 0.0
+	var banner_bg := StyleBoxFlat.new()
+	banner_bg.bg_color = Color(0.04, 0.06, 0.1, 0.82)
+	banner_bg.set_corner_radius_all(6)
+	banner_bg.content_margin_left = 20.0
+	banner_bg.content_margin_right = 20.0
+	banner_bg.content_margin_top = 10.0
+	banner_bg.content_margin_bottom = 10.0
+	_turn_banner_panel.add_theme_stylebox_override("panel", banner_bg)
+	add_child(_turn_banner_panel)
+
+	_turn_banner = Label.new()
+	_turn_banner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_turn_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_turn_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_turn_banner.add_theme_font_size_override("font_size", 22)
+	_turn_banner.add_theme_color_override("font_color", Color("f2f6fc"))
+	_turn_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_turn_banner_panel.add_child(_turn_banner)
+
+	_game_over_panel = PanelContainer.new()
+	_game_over_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_game_over_panel.offset_left = -140.0
+	_game_over_panel.offset_top = -72.0
+	_game_over_panel.offset_right = 140.0
+	_game_over_panel.offset_bottom = 72.0
+	_game_over_panel.visible = false
+	_game_over_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_game_over_panel)
+
+	var go_box := VBoxContainer.new()
+	go_box.add_theme_constant_override("separation", 10)
+	_game_over_panel.add_child(go_box)
+
+	_game_over_title = Label.new()
+	_game_over_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_game_over_title.add_theme_font_size_override("font_size", 20)
+	go_box.add_child(_game_over_title)
+
+	var go_menu := Button.new()
+	go_menu.text = "返回主菜单"
+	go_menu.custom_minimum_size = Vector2(160, 36)
+	go_menu.pressed.connect(_on_back_pressed)
+	go_box.add_child(go_menu)
+
 
 func _on_board_changed() -> void:
-	_refresh_all()
+	if not _input_locked:
+		_refresh_all()
 
 
 func _refresh_all() -> void:
@@ -163,21 +229,29 @@ func _refresh_all() -> void:
 		_last_log if _last_log != "" else "点选己方单位 · 绿=可移动 · 红=攻击距离",
 	]
 	_refresh_unit_panel()
+	_refresh_action_buttons()
 	var move_cells: Array = []
 	var attack_cells: Array = []
 	var sel_cell := Vector2i(-1, -1)
-	if _selected_unit != null and _clock.player_active:
+	if _selected_unit != null and _clock.player_active and not _game_over:
 		sel_cell = _selected_unit.cell
 		if _selected_unit.faction == TacticalFactionScript.Id.PLAYER:
 			move_cells = _board.reachable_move_cells(_selected_unit)
 			attack_cells = _board.attack_range_cells(_selected_unit)
 	elif _selected_unit != null:
 		sel_cell = _selected_unit.cell
-	_board_view.sync_tactical_units(_board.living_units(), sel_cell, move_cells, attack_cells)
+	_board_view.sync_tactical_units(
+		_board.living_units(), sel_cell, move_cells, attack_cells
+	)
+
+
+func _refresh_action_buttons() -> void:
+	var player_turn := _clock.player_active and not _game_over
+	_end_turn_button.disabled = not player_turn or _input_locked
 
 
 func _refresh_unit_panel() -> void:
-	if _selected_unit == null:
+	if _selected_unit == null or not _selected_unit.is_alive():
 		_unit_panel.text = "未选中单位\n（玩家回合可点蓝方）"
 		return
 	var u := _selected_unit
@@ -200,8 +274,20 @@ func _refresh_unit_panel() -> void:
 	)
 
 
+func _show_turn_banner() -> void:
+	if _game_over:
+		return
+	_turn_banner.text = _clock.status_text()
+	_turn_banner_panel.modulate.a = 1.0
+	_turn_banner_panel.scale = Vector2(0.94, 0.94)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(_turn_banner_panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK)
+	tw.chain().tween_property(_turn_banner_panel, "modulate:a", 0.0, 0.55).set_delay(0.75)
+
+
 func _on_cell_clicked(cell: Vector2i) -> void:
-	if not _clock.player_active:
+	if _input_locked or _game_over or not _clock.player_active:
 		return
 
 	var clicked := _board.unit_at(cell)
@@ -209,6 +295,18 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		if clicked.faction == TacticalFactionScript.Id.PLAYER:
 			_selected_unit = clicked
 			_refresh_all()
+		elif (
+			_selected_unit != null
+			and _selected_unit.faction == TacticalFactionScript.Id.PLAYER
+		):
+			var atk := TacticalCombatScript.try_basic_attack(
+				_board, _selected_unit, cell, TacticalFactionScript.Id.PLAYER
+			)
+			_last_log = atk["log"]
+			if atk["ok"]:
+				_feedback_from_attack(clicked, atk)
+				_check_victory()
+		_refresh_all()
 		return
 
 	if _selected_unit != null and _selected_unit.faction == TacticalFactionScript.Id.PLAYER:
@@ -219,15 +317,82 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 	_refresh_all()
 
 
+func _feedback_from_attack(target: TacticalUnitInstance, res: Dictionary) -> void:
+	var dmg: int = int(res.get("damage", 0))
+	_board_view.play_damage_popup(target.cell, dmg)
+	_board_view.play_unit_hit(target)
+	if res.get("killed", false):
+		_board_view.play_unit_death(target)
+		if _selected_unit == target:
+			_selected_unit = null
+
+
 func _on_end_turn_pressed() -> void:
+	if _input_locked or _game_over or not _clock.player_active:
+		return
 	_clock.end_turn()
-	if _clock.player_active:
-		_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
-		_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
-	else:
-		_board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
-		_apply_side_turn_start_triggers(TacticalFactionScript.Id.OPPONENT)
+	_board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	_apply_side_turn_start_triggers(TacticalFactionScript.Id.OPPONENT)
+	_selected_unit = null
+	_show_turn_banner()
 	_refresh_all()
+	_run_opponent_turn_async()
+
+
+func _run_opponent_turn_async() -> void:
+	_input_locked = true
+	_refresh_action_buttons()
+	await get_tree().process_frame
+	var events := TacticalEnemyAiScript.run_opponent_turn(_board)
+	for ev in events:
+		var kind: String = ev.get("kind", "")
+		if kind == "attack":
+			var res: Dictionary = ev["result"]
+			var cell: Vector2i = ev["cell"]
+			var target := _board.unit_at(cell)
+			if target != null:
+				_board_view.play_damage_popup(cell, int(res.get("damage", 0)))
+				_board_view.play_unit_hit(target)
+				if res.get("killed", false):
+					await get_tree().create_timer(0.25).timeout
+					_board_view.play_unit_death(target)
+		elif kind == "move":
+			_last_log = "对手 %s 移动" % (ev["unit"] as TacticalUnitInstance).def.display_name
+		_refresh_all()
+		await get_tree().create_timer(0.32).timeout
+		if _check_victory():
+			return
+
+	_clock.end_turn()
+	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
+	_last_log = "对手结束行动"
+	_show_turn_banner()
+	_input_locked = false
+	_refresh_all()
+
+
+func _check_victory() -> bool:
+	if _game_over:
+		return true
+	var player_lost := TacticalCombatScript.faction_defeated(
+		_board, TacticalFactionScript.Id.PLAYER
+	)
+	var opp_lost := TacticalCombatScript.faction_defeated(
+		_board, TacticalFactionScript.Id.OPPONENT
+	)
+	if not player_lost and not opp_lost:
+		return false
+	_game_over = true
+	_input_locked = false
+	_selected_unit = null
+	if player_lost:
+		_game_over_title.text = "失败\n对手获胜"
+	else:
+		_game_over_title.text = "胜利\n我方获胜"
+	_game_over_panel.visible = true
+	_refresh_all()
+	return true
 
 
 func _on_back_pressed() -> void:
