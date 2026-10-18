@@ -11,13 +11,15 @@ extends Resource
 @export var initial_reveal_radius: int = 1
 @export var fog_color: Color = Color("1e2430cc")
 @export var reveal_only_on_player_turn: bool = true
-## 战略俯视俯角（度），Civ 式约 45。可改。
-@export var camera_pitch_deg: float = 50.0
-## 正交相机沿视线的放置距离（不影响缩放，只保证能看见挤出高度）。
-@export var camera_distance: float = 40.0
+## 相对水平面的仰角（度）。Civ 式战略俯视约 45；越大越顶视。
+@export var camera_pitch_deg: float = 45.0
+## 水平偏航（度），与尖顶六边搭配的斜向观感。可改。
+@export var camera_yaw_deg: float = 45.0
+## 正交相机吊臂长度（不影响缩放，只保证能看见挤出高度）。
+@export var camera_distance: float = 36.0
 ## 正交竖直可视范围（世界单位）；滚轮缩放改此有效值。越小地图越大。
-@export var camera_ortho_size: float = 7.2
+@export var camera_ortho_size: float = 8.0
 @export var camera_zoom_min: float = 0.65
 @export var camera_zoom_max: float = 1.9
-@export var camera_zoom_default: float = 1.05
-@export var camera_pan_sensitivity: float = 0.018
+@export var camera_zoom_default: float = 1.0
+@export var camera_pan_sensitivity: float = 0.02

@@ -120,6 +120,12 @@ func _test_view_builds() -> bool:
 	if camera.projection != Camera3D.PROJECTION_ORTHOGONAL:
 		push_error("HexMapView: expected orthogonal projection")
 		return false
+	# 仰角应接近配置的 45°（相对水平面），避免「几乎顶视」。
+	var local_pos := camera.position
+	var elev_deg := rad_to_deg(atan2(local_pos.y, Vector2(local_pos.x, local_pos.z).length()))
+	if absf(elev_deg - cfg.camera_pitch_deg) > 1.5:
+		push_error("HexMapView: camera elev %.1f° != pitch %.1f°" % [elev_deg, cfg.camera_pitch_deg])
+		return false
 	return true
 
 

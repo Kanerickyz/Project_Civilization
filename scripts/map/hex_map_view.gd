@@ -31,7 +31,6 @@ var _press_pos: Vector2 = Vector2.ZERO
 var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
-const CAMERA_YAW_DEG := 35.0
 
 
 func setup(p_model: HexMapModel) -> void:
@@ -77,8 +76,9 @@ func _ensure_viewport_tree() -> void:
 	_viewport.add_child(_world_root)
 
 	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-50.0, 40.0, 0.0)
-	light.light_energy = 1.15
+	# 从斜前方打光，突出约 45° 俯视下的六边立面。
+	light.rotation_degrees = Vector3(-45.0, 45.0, 0.0)
+	light.light_energy = 1.25
 	light.shadow_enabled = false
 	_world_root.add_child(light)
 
@@ -196,16 +196,22 @@ func _cell_to_world(cell: Vector2i, hex_size: float) -> Vector3:
 func _apply_camera() -> void:
 	if _camera == null or _pivot == null or model == null:
 		return
+	# 枢轴只平移；偏航打进吊臂，避免「几乎顶视」的怪手感。
 	_pivot.position = _target
-	_pivot.rotation_degrees = Vector3(0.0, CAMERA_YAW_DEG, 0.0)
-	var pitch_deg := model.config.camera_pitch_deg
-	var pitch := deg_to_rad(pitch_deg)
+	_pivot.rotation = Vector3.ZERO
+	var elev := deg_to_rad(model.config.camera_pitch_deg)
+	var yaw := deg_to_rad(model.config.camera_yaw_deg)
 	var dist := model.config.camera_distance
-	# 正交俯视：缩放改 size；距离仅放置相机，不随解锁变化。
+	# 球坐标吊臂：仰角 = 相对水平面，45° 时前后左右立面都可读。
+	var offset := Vector3(
+		dist * cos(elev) * sin(yaw),
+		dist * sin(elev),
+		dist * cos(elev) * cos(yaw)
+	)
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	_camera.size = model.config.camera_ortho_size / maxf(_zoom, 0.05)
-	_camera.position = Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist)
-	_camera.rotation_degrees = Vector3(-pitch_deg, 0.0, 0.0)
+	# -Z 指向目标（枢轴原点）；入树前后都安全。
+	_camera.transform = Transform3D(Basis.looking_at(-offset, Vector3.UP), offset)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -251,9 +257,9 @@ func _set_zoom(value: float) -> void:
 
 
 func _pan_by_screen_delta(delta: Vector2) -> void:
-	# 屏幕拖拽：右拖世界右移感 → 目标反向；结合 yaw 投影到 XZ。
+	# 屏幕拖拽：与相机偏航对齐的地面轴向。
 	var sens := model.config.camera_pan_sensitivity / maxf(_zoom, 0.05)
-	var yaw := deg_to_rad(CAMERA_YAW_DEG)
+	var yaw := deg_to_rad(model.config.camera_yaw_deg)
 	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
 	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
 	_target += -right * delta.x * sens + forward * delta.y * sens
