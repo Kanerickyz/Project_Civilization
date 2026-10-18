@@ -6,7 +6,7 @@
 
 - 主菜单 → 沙盘（有限六边地图）
 - `TurnClock`：玩家与对手交替
-- 地图：WFC 预生成、分边战略迷雾、拖拽镜头（见 Features/HEX_MAP）
+- 地图：WFC 预生成、分边战略迷雾、3D ~45° 俯视与拖拽/滚轮镜头（见 Features/HEX_MAP）
 - `GameSettings`：音量与全屏会写入 `user://settings.cfg`，界面上还不能改
 - 没有单位、战斗或存档对局
 
@@ -16,7 +16,7 @@
 |------|------|
 | `scenes/main/` | 主菜单、沙盘 |
 | `scripts/core/` | 与界面无关的规则（回合钟与加载烟测） |
-| `scripts/map/` | 六边坐标、WFC、战略雾、地图视图 |
+| `scripts/map/` | 六边坐标、WFC、战略雾、3D 地图视图 |
 | `scripts/ui/` | 界面脚本 |
 | `scripts/autoload/` | 全局设置 |
 | `resources/map/` | 地图尺寸与生成参数 `.tres` |

@@ -26,7 +26,7 @@
 | 玩家能看到的 | 实际规则 |
 |--------------|----------|
 | 主菜单进入沙盘 | 场景切换 |
-| 有限六边形地图与战略迷雾 | WFC 预生成整图；中心约 7 格已揭开；点邻雾揭开；拖拽镜头。见 [Features/HEX_MAP.md](./Features/HEX_MAP.md) |
+| 有限六边形地图与战略迷雾 | WFC 预生成整图；中心约 7 格已揭开；点邻雾揭开；3D 正交 ~45° 俯视，拖拽/滚轮镜头。见 [Features/HEX_MAP.md](./Features/HEX_MAP.md) |
 | 「结束行动」 | 回合钟，见 [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) |
 
 没有城市产出、科技、外交、单位移动或战斗结算。

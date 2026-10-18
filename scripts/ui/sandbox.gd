@@ -33,71 +33,89 @@ func _load_map_config() -> MapConfig:
 
 
 func _build() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	add_child(margin)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
-	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	margin.add_child(column)
+	var bg := ColorRect.new()
+	bg.color = Color("121820")
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bg)
 
-	var title := Label.new()
-	title.text = "文明战棋 · 沙盘"
-	column.add_child(title)
-
-	_turn_label = Label.new()
-	column.add_child(_turn_label)
-
-	_hint_label = Label.new()
-	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	column.add_child(_hint_label)
-
-	var map_host := PanelContainer.new()
-	map_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	map_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	map_host.custom_minimum_size = Vector2(0, 180)
-	column.add_child(map_host)
-
+	# 地图全幅占主体；HUD 浮层叠在地图上，少占纵向空间。
 	_map_view = HexMapViewScript.new()
-	_map_view.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_map_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	map_host.add_child(_map_view)
+	_map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_map_view.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_map_view)
 	_map_view.setup(_map_model)
 	_map_view.cell_clicked.connect(_on_cell_clicked)
 
+	var top_bar := MarginContainer.new()
+	top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	top_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	top_bar.add_theme_constant_override("margin_left", 10)
+	top_bar.add_theme_constant_override("margin_top", 6)
+	top_bar.add_theme_constant_override("margin_right", 10)
+	top_bar.add_theme_constant_override("margin_bottom", 0)
+	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(top_bar)
+
+	var top_row := HBoxContainer.new()
+	top_row.add_theme_constant_override("separation", 10)
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_bar.add_child(top_row)
+
+	_turn_label = Label.new()
+	_turn_label.add_theme_font_size_override("font_size", 16)
+	_turn_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_row.add_child(_turn_label)
+
+	_hint_label = Label.new()
+	_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_hint_label.add_theme_font_size_override("font_size", 13)
+	_hint_label.add_theme_color_override("font_color", Color("c5d0dc"))
+	_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_row.add_child(_hint_label)
+
+	var bottom_bar := MarginContainer.new()
+	bottom_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	bottom_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	bottom_bar.add_theme_constant_override("margin_left", 10)
+	bottom_bar.add_theme_constant_override("margin_top", 0)
+	bottom_bar.add_theme_constant_override("margin_right", 10)
+	bottom_bar.add_theme_constant_override("margin_bottom", 8)
+	bottom_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bottom_bar)
+
 	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 12)
-	column.add_child(actions)
+	actions.add_theme_constant_override("separation", 8)
+	actions.alignment = BoxContainer.ALIGNMENT_BEGIN
+	bottom_bar.add_child(actions)
 
 	var end_turn := Button.new()
 	end_turn.text = "结束行动"
+	end_turn.custom_minimum_size = Vector2(96, 32)
 	end_turn.pressed.connect(_on_end_turn_pressed)
 	actions.add_child(end_turn)
 
 	var back := Button.new()
-	back.text = "返回主菜单"
+	back.text = "返回"
+	back.custom_minimum_size = Vector2(72, 32)
 	back.pressed.connect(_on_back_pressed)
 	actions.add_child(back)
 
 
 func _refresh() -> void:
-	_turn_label.text = _clock.status_text()
-	var gen_note := "WFC 已生成" if _map_model.generation_ok else "WFC 失败已回退"
-	_hint_label.text = "%s · 拖拽浏览 · 点相邻雾格揭开 · 种子 %d" % [gen_note, _map_model.seed_used]
+	_turn_label.text = "沙盘 · %s" % _clock.status_text()
+	var gen_note := "WFC" if _map_model.generation_ok else "WFC回退"
+	_hint_label.text = "%s · 拖拽/滚轮 · 点邻雾 · #%d" % [gen_note, _map_model.seed_used % 100000]
 
 
 func _on_cell_clicked(cell: Vector2i) -> void:
 	if _map_model.config.reveal_only_on_player_turn and not _clock.player_active:
 		return
-	if _map_model.try_player_reveal(cell):
-		_map_view.queue_redraw()
+	_map_model.try_player_reveal(cell)
 
 
 func _on_end_turn_pressed() -> void:
