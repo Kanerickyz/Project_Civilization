@@ -41,23 +41,40 @@ func reset_side_turn_flags(active_faction: TacticalFaction.Id) -> void:
 	for u in units:
 		if u.faction == active_faction:
 			u.moved_this_side_turn = false
+			u.attacked_this_side_turn = false
+			u.remaining_move_budget = u.def.action_move_budget()
 	changed.emit()
 
 
 func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	if unit == null or not unit.is_alive() or unit.moved_this_side_turn:
+	if unit == null or not unit.is_alive() or unit.remaining_move_budget <= 0:
 		return out
-	for gx in range(grid_width):
-		for gy in range(grid_height):
-			var cell := Vector2i(gx, gy)
-			if cell == unit.cell:
-				continue
-			if unit_at(cell) != null:
-				continue
-			if GridMathScript.chebyshev(unit.cell, cell) > unit.def.move_range:
-				continue
-			out.append(cell)
+	var dist: Dictionary = {unit.cell: 0}
+	var queue: Array[Vector2i] = [unit.cell]
+	var head := 0
+	while head < queue.size():
+		var cur: Vector2i = queue[head]
+		head += 1
+		var cur_d: int = dist[cur]
+		for gx in range(grid_width):
+			for gy in range(grid_height):
+				var cell := Vector2i(gx, gy)
+				if cell == cur:
+					continue
+				if unit_at(cell) != null:
+					continue
+				var step := GridMathScript.chebyshev(cur, cell)
+				if step > unit.def.move_range:
+					continue
+				var nd := cur_d + step
+				if nd > unit.remaining_move_budget:
+					continue
+				if dist.has(cell) and dist[cell] <= nd:
+					continue
+				dist[cell] = nd
+				queue.append(cell)
+				out.append(cell)
 	return out
 
 
@@ -96,16 +113,19 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 
 
 func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
-	if unit.moved_this_side_turn:
+	if unit.remaining_move_budget <= 0:
 		return false
 	if not GridMathScript.in_bounds(dest, grid_width, grid_height):
 		return false
 	if unit_at(dest) != null:
 		return false
-	if GridMathScript.chebyshev(unit.cell, dest) > unit.def.move_range:
+	var step := GridMathScript.chebyshev(unit.cell, dest)
+	if step > unit.def.move_range or step > unit.remaining_move_budget:
 		return false
 	unit.cell = dest
-	unit.moved_this_side_turn = true
+	unit.remaining_move_budget -= step
+	if unit.remaining_move_budget <= 0:
+		unit.moved_this_side_turn = true
 	changed.emit()
 	return true
 

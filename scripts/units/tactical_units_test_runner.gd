@@ -29,6 +29,12 @@ func _initialize() -> void:
 	if not _test_basic_attack_flag():
 		quit(1)
 		return
+	if not _test_side_turn_resets_attack():
+		quit(1)
+		return
+	if not _test_multi_move_budget():
+		quit(1)
+		return
 	print("TACTICAL_UNITS_OK")
 	quit(0)
 
@@ -65,8 +71,8 @@ func _test_move_and_attack_ranges() -> bool:
 		push_error("TacticalUnits: archer should have move options")
 		return false
 	for c in moves:
-		if GridMathScript.chebyshev(archer.cell, c) > archer.def.move_range:
-			push_error("TacticalUnits: move cell out of range")
+		if GridMathScript.chebyshev(archer.cell, c) > archer.def.action_move_budget():
+			push_error("TacticalUnits: move cell beyond action move budget")
 			return false
 	var attacks := board.attack_range_cells(archer)
 	if attacks.is_empty():
@@ -76,9 +82,9 @@ func _test_move_and_attack_ranges() -> bool:
 		if GridMathScript.chebyshev(archer.cell, c) > archer.def.attack_range:
 			push_error("TacticalUnits: attack cell out of range")
 			return false
-	archer.moved_this_side_turn = true
+	archer.remaining_move_budget = 0
 	if not board.reachable_move_cells(archer).is_empty():
-		push_error("TacticalUnits: moved unit should have no move overlay")
+		push_error("TacticalUnits: exhausted move budget should have no move overlay")
 		return false
 	return true
 
@@ -174,5 +180,53 @@ func _test_basic_attack_flag() -> bool:
 	)
 	if again["ok"]:
 		push_error("TacticalUnits: should not attack twice per side turn")
+		return false
+	return true
+
+
+func _test_side_turn_resets_attack() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	var foe := _opponent_unit(board, "archer")
+	if knight == null or foe == null:
+		return false
+	foe.cell = knight.cell + Vector2i(0, 1)
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"] or not knight.attacked_this_side_turn:
+		push_error("TacticalUnits: first attack should succeed and set flag")
+		return false
+	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+	if knight.attacked_this_side_turn:
+		push_error("TacticalUnits: side turn reset should clear attack flag")
+		return false
+	if not TacticalCombatScript.can_basic_attack(knight, TacticalFactionScript.Id.PLAYER):
+		push_error("TacticalUnits: should attack again after side turn reset")
+		return false
+	return true
+
+
+func _test_multi_move_budget() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer := _player_unit(board, "archer")
+	if archer == null:
+		return false
+	var budget := archer.def.action_move_budget()
+	if budget < 2:
+		push_error("TacticalUnits: archer needs move budget for multi-step test")
+		return false
+	var first_dest := archer.cell + Vector2i(1, 0)
+	if board.unit_at(first_dest) != null:
+		first_dest = archer.cell + Vector2i(0, 1)
+	if not board.try_move(archer, first_dest):
+		push_error("TacticalUnits: first multi-move step failed")
+		return false
+	if archer.remaining_move_budget <= 0:
+		push_error("TacticalUnits: should have budget after one step")
+		return false
+	var moves := board.reachable_move_cells(archer)
+	if moves.is_empty():
+		push_error("TacticalUnits: should still show reachable cells with budget left")
 		return false
 	return true
