@@ -15,7 +15,7 @@
 - 主菜单和沙盘上的格子、双方标记是**占位**。单位还不能移动，没有城市、科技、外交或胜负结算。
 - 第一刀同时只做玩家对一个对手。宗教、文化胜利、世界议会和长科技树不进入当前切片。
 - 以后的数值放 `resources/` 下的 `.tres`，避免在脚本里堆正式点数。当前没有数值资源。
-- 表现与逻辑分离。界面默认 1280×720，横屏，GL Compatibility。中文用 `assets/fonts/DroidSansFallbackFull.ttf`。
+- 表现与逻辑分离。界面默认按 iPhone 14 Pro 横屏逻辑点 852×393（约 19.5:9），横屏，GL Compatibility。中文用 `assets/fonts/DroidSansFallbackFull.ttf`。
 
 ## 实现与验证
 - 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。保留 `.uid` 和导入侧车，不提交 `.godot/`、`.artifacts/`、导出凭据、日志与缓存。
