@@ -30,7 +30,7 @@ window/size/window_width_override=1704
 window/size/window_height_override=786
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-window/handheld/orientation=1
+window/handheld/orientation=0
 
 [rendering]
 
