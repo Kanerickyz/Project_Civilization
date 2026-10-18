@@ -27,8 +27,11 @@ var _press_pos: Vector2 = Vector2.ZERO
 var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
-const TEX_PLAYER := preload("res://assets/autochess/sprites/units/wolf.png")
-const TEX_OPPONENT := preload("res://assets/autochess/sprites/units/pyre_guard.png")
+const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+
+var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite3D
+var _overlay_selected: Vector2i = Vector2i(-1, -1)
+var _overlay_targets: Dictionary = {}
 
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {} # int index -> Vector2 position
@@ -149,7 +152,46 @@ func _rebuild_board() -> void:
 			_tile_nodes[cell] = mi
 			_apply_tile_visual(cell)
 
-	_spawn_placeholder_units()
+
+func sync_tactical_units(units: Array, selected_cell: Vector2i, target_cells: Array) -> void:
+	if config == null or _units_root == null:
+		return
+	_overlay_selected = selected_cell
+	_overlay_targets.clear()
+	for c in target_cells:
+		_overlay_targets[c] = true
+	var alive: Dictionary = {}
+	for u in units:
+		if u is TacticalUnitInstance and (u as TacticalUnitInstance).is_alive():
+			alive[u] = true
+			_ensure_unit_sprite(u as TacticalUnitInstance)
+	for key in _unit_sprites.keys():
+		if not alive.has(key):
+			var spr: Sprite3D = _unit_sprites[key] as Sprite3D
+			spr.queue_free()
+			_unit_sprites.erase(key)
+	for cell in _tile_nodes.keys():
+		_apply_tile_visual(cell)
+
+
+func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
+	var spr: Sprite3D
+	if _unit_sprites.has(unit):
+		spr = _unit_sprites[unit] as Sprite3D
+	else:
+		spr = Sprite3D.new()
+		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		spr.pixel_size = 0.011
+		spr.name = "Unit_%s_%s" % [unit.def.id, unit.faction]
+		_units_root.add_child(spr)
+		_unit_sprites[unit] = spr
+	var tex := unit.def.texture_blue
+	if unit.faction == TacticalFactionScript.Id.OPPONENT:
+		tex = unit.def.texture_red
+	spr.texture = tex
+	var world := _cell_to_world(unit.cell, config.cell_size)
+	spr.position = Vector3(world.x, config.tile_height + 0.55, world.z)
+	spr.modulate = Color.WHITE if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
 
 
 func _apply_tile_visual(cell: Vector2i) -> void:
@@ -166,7 +208,11 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	mi.mesh = _mesh_cache[key] as Mesh
 	var checker := (cell.x + cell.y) % 2 == 0
 	var color := config.color_light if checker else config.color_dark
-	mi.material_override = _material_for("tile_%d" % int(checker), color)
+	if cell == _overlay_selected:
+		color = color.lerp(Color("5a8fd4"), 0.45)
+	elif _overlay_targets.has(cell):
+		color = color.lerp(Color("c46a5a"), 0.42)
+	mi.material_override = _material_for("tile_%d_%d_%d" % [int(checker), cell.x, cell.y], color)
 
 
 func _material_for(key: String, color: Color) -> StandardMaterial3D:
@@ -178,23 +224,6 @@ func _material_for(key: String, color: Color) -> StandardMaterial3D:
 	mat.roughness = 0.88
 	_mat_cache[key] = mat
 	return mat
-
-
-func _spawn_placeholder_units() -> void:
-	_add_unit_sprite(Vector2i(2, 3), TEX_PLAYER, "player")
-	_add_unit_sprite(Vector2i(7, 4), TEX_OPPONENT, "opponent")
-
-
-func _add_unit_sprite(cell: Vector2i, texture: Texture2D, label: String) -> void:
-	var spr := Sprite3D.new()
-	spr.texture = texture
-	spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	spr.pixel_size = 0.012
-	spr.modulate = Color.WHITE
-	spr.name = "Unit_%s" % label
-	var world := _cell_to_world(cell, config.cell_size)
-	spr.position = Vector3(world.x, config.tile_height + 0.55, world.z)
-	_units_root.add_child(spr)
 
 
 func _cell_to_world(cell: Vector2i, cell_size: float) -> Vector3:

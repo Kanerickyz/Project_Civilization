@@ -76,15 +76,9 @@ func _test_view_builds() -> bool:
 		push_error("GridBoardView: expected orthogonal projection")
 		return false
 	var units := _find_node_named(view, "Units")
-	if units == null or units.get_child_count() < 2:
-		push_error("GridBoardView: expected placeholder units")
+	if units == null:
+		push_error("GridBoardView: Units root missing")
 		return false
-	for child in units.get_children():
-		if child is Sprite3D:
-			var spr := child as Sprite3D
-			if spr.texture == null:
-				push_error("GridBoardView: unit sprite missing texture")
-				return false
 	var local_pos := camera.position
 	var elev_deg := rad_to_deg(atan2(local_pos.y, Vector2(local_pos.x, local_pos.z).length()))
 	if absf(elev_deg - cfg.camera_pitch_deg) > 1.5:
