@@ -4,14 +4,13 @@
 
 [resource]
 script = ExtResource("1_ab")
-id = "iron_strike"
-display_name = "铁壁强击"
+id = "iron_wall"
+display_name = "铁壁"
 autochess_ability_id = "hurt_gain_atk_small"
-rules_hint = "对相邻敌方造成攻击伤害；释放后自身攻击+1（本场）。每段玩家行动每单位一次。"
-target_kind = 0
+rules_hint = "受伤时：自身攻击+1（本场，可叠加）。"
+trigger_kind = 1
 range_chebyshev = 1
-damage_add = 0
-self_atk_on_cast = 1
+self_atk_on_trigger = 1
 self_atk_on_kill = 0
 ally_atk_buff = 0
 ally_buff_radius = 2

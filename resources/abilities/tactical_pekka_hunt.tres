@@ -4,14 +4,13 @@
 
 [resource]
 script = ExtResource("1_ab")
-id = "hunt_slash"
-display_name = "猎杀斩"
+id = "hunt_instinct"
+display_name = "猎杀本能"
 autochess_ability_id = "kill_gain_atk_mid"
-rules_hint = "对相邻敌方造成攻击伤害；若击杀，自身攻击+2（本场）。每段玩家行动每单位一次。"
-target_kind = 0
+rules_hint = "击杀敌方单位时：自身攻击+2（本场，可叠加）。"
+trigger_kind = 3
 range_chebyshev = 1
-damage_add = 0
-self_atk_on_cast = 0
+self_atk_on_trigger = 0
 self_atk_on_kill = 2
 ally_atk_buff = 0
 ally_buff_radius = 2

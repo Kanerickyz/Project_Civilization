@@ -15,4 +15,4 @@ move_range = 1
 attack_range = 1
 texture_blue = ExtResource("3_tex_b")
 texture_red = ExtResource("4_tex_r")
-active_ability = ExtResource("2_ab")
+triggered_ability = ExtResource("2_ab")
