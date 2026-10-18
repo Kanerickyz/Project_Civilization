@@ -1,35 +1,34 @@
 extends Control
 
 const MAIN_MENU_SCENE_PATH := "res://scenes/main/main_menu.tscn"
-const MAP_CONFIG_PATH := "res://resources/map/map_config.tres"
+const BOARD_CONFIG_PATH := "res://resources/map/board_config.tres"
 const TurnClockScript := preload("res://scripts/core/turn_clock.gd")
 const UiThemeScript := preload("res://scripts/ui/ui_theme.gd")
-const HexMapModelScript := preload("res://scripts/map/hex_map_model.gd")
-const HexMapViewScript := preload("res://scripts/map/hex_map_view.gd")
-const MapConfigScript := preload("res://scripts/map/map_config.gd")
+const GridBoardViewScript := preload("res://scripts/map/grid_board_view.gd")
+const BoardConfigScript := preload("res://scripts/map/board_config.gd")
 
 var _clock: TurnClock
 var _turn_label: Label
 var _hint_label: Label
-var _map_model: HexMapModel
-var _map_view: HexMapView
+var _board_config: BoardConfig
+var _board_view: GridBoardView
+var _selected_cell: Vector2i = Vector2i(-1, -1)
 
 
 func _ready() -> void:
 	UiThemeScript.apply(self)
 	_clock = TurnClockScript.new()
-	_map_model = HexMapModelScript.new(_load_map_config())
-	_map_model.generate()
+	_board_config = _load_board_config()
 	_build()
 	_refresh()
 
 
-func _load_map_config() -> MapConfig:
-	var loaded := load(MAP_CONFIG_PATH)
-	if loaded is MapConfig:
-		return (loaded as MapConfig).duplicate(true) as MapConfig
-	push_warning("Sandbox: missing %s, using defaults" % MAP_CONFIG_PATH)
-	return MapConfigScript.new()
+func _load_board_config() -> BoardConfig:
+	var loaded := load(BOARD_CONFIG_PATH)
+	if loaded is BoardConfig:
+		return (loaded as BoardConfig).duplicate(true) as BoardConfig
+	push_warning("Sandbox: missing %s, using defaults" % BOARD_CONFIG_PATH)
+	return BoardConfigScript.new()
 
 
 func _build() -> void:
@@ -41,13 +40,12 @@ func _build() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	# 地图全幅占主体；HUD 浮层叠在地图上，少占纵向空间。
-	_map_view = HexMapViewScript.new()
-	_map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_map_view.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(_map_view)
-	_map_view.setup(_map_model)
-	_map_view.cell_clicked.connect(_on_cell_clicked)
+	_board_view = GridBoardViewScript.new()
+	_board_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_board_view.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_board_view)
+	_board_view.setup(_board_config)
+	_board_view.cell_clicked.connect(_on_cell_clicked)
 
 	var top_bar := MarginContainer.new()
 	top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -107,15 +105,22 @@ func _build() -> void:
 
 
 func _refresh() -> void:
-	_turn_label.text = "沙盘 · %s" % _clock.status_text()
-	var gen_note := "WFC" if _map_model.generation_ok else "WFC回退"
-	_hint_label.text = "%s · 拖拽/滚轮 · 点邻雾 · #%d" % [gen_note, _map_model.seed_used % 100000]
+	_turn_label.text = "对战 · %s" % _clock.status_text()
+	var sel := ""
+	if _selected_cell.x >= 0:
+		sel = " · 格(%d,%d)" % [_selected_cell.x, _selected_cell.y]
+	_hint_label.text = "%dx%d 方格 · 拖拽/滚轮%s" % [
+		_board_config.grid_width,
+		_board_config.grid_height,
+		sel,
+	]
 
 
 func _on_cell_clicked(cell: Vector2i) -> void:
-	if _map_model.config.reveal_only_on_player_turn and not _clock.player_active:
+	if not _clock.player_active:
 		return
-	_map_model.try_player_reveal(cell)
+	_selected_cell = cell
+	_refresh()
 
 
 func _on_end_turn_pressed() -> void:

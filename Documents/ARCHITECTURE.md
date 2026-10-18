@@ -1,43 +1,30 @@
-# 架构
+# 架构概览
 
-初始化工程。未列出的系统是以后的落点，不是已实现模块。
+Godot 4.6 · GL Compatibility · 横屏 UI（852×393 逻辑点）。
 
-## 当前状态
+## 当前系统
 
-- 主菜单 → 沙盘（有限六边地图）
-- `TurnClock`：玩家与对手交替
-- 地图：WFC 预生成、分边战略迷雾、3D ~45° 俯视与拖拽/滚轮镜头（见 Features/HEX_MAP）
-- `GameSettings`：音量与全屏会写入 `user://settings.cfg`，界面上还不能改
-- 没有单位、战斗或存档对局
+- **入口**：`scenes/main/main_menu.tscn` → `sandbox.tscn`
+- **回合**：`TurnClock`（`scripts/core/turn_clock.gd`），UI 只调用 `end_turn()`，不自写计数
+- **地图**：方格 3D 盘、正交 ~45° 镜头、拖拽/滚轮（见 Features/GRID_BOARD）
+- **设置**：`GameSettings` autoload 持久化音量/全屏（主菜单尚无设置 UI）
 
 ## 目录
 
 | 路径 | 职责 |
 |------|------|
-| `scenes/main/` | 主菜单、沙盘 |
-| `scripts/core/` | 与界面无关的规则（回合钟与加载烟测） |
-| `scripts/map/` | 六边坐标、WFC、战略雾、3D 地图视图 |
-| `scripts/ui/` | 界面脚本 |
-| `scripts/autoload/` | 全局设置 |
-| `resources/map/` | 地图尺寸与生成参数 `.tres` |
-| `assets/` | 字体、图、声音 |
-| `tools/` | 安装 Godot、加载烟测、test runner |
-| `Documents/` | 愿景、规格、工作流 |
-| `.cursor/` | 角色、规则、技能 |
+| `scripts/core/` | 回合钟、加载烟测 |
+| `scripts/ui/` | 主菜单、沙盘 HUD |
+| `scripts/map/` | `BoardConfig`、`GridBoardView` |
+| `resources/map/` | 棋盘 `.tres` |
+| `scenes/main/` | 主菜单与沙盘场景 |
+| `tools/` | Godot 安装与验收脚本 |
 
-## 系统划分（规划）
+## 表现与逻辑
 
-| 系统 | 职责 | 状态 |
-|------|------|------|
-| 回合钟 | 谁在行动、第几回合 | **已实现** |
-| 地图 | 六边盘、地形、战略雾、镜头 | **已实现（无占用/移动）** |
-| 单位 | 站在格子上的棋子 | 未做 |
-| 定居点 | 产出与发展 | 未做 |
-| 战斗 | 相邻或进入敌格时的结算 | 未做 |
-| 界面 | 菜单、地图 HUD、回合条 | 菜单和沙盘已有 |
+- 沙盘用 `Control` 全屏；棋盘在 `SubViewport` 内 3D 渲染，HUD 浮在上层。
+- 单位占位为 `Sprite3D`（Billboard），逻辑坐标与格点后续由 gameplay 模块驱动。
 
-新增系统时先写 Feature，再落代码。不要为了「以后可能像文明」先搭空管理器。
+## 扩展约定
 
-## 不要从自走棋工程搬过来的东西
-
-那个项目的商店、牌库、招募、技能效果栈和战斗事件总线属于另一种游戏。本仓库不建立对应目录，也不把那些名词写进规格。需要新系统时按本页的划分命名。
+新增系统时先写 Feature，再落代码。不要预搭未在愿景或 Feature 中立项的管理器。

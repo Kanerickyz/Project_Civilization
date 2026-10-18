@@ -29,7 +29,7 @@ theme_override_constants/separation = 16
 [node name="Title" type="Label" parent="Center"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 36
-text = "文明战棋"
+text = "战术战棋"
 horizontal_alignment = 1
 
 [node name="Subtitle" type="Label" parent="Center"]
