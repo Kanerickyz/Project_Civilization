@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TacticalUnitDef" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/units/tactical_unit_def.gd" id="1_def"]
+[ext_resource type="Resource" path="res://resources/abilities/tactical_pekka_hunt.tres" id="2_ab"]
+[ext_resource type="Texture2D" path="res://assets/autochess/sprites/paper_cutout/units/unit_captain_blue.png" id="3_tex_b"]
+[ext_resource type="Texture2D" path="res://assets/autochess/sprites/paper_cutout/units/unit_captain_red.png" id="4_tex_r"]
+
+[resource]
+script = ExtResource("1_def")
+id = "mini_pekka"
+display_name = "大剑"
+max_hp = 6
+attack = 9
+move_range = 1
+attack_range = 1
+texture_blue = ExtResource("3_tex_b")
+texture_red = ExtResource("4_tex_r")
+active_ability = ExtResource("2_ab")
