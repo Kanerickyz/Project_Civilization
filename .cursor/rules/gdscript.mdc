@@ -1,0 +1,10 @@
+---
+description: GDScript 与 Godot 资源修改规范
+globs: "**/*.gd,**/*.tscn,**/*.tres,**/*.gdshader"
+alwaysApply: false
+---
+
+遵守 CONTRIBUTING.md 的 GDScript/资源规范。
+正式数值来自 resources/ 下的 .tres。回合规则见 scripts/core/turn_clock.gd，不要在界面脚本里另写一套计数。
+检查共享 Resource、枚举兼容和 UID。
+按改动跑现有 *_test_runner.gd；视觉变更补 GUI 验收，报告未验证项。
