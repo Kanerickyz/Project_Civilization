@@ -1,0 +1,8 @@
+[gd_resource type="FontVariation" format=3 uid="uid://civuifontvar01"]
+
+[ext_resource type="FontFile" uid="uid://civnotosanslatin1" path="res://assets/fonts/NotoSans-Regular.ttf" id="1_latin"]
+[ext_resource type="FontFile" uid="uid://cr68j6mcyfec1" path="res://assets/fonts/DroidSansFallbackFull.ttf" id="2_cjk"]
+
+[resource]
+base_font = ExtResource("1_latin")
+fallbacks = Array[Font]([ExtResource("2_cjk")])
