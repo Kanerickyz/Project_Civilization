@@ -1,32 +1,21 @@
-# 文明战棋
+# 战术战棋
 
-小规模、快节奏的文明式战棋。Godot 4.6。
+小地图战术战棋框架：3D 斜俯视方格盘 + 2D 占位单位。Godot 4.6。
 
-设计与协作入口见 [Documents/INDEX.md](Documents/INDEX.md)。项目规则见 [AGENTS.md](AGENTS.md)。
-
-## 本地运行
-
-需要 PATH 上的 `godot`（4.6.3）。可执行：
+## 运行
 
 ```bash
-bash tools/install_godot.sh
+bash tools/install_godot.sh   # 若 PATH 无 godot
+bash tools/run_light_verify.sh
 godot --path .
 ```
 
-轻量加载检查：
+## 文档
 
-```bash
-bash tools/run_light_verify.sh
-```
+见 [Documents/INDEX.md](Documents/INDEX.md)。
 
-视口按 iPhone 14 Pro 横屏比例（逻辑点约 852×393）。Web 导出预设见 `export_presets.cfg`（单线程，便于 GitHub Pages）。
-
-## GitHub Pages
-
-`main` 推送或手动触发 `.github/workflows/deploy-pages.yml` 后发布 Web 构建。
-
-预期地址（仓库 Pages 启用后）：
+## Web 演示
 
 `https://kanerickyz.github.io/Project_Civilization/`
 
-仓库需在 **Settings → Pages** 将 Source 设为 **GitHub Actions**（首次部署前）。
+（仓库名未改；Pages 仍导出同一项目。）
