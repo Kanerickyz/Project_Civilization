@@ -10,11 +10,28 @@ func _initialize() -> void:
 	if not _test_cell_mapping():
 		quit(1)
 		return
+	if not _test_pan_vertical_intuitive():
+		quit(1)
+		return
 	if not _test_view_builds():
 		quit(1)
 		return
 	print("GRID_BOARD_OK")
 	quit(0)
+
+
+func _test_pan_vertical_intuitive() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	var view := GridBoardViewScript.new()
+	view.config = cfg
+	view._zoom = 1.0
+	var yaw := deg_to_rad(cfg.camera_yaw_deg)
+	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
+	var delta := view.compute_pan_world_delta(Vector2(0.0, -24.0))
+	if delta.dot(forward) <= 0.0:
+		push_error("GridBoardView: upward drag should pan along +forward (grab-the-map feel)")
+		return false
+	return true
 
 
 func _test_cell_mapping() -> bool:
@@ -62,6 +79,12 @@ func _test_view_builds() -> bool:
 	if units == null or units.get_child_count() < 2:
 		push_error("GridBoardView: expected placeholder units")
 		return false
+	for child in units.get_children():
+		if child is Sprite3D:
+			var spr := child as Sprite3D
+			if spr.texture == null:
+				push_error("GridBoardView: unit sprite missing texture")
+				return false
 	var local_pos := camera.position
 	var elev_deg := rad_to_deg(atan2(local_pos.y, Vector2(local_pos.x, local_pos.z).length()))
 	if absf(elev_deg - cfg.camera_pitch_deg) > 1.5:

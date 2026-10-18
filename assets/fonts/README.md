@@ -1,8 +1,11 @@
 # UI 字体
 
-`DroidSansFallbackFull.ttf` 用来显示中文界面。
+界面默认字体：`res://resources/ui/ui_font.tres`（FontVariation）。
 
-- 版权：Copyright 2006–2010 Google Corp.
-- 许可：Apache License 2.0，见 [LICENSE.apache-2.0.txt](./LICENSE.apache-2.0.txt)
-- Droid 是 Google Corp. 的商标
-- 来源：Android Open Source Project（本机 `fonts-droid-fallback` 包中的文件）
+| 文件 | 作用 |
+|------|------|
+| `NotoSans-Regular.ttf` | 拉丁字母与数字（OFL Noto Sans） |
+| `DroidSansFallbackFull.ttf` | 中文回退 |
+
+- Droid 版权：Copyright 2006–2010 Google Corp.；Apache 2.0，见 [LICENSE.apache-2.0.txt](./LICENSE.apache-2.0.txt)
+- Noto Sans：SIL Open Font License（与 [project-autochess](https://github.com/Kanerickyz/project-autochess) 同源拷贝）

@@ -27,6 +27,12 @@ var _press_pos: Vector2 = Vector2.ZERO
 var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
+const TEX_PLAYER := preload("res://assets/autochess/sprites/units/wolf.png")
+const TEX_OPPONENT := preload("res://assets/autochess/sprites/units/pyre_guard.png")
+
+var _touch_drag_index: int = -1
+var _active_touches: Dictionary = {} # int index -> Vector2 position
+var _pinch_last_distance: float = 0.0
 
 
 func setup(p_config: BoardConfig) -> void:
@@ -175,33 +181,20 @@ func _material_for(key: String, color: Color) -> StandardMaterial3D:
 
 
 func _spawn_placeholder_units() -> void:
-	# 双方各一占位精灵，便于验证 Z 序与格点对齐。
-	_add_unit_sprite(Vector2i(2, 3), Color("4a9fd4"), "player")
-	_add_unit_sprite(Vector2i(7, 4), Color("d45a4a"), "opponent")
+	_add_unit_sprite(Vector2i(2, 3), TEX_PLAYER, "player")
+	_add_unit_sprite(Vector2i(7, 4), TEX_OPPONENT, "opponent")
 
 
-func _add_unit_sprite(cell: Vector2i, tint: Color, label: String) -> void:
+func _add_unit_sprite(cell: Vector2i, texture: Texture2D, label: String) -> void:
 	var spr := Sprite3D.new()
-	spr.texture = _unit_placeholder_texture(tint)
+	spr.texture = texture
 	spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	spr.pixel_size = 0.008
+	spr.pixel_size = 0.012
 	spr.modulate = Color.WHITE
 	spr.name = "Unit_%s" % label
 	var world := _cell_to_world(cell, config.cell_size)
 	spr.position = Vector3(world.x, config.tile_height + 0.55, world.z)
 	_units_root.add_child(spr)
-
-
-static func _unit_placeholder_texture(tint: Color) -> Texture2D:
-	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
-	img.fill(tint)
-	# 简单描边便于在格子上辨认。
-	for i in range(64):
-		img.set_pixel(i, 0, Color.BLACK)
-		img.set_pixel(i, 63, Color.BLACK)
-		img.set_pixel(0, i, Color.BLACK)
-		img.set_pixel(63, i, Color.BLACK)
-	return ImageTexture.create_from_image(img)
 
 
 func _cell_to_world(cell: Vector2i, cell_size: float) -> Vector3:
@@ -232,6 +225,17 @@ func _apply_camera() -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	if config == null or _camera == null:
+		return
+	if event is InputEventMagnifyGesture:
+		var mg := event as InputEventMagnifyGesture
+		_set_zoom(_zoom * mg.factor)
+		accept_event()
+		return
+	if event is InputEventScreenTouch:
+		_handle_screen_touch(event as InputEventScreenTouch)
+		return
+	if event is InputEventScreenDrag:
+		_handle_screen_drag(event as InputEventScreenDrag)
 		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
@@ -273,13 +277,84 @@ func _set_zoom(value: float) -> void:
 
 
 func _pan_by_screen_delta(delta: Vector2) -> void:
+	_target += compute_pan_world_delta(delta)
+	_clamp_target()
+	_apply_camera()
+
+
+## 供 headless 烟测：屏幕位移对应的地面平移（指拖地图，非相机反移）。
+func compute_pan_world_delta(delta: Vector2) -> Vector3:
 	var sens := config.camera_pan_sensitivity / maxf(_zoom, 0.05)
 	var yaw := deg_to_rad(config.camera_yaw_deg)
 	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
 	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
-	_target += -right * delta.x * sens + forward * delta.y * sens
-	_clamp_target()
-	_apply_camera()
+	return -right * delta.x * sens - forward * delta.y * sens
+
+
+func _handle_screen_touch(st: InputEventScreenTouch) -> void:
+	if st.pressed:
+		_active_touches[st.index] = st.position
+		if _active_touches.size() == 1:
+			_touch_drag_index = st.index
+			_dragging = true
+			_drag_moved = false
+			_drag_last = st.position
+			_press_pos = st.position
+		elif _active_touches.size() >= 2:
+			_dragging = false
+			_touch_drag_index = -1
+			_pinch_last_distance = _pinch_distance()
+	else:
+		_active_touches.erase(st.index)
+		if st.index == _touch_drag_index:
+			if not _drag_moved and _active_touches.is_empty():
+				_handle_click(st.position)
+			_dragging = false
+			_touch_drag_index = -1
+		if _active_touches.size() < 2:
+			_pinch_last_distance = 0.0
+		elif _active_touches.size() == 1:
+			var remaining: int = _active_touches.keys()[0]
+			_touch_drag_index = remaining
+			_dragging = true
+			_drag_last = _active_touches[remaining]
+			_press_pos = _drag_last
+			_drag_moved = true
+	accept_event()
+
+
+func _handle_screen_drag(sd: InputEventScreenDrag) -> void:
+	if _active_touches.has(sd.index):
+		_active_touches[sd.index] = sd.position
+	if _active_touches.size() >= 2:
+		_apply_pinch_zoom()
+		accept_event()
+		return
+	if not _dragging or sd.index != _touch_drag_index:
+		return
+	var delta := sd.position - _drag_last
+	_drag_last = sd.position
+	if not _drag_moved and _press_pos.distance_to(sd.position) >= DRAG_THRESHOLD_PX:
+		_drag_moved = true
+	if _drag_moved:
+		_pan_by_screen_delta(delta)
+	accept_event()
+
+
+func _pinch_distance() -> float:
+	var keys := _active_touches.keys()
+	if keys.size() < 2:
+		return 0.0
+	var a: Vector2 = _active_touches[keys[0]]
+	var b: Vector2 = _active_touches[keys[1]]
+	return a.distance_to(b)
+
+
+func _apply_pinch_zoom() -> void:
+	var dist := _pinch_distance()
+	if _pinch_last_distance > 1.0 and dist > 1.0:
+		_set_zoom(_zoom * (dist / _pinch_last_distance))
+	_pinch_last_distance = dist
 
 
 func _handle_click(local_pos: Vector2) -> void:
