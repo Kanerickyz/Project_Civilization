@@ -13,8 +13,11 @@ extends Resource
 @export var reveal_only_on_player_turn: bool = true
 ## 战略俯视俯角（度），Civ 式约 45。可改。
 @export var camera_pitch_deg: float = 50.0
-@export var camera_distance: float = 12.5
-@export var camera_zoom_min: float = 0.7
-@export var camera_zoom_max: float = 1.8
-@export var camera_zoom_default: float = 1.0
-@export var camera_pan_sensitivity: float = 0.028
+## 正交相机沿视线的放置距离（不影响缩放，只保证能看见挤出高度）。
+@export var camera_distance: float = 40.0
+## 正交竖直可视范围（世界单位）；滚轮缩放改此有效值。越小地图越大。
+@export var camera_ortho_size: float = 7.2
+@export var camera_zoom_min: float = 0.65
+@export var camera_zoom_max: float = 1.9
+@export var camera_zoom_default: float = 1.05
+@export var camera_pan_sensitivity: float = 0.018

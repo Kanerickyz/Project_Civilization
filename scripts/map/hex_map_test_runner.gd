@@ -113,4 +113,21 @@ func _test_view_builds() -> bool:
 	if view.get_child_count() < 1:
 		push_error("HexMapView: missing viewport tree")
 		return false
+	var camera := _find_camera(view)
+	if camera == null:
+		push_error("HexMapView: Camera3D missing")
+		return false
+	if camera.projection != Camera3D.PROJECTION_ORTHOGONAL:
+		push_error("HexMapView: expected orthogonal projection")
+		return false
 	return true
+
+
+func _find_camera(node: Node) -> Camera3D:
+	if node is Camera3D:
+		return node as Camera3D
+	for child in node.get_children():
+		var found := _find_camera(child)
+		if found != null:
+			return found
+	return null

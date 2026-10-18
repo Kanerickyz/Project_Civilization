@@ -1,6 +1,6 @@
 class_name HexMapView
 extends Control
-## 文明式 ~45° 俯视 3D 六边地图：棱柱地形、迷雾、拖拽/滚轮镜头。逻辑在 HexMapModel。
+## 文明式正交 ~45° 俯视 3D 六边地图：棱柱地形、迷雾、拖拽/滚轮镜头。逻辑在 HexMapModel。
 
 
 const Terrain := preload("res://scripts/map/terrain_type.gd")
@@ -98,9 +98,10 @@ func _ensure_viewport_tree() -> void:
 
 	_camera = Camera3D.new()
 	_camera.current = true
-	_camera.fov = 42.0
-	_camera.near = 0.1
-	_camera.far = 400.0
+	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_camera.size = 10.5
+	_camera.near = 0.05
+	_camera.far = 200.0
 	_pivot.add_child(_camera)
 
 	_tiles_root = Node3D.new()
@@ -197,10 +198,12 @@ func _apply_camera() -> void:
 		return
 	_pivot.position = _target
 	_pivot.rotation_degrees = Vector3(0.0, CAMERA_YAW_DEG, 0.0)
-	var dist := model.config.camera_distance / maxf(_zoom, 0.05)
 	var pitch_deg := model.config.camera_pitch_deg
 	var pitch := deg_to_rad(pitch_deg)
-	# 俯角约 45°：局部位移 + 俯仰，避免依赖 global look_at（入树前也安全）。
+	var dist := model.config.camera_distance
+	# 正交俯视：缩放改 size；距离仅放置相机，不随解锁变化。
+	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_camera.size = model.config.camera_ortho_size / maxf(_zoom, 0.05)
 	_camera.position = Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist)
 	_camera.rotation_degrees = Vector3(-pitch_deg, 0.0, 0.0)
 
