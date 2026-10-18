@@ -24,6 +24,7 @@ var _selected_unit: TacticalUnitInstance
 var _last_log: String = ""
 var _input_locked: bool = false
 var _game_over: bool = false
+var _turn_banner_panel: PanelContainer
 var _turn_banner: Label
 var _game_over_panel: PanelContainer
 var _game_over_title: Label
@@ -155,15 +156,35 @@ func _build() -> void:
 	back.pressed.connect(_on_back_pressed)
 	actions.add_child(back)
 
+	_turn_banner_panel = PanelContainer.new()
+	_turn_banner_panel.anchor_left = 0.0
+	_turn_banner_panel.anchor_right = 1.0
+	_turn_banner_panel.anchor_top = 0.36
+	_turn_banner_panel.anchor_bottom = 0.36
+	_turn_banner_panel.offset_left = 28.0
+	_turn_banner_panel.offset_right = -28.0
+	_turn_banner_panel.offset_top = -22.0
+	_turn_banner_panel.offset_bottom = 22.0
+	_turn_banner_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_turn_banner_panel.modulate.a = 0.0
+	var banner_bg := StyleBoxFlat.new()
+	banner_bg.bg_color = Color(0.04, 0.06, 0.1, 0.82)
+	banner_bg.set_corner_radius_all(6)
+	banner_bg.content_margin_left = 20.0
+	banner_bg.content_margin_right = 20.0
+	banner_bg.content_margin_top = 10.0
+	banner_bg.content_margin_bottom = 10.0
+	_turn_banner_panel.add_theme_stylebox_override("panel", banner_bg)
+	add_child(_turn_banner_panel)
+
 	_turn_banner = Label.new()
-	_turn_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_turn_banner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_turn_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_turn_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_turn_banner.add_theme_font_size_override("font_size", 28)
-	_turn_banner.add_theme_color_override("font_color", Color("f0f4ff"))
-	_turn_banner.modulate.a = 0.0
+	_turn_banner.add_theme_font_size_override("font_size", 22)
+	_turn_banner.add_theme_color_override("font_color", Color("f2f6fc"))
 	_turn_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_turn_banner)
+	_turn_banner_panel.add_child(_turn_banner)
 
 	_game_over_panel = PanelContainer.new()
 	_game_over_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -257,12 +278,12 @@ func _show_turn_banner() -> void:
 	if _game_over:
 		return
 	_turn_banner.text = _clock.status_text()
-	_turn_banner.modulate.a = 1.0
-	_turn_banner.scale = Vector2(0.92, 0.92)
+	_turn_banner_panel.modulate.a = 1.0
+	_turn_banner_panel.scale = Vector2(0.94, 0.94)
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(_turn_banner, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK)
-	tw.chain().tween_property(_turn_banner, "modulate:a", 0.0, 0.55).set_delay(0.65)
+	tw.tween_property(_turn_banner_panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK)
+	tw.chain().tween_property(_turn_banner_panel, "modulate:a", 0.0, 0.55).set_delay(0.75)
 
 
 func _on_cell_clicked(cell: Vector2i) -> void:

@@ -165,13 +165,16 @@ func sync_tactical_units(
 ) -> void:
 	if config == null or _units_root == null:
 		return
+	_mat_cache.clear()
 	_overlay_selected = selected_cell
 	_overlay_move.clear()
 	for c in move_cells:
-		_overlay_move[c] = true
+		if c is Vector2i:
+			_overlay_move[c] = true
 	_overlay_attack.clear()
 	for c in attack_cells:
-		_overlay_attack[c] = true
+		if c is Vector2i:
+			_overlay_attack[c] = true
 	var alive: Dictionary = {}
 	for u in units:
 		if u is TacticalUnitInstance and (u as TacticalUnitInstance).is_alive():
@@ -324,10 +327,19 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	if cell == _overlay_selected:
 		color = color.lerp(Color("5a8fd4"), 0.52)
 	elif _overlay_attack.has(cell):
-		color = color.lerp(Color("c46a5a"), 0.48)
+		color = color.lerp(Color("d04850"), 0.58)
 	elif _overlay_move.has(cell):
-		color = color.lerp(Color("5ab88a"), 0.44)
-	mi.material_override = _material_for("tile_%d_%d_%d" % [int(checker), cell.x, cell.y], color)
+		color = color.lerp(Color("40c870"), 0.55)
+	var overlay_tag := "n"
+	if cell == _overlay_selected:
+		overlay_tag = "s"
+	elif _overlay_attack.has(cell):
+		overlay_tag = "a"
+	elif _overlay_move.has(cell):
+		overlay_tag = "m"
+	mi.material_override = _material_for(
+		"tile_%d_%d_%d_%s" % [int(checker), cell.x, cell.y, overlay_tag], color
+	)
 
 
 func _material_for(key: String, color: Color) -> StandardMaterial3D:
@@ -511,7 +523,7 @@ func _handle_click(local_pos: Vector2) -> void:
 func _pick_cell(local_pos: Vector2) -> Variant:
 	if _camera == null or size.y <= 0.0 or not _camera.is_inside_tree():
 		return null
-	var vp_pos := _to_viewport_pos(local_pos)
+	var vp_pos := _pick_viewport_pos(local_pos)
 	var from := _camera.project_ray_origin(vp_pos)
 	var dir := _camera.project_ray_normal(vp_pos)
 	if absf(dir.y) < 0.0001:
@@ -534,11 +546,16 @@ func _world_to_cell(world: Vector3) -> Variant:
 	return Vector2i(gx, gy)
 
 
-func _to_viewport_pos(local_pos: Vector2) -> Vector2:
-	if _viewport == null or size.x <= 0.0 or size.y <= 0.0:
+func _pick_viewport_pos(local_pos: Vector2) -> Vector2:
+	if _viewport == null or _viewport_container == null:
+		return local_pos
+	var container_size := _viewport_container.size
+	if container_size.x <= 0.0 or container_size.y <= 0.0:
 		return local_pos
 	var vs := _viewport.size
-	return Vector2(local_pos.x * vs.x / size.x, local_pos.y * vs.y / size.y)
+	if vs.x <= 0 or vs.y <= 0:
+		return local_pos
+	return Vector2(local_pos.x * vs.x / container_size.x, local_pos.y * vs.y / container_size.y)
 
 
 func _clamp_target() -> void:
