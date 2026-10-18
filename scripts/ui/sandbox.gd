@@ -69,9 +69,19 @@ func _build() -> void:
 	actions.add_child(back)
 
 
+## Fit the placeholder grid into short landscape viewports (e.g. 852×393).
+func _cell_min_size() -> Vector2:
+	var viewport_size := get_viewport_rect().size
+	var usable_w := maxf(viewport_size.x - 48.0, 160.0)
+	var usable_h := maxf(viewport_size.y - 168.0, 120.0)
+	var side := minf(usable_w / float(GRID_COLUMNS), usable_h / float(GRID_ROWS)) - 4.0
+	side = clampf(side, 24.0, 56.0)
+	return Vector2(side, side)
+
+
 func _make_cell(x: int, y: int) -> Control:
 	var cell := ColorRect.new()
-	cell.custom_minimum_size = Vector2(56, 56)
+	cell.custom_minimum_size = _cell_min_size()
 	var light := (x + y) % 2 == 0
 	cell.color = Color("d7d2c4") if light else Color("b7c4ae")
 	var marker := ""

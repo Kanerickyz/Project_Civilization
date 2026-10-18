@@ -50,10 +50,11 @@
 |----|-----|
 | 引擎 | Godot **4.6**（安装脚本固定 4.6.3） |
 | 项目名 | 文明战棋 |
-| 版本 | `0.1.0`（主菜单显示） |
+| 版本 | `0.2.0`（主菜单显示） |
 | 特性标签 | `4.6`, `GL Compatibility` |
 | 渲染器 | `gl_compatibility` |
-| 窗口 | 1280×720，`canvas_items` + `expand` |
+| 窗口 | 852×393（iPhone 14 Pro 横屏逻辑点），桌面覆盖 1704×786；`canvas_items` + `expand`；handheld 横屏 |
+| Web | `export_presets.cfg` 单线程 Web；GitHub Pages：`.github/workflows/deploy-pages.yml` |
 
 ## 里程碑
 

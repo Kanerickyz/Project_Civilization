@@ -33,7 +33,7 @@
 - 场景尽量用编辑器修改；文本修改保持资源 ID/UID 与引用。提交前确认没有丢失 `.uid` 或 `.import`。
 - 共享 `Resource` 进入运行时实例前判断是否需 `duplicate()`。
 - 视觉效果保持 **GL Compatibility**。2D 与界面放 `assets/`。中文界面使用 `assets/fonts/DroidSansFallbackFull.ttf`，不要改回不含中文的默认字体。
-- 窗口默认 1280×720 横屏。色盲不只靠红绿区分阵营：同时使用文字或形状。
+- 窗口默认按 iPhone 14 Pro 横屏逻辑点 852×393（约 19.5:9），桌面可用 2× 覆盖窗口；拉伸 `canvas_items` + `expand`，handheld 锁定横屏。色盲不只靠红绿区分阵营：同时使用文字或形状。
 
 ## Cursor
 
