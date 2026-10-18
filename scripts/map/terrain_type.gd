@@ -43,27 +43,27 @@ static func display_name(id: int) -> String:
 			return "未知"
 
 
-## 3D 占位挤出高度（逻辑单位，相对 hex_size）。可读分层，非最终美术。
+## 3D 占位挤出高度（世界单位）。分层夸大以便 ~45° 俯视可读，非最终美术。
 static func placeholder_height(id: int) -> float:
 	match id:
 		Id.OCEAN:
-			return 0.18
+			return 0.12
 		Id.BEACH:
-			return 0.32
+			return 0.28
 		Id.GRASSLAND:
-			return 0.55
+			return 0.62
 		Id.FOREST:
-			return 0.85
+			return 1.05
 		Id.HILLS:
-			return 1.15
+			return 1.45
 		Id.MOUNTAIN:
-			return 1.85
+			return 2.25
 		Id.DESERT:
-			return 0.5
+			return 0.55
 		Id.MARSH:
-			return 0.4
+			return 0.38
 		Id.SNOW:
-			return 0.7
+			return 0.8
 		_:
 			return 0.5
 

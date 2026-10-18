@@ -67,7 +67,8 @@ func _ensure_viewport_tree() -> void:
 	_viewport.own_world_3d = true
 	_viewport.handle_input_locally = false
 	_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-	_viewport.msaa_3d = Viewport.MSAA_2X
+	# 软光栅下 MSAA 成本高；占位地形以清晰色块为主。
+	_viewport.msaa_3d = Viewport.MSAA_DISABLED
 	# stretch=true 时由容器驱动尺寸，勿再手改 SubViewport.size。
 	_viewport_container.add_child(_viewport)
 
