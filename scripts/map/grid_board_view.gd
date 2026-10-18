@@ -99,7 +99,7 @@ func _ensure_viewport_tree() -> void:
 	_camera = Camera3D.new()
 	_camera.current = true
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_camera.size = 10.5
+	_camera.size = 5.4
 	_camera.near = 0.05
 	_camera.far = 200.0
 	_pivot.add_child(_camera)
@@ -181,16 +181,19 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	else:
 		spr = Sprite3D.new()
 		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		spr.pixel_size = 0.011
 		spr.name = "Unit_%s_%s" % [unit.def.id, unit.faction]
 		_units_root.add_child(spr)
 		_unit_sprites[unit] = spr
 	var tex := unit.def.texture_blue
 	if unit.faction == TacticalFactionScript.Id.OPPONENT:
 		tex = unit.def.texture_red
+	var unit_h := config.unit_world_height
+	var tex_h := float(tex.get_height())
+	if tex_h > 0.0:
+		spr.pixel_size = unit_h / tex_h
 	spr.texture = tex
 	var world := _cell_to_world(unit.cell, config.cell_size)
-	spr.position = Vector3(world.x, config.tile_height + 0.55, world.z)
+	spr.position = Vector3(world.x, config.tile_height + unit_h * 0.5, world.z)
 	spr.modulate = Color.WHITE if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
 
 
