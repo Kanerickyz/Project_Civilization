@@ -1,8 +1,8 @@
 class_name BoardLook
 extends Resource
-## 棋盘画面：主光 / 天光补光 / 投影 / 背景 / 调色。正式数值见 resources/map/board_look.tres。
+## 棋盘画面：主光 / 天光补光 / 投影 / 背景。正式数值见 resources/map/board_look.tres。
 ## 全部效果在 GL Compatibility（含 Web）可用。Web 回退：shadow_on_web=false 时不画实时投影（Compatibility
-## 每盏带影灯多一遍绘制），角色仍有脚下软影；post_adjust_on_web=false 时只保留 tonemap。
+## 每盏带影灯多一遍绘制），角色仍有脚下软影。
 
 
 @export_group("Key light")
@@ -27,17 +27,6 @@ extends Resource
 @export var ambient_energy: float = 0.36
 @export var background_color: Color = Color("56603a")
 
-@export_group("Color grading")
-@export var tonemap_mode: Environment.ToneMapper = Environment.TONE_MAPPER_LINEAR
-@export var tonemap_exposure: float = 1.0
-@export var tonemap_white: float = 1.0
-@export var post_adjust_enabled: bool = true
-## Web 上额外的全屏调色 pass；低端设备可关，关后只少一层饱和/对比微调。
-@export var post_adjust_on_web: bool = true
-@export var adjust_brightness: float = 1.0
-@export var adjust_contrast: float = 1.06
-@export var adjust_saturation: float = 0.88
-
 @export_group("Units")
 ## Billboard 角色脚下软影（不透明度 0 = 关）。
 @export var unit_blob_opacity: float = 0.62
@@ -50,13 +39,5 @@ func shadow_active(is_web: bool = OS.has_feature("web")) -> bool:
 	if not shadow_enabled:
 		return false
 	if is_web and not shadow_on_web:
-		return false
-	return true
-
-
-func post_adjust_active(is_web: bool = OS.has_feature("web")) -> bool:
-	if not post_adjust_enabled:
-		return false
-	if is_web and not post_adjust_on_web:
 		return false
 	return true
