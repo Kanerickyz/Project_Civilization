@@ -21,6 +21,10 @@ var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
 var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
 var _overlay_mesh: PlaneMesh
 var _catalog: TerrainCatalog
+var _key_light: DirectionalLight3D
+var _environment: Environment
+var _blob_mesh: PlaneMesh
+var _blob_material: StandardMaterial3D
 
 var _target: Vector3 = Vector3.ZERO
 var _zoom: float = 1.0
@@ -33,6 +37,7 @@ var _needs_center: bool = true
 const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const OVERLAY_LIFT := 0.005
+const BLOB_LIFT := 0.02
 const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
@@ -48,6 +53,7 @@ var _overlay_attack: Dictionary = {}
 
 var _last_unit_cells: Dictionary = {} # TacticalUnitInstance -> Vector2i
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label3D
+var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> MeshInstance3D
 
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {} # int index -> Vector2 position
@@ -59,6 +65,7 @@ func setup(p_config: BoardConfig) -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_ensure_viewport_tree()
+	_apply_look()
 	_zoom = clampf(config.camera_zoom_default, config.camera_zoom_min, config.camera_zoom_max)
 	_needs_center = true
 	_rebuild_board()
@@ -142,22 +149,16 @@ func _ensure_viewport_tree() -> void:
 	_world_root.name = "BoardWorld"
 	_viewport.add_child(_world_root)
 
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-52.0, 20.0, 0.0)
-	light.light_color = Color("fff6e6")
-	light.light_energy = 0.72
-	light.shadow_enabled = false
-	_world_root.add_child(light)
+	_key_light = DirectionalLight3D.new()
+	_key_light.name = "KeyLight"
+	_world_root.add_child(_key_light)
 
-	var ambient := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("3a4629")
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("8a96a8")
-	env.ambient_light_energy = 0.26
-	ambient.environment = env
-	_world_root.add_child(ambient)
+	var world_env := WorldEnvironment.new()
+	_environment = Environment.new()
+	_environment.background_mode = Environment.BG_COLOR
+	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	world_env.environment = _environment
+	_world_root.add_child(world_env)
 
 	_pivot = Node3D.new()
 	_pivot.name = "CameraPivot"
@@ -178,6 +179,42 @@ func _ensure_viewport_tree() -> void:
 	_units_root = Node3D.new()
 	_units_root.name = "Units"
 	_world_root.add_child(_units_root)
+
+
+func _look() -> BoardLook:
+	if config != null and config.look != null:
+		return config.look
+	return BoardLook.new()
+
+
+## 暖色主光 + 冷色天光（环境光）+ 柔和投影 + tonemap / 调色。Compatibility 与 Web 均支持；
+## Web 回退见 BoardLook.shadow_active() / post_adjust_active()。
+func _apply_look() -> void:
+	if _key_light == null or _environment == null:
+		return
+	var look := _look()
+	_key_light.rotation_degrees = Vector3(look.key_pitch_deg, look.key_yaw_deg, 0.0)
+	_key_light.light_color = look.key_color
+	_key_light.light_energy = look.key_energy
+	_key_light.shadow_enabled = look.shadow_active()
+	_key_light.shadow_opacity = look.shadow_opacity
+	_key_light.shadow_blur = look.shadow_blur
+	_key_light.shadow_bias = look.shadow_bias
+	_key_light.shadow_normal_bias = look.shadow_normal_bias
+	_key_light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	_key_light.directional_shadow_max_distance = look.shadow_max_distance
+	_environment.background_color = look.background_color
+	_environment.ambient_light_color = look.ambient_color
+	_environment.ambient_light_energy = look.ambient_energy
+	_environment.tonemap_mode = look.tonemap_mode
+	_environment.tonemap_exposure = look.tonemap_exposure
+	_environment.tonemap_white = look.tonemap_white
+	_environment.adjustment_enabled = look.post_adjust_active()
+	_environment.adjustment_brightness = look.adjust_brightness
+	_environment.adjustment_contrast = look.adjust_contrast
+	_environment.adjustment_saturation = look.adjust_saturation
+	_blob_mesh = null
+	_blob_material = null
 
 
 func _on_resized() -> void:
@@ -320,6 +357,9 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 		var spr: Sprite3D = _unit_sprites[unit] as Sprite3D
 		spr.queue_free()
 		_unit_sprites.erase(unit)
+	if _unit_blobs.has(unit):
+		(_unit_blobs[unit] as Node).queue_free()
+		_unit_blobs.erase(unit)
 	if _hp_bars.has(unit):
 		var bar: Label3D = _hp_bars[unit] as Label3D
 		bar.queue_free()
@@ -355,7 +395,7 @@ func play_unit_hit(unit: TacticalUnitInstance) -> void:
 	spr.modulate = Color("ff8888")
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(spr, "modulate", Color.WHITE, 0.32)
+	tw.tween_property(spr, "modulate", _look().unit_modulate, 0.32)
 	tw.tween_property(spr, "position:x", base.x + 0.06, 0.06).set_trans(Tween.TRANS_SINE)
 	tw.chain().tween_property(spr, "position", base, 0.12).set_trans(Tween.TRANS_SINE)
 
@@ -377,9 +417,13 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	else:
 		spr = Sprite3D.new()
 		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		spr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# 透明像素不写深度，脚下软影才不会被整张卡片挡住。
+		spr.alpha_cut = SpriteBase3D.ALPHA_CUT_OPAQUE_PREPASS
 		spr.name = "Unit_%s_%s" % [unit.def.id, unit.faction]
 		_units_root.add_child(spr)
 		_unit_sprites[unit] = spr
+		_attach_unit_blob(unit)
 	var tex := unit.def.texture_blue
 	if unit.faction == TacticalFactionScript.Id.OPPONENT:
 		tex = unit.def.texture_red
@@ -388,9 +432,55 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	if tex_h > 0.0:
 		spr.pixel_size = unit_h / tex_h
 	spr.texture = tex
-	spr.modulate = Color.WHITE if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
+	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
 	spr.scale = Vector3.ONE
 	_ensure_hp_bar(unit)
+
+
+## 脚下软影：与 Sprite 同级（挂在 Sprite 下时会被 billboard 卡片吞掉），每帧跟随其水平位置 / 缩放 / 透明度。
+func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
+	var look := _look()
+	if look.unit_blob_opacity <= 0.0:
+		return
+	if _blob_mesh == null:
+		_blob_mesh = PlaneMesh.new()
+		_blob_mesh.size = Vector2.ONE * look.unit_blob_radius * 2.0 * config.cell_size
+		var grad := Gradient.new()
+		grad.set_color(0, Color(0.08, 0.07, 0.04, look.unit_blob_opacity))
+		grad.set_color(1, Color(0.08, 0.07, 0.04, 0.0))
+		grad.add_point(0.55, Color(0.08, 0.07, 0.04, look.unit_blob_opacity * 0.85))
+		var tex := GradientTexture2D.new()
+		tex.gradient = grad
+		tex.fill = GradientTexture2D.FILL_RADIAL
+		tex.fill_from = Vector2(0.5, 0.5)
+		tex.fill_to = Vector2(0.5, 0.0)
+		tex.width = 64
+		tex.height = 64
+		_blob_material = StandardMaterial3D.new()
+		_blob_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_blob_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_blob_material.albedo_texture = tex
+		# 透明物按 render_priority 先排：高亮(-2) → 软影(-1) → 角色(0)，避免被 Sprite 深度挡住。
+		_blob_material.render_priority = -1
+	var blob := MeshInstance3D.new()
+	blob.name = "Blob"
+	blob.mesh = _blob_mesh
+	blob.material_override = _blob_material
+	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_units_root.add_child(blob)
+	_unit_blobs[unit] = blob
+
+
+func _process(_delta: float) -> void:
+	for unit in _unit_blobs:
+		var spr := _unit_sprites.get(unit) as Sprite3D
+		if spr == null:
+			continue
+		var blob := _unit_blobs[unit] as MeshInstance3D
+		var s := spr.scale.x
+		blob.position = Vector3(spr.position.x, config.tile_height + BLOB_LIFT, spr.position.z)
+		blob.scale = Vector3(s, 1.0, s * 0.7)
+		blob.transparency = 1.0 - clampf(spr.modulate.a, 0.0, 1.0)
 
 
 func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
@@ -479,6 +569,7 @@ func _overlay_material(tag: String) -> StandardMaterial3D:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.render_priority = -2
 	_overlay_mat_cache[tag] = mat
 	return mat
 

@@ -28,6 +28,9 @@ func _initialize() -> void:
 	if not _test_terrain_mesh_dimensions():
 		quit(1)
 		return
+	if not _test_board_look_and_unit_blob():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -71,6 +74,64 @@ func _test_unit_scale_vs_cell() -> bool:
 		return false
 	if expected_h > cfg.cell_size * cfg.tile_inset:
 		push_error("GridBoardView: unit_world_height should fit inside cell inset")
+		return false
+	return true
+
+
+func _test_board_look_and_unit_blob() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	if cfg.look == null:
+		push_error("GridBoardView: board_config.tres should reference a BoardLook")
+		return false
+	var look := cfg.look
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	if view._key_light == null or view._environment == null:
+		push_error("GridBoardView: key light / environment missing after setup")
+		return false
+	if view._key_light.shadow_enabled != look.shadow_active():
+		push_error("GridBoardView: key light shadow should follow BoardLook.shadow_active()")
+		return false
+	if not view._key_light.light_color.is_equal_approx(look.key_color):
+		push_error("GridBoardView: key light color should come from BoardLook")
+		return false
+	if view._environment.adjustment_enabled != look.post_adjust_active():
+		push_error("GridBoardView: environment adjustment should follow BoardLook.post_adjust_active()")
+		return false
+	if not is_equal_approx(view._environment.adjustment_saturation, look.adjust_saturation):
+		push_error("GridBoardView: saturation should come from BoardLook")
+		return false
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		return true
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, 0, Vector2i(1, 1))
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	var spr := view._unit_sprites[unit] as Sprite3D
+	if spr.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+		push_error("GridBoardView: billboard unit should not cast a real shadow")
+		return false
+	if not view._unit_blobs.has(unit):
+		push_error("GridBoardView: unit foot blob missing")
+		return false
+	var blob := view._unit_blobs[unit] as MeshInstance3D
+	if blob.get_parent() == spr:
+		push_error("GridBoardView: foot blob must not be a child of the billboard sprite")
+		return false
+	view._process(0.0)
+	if absf(blob.position.x - spr.position.x) > 0.001 or absf(blob.position.z - spr.position.z) > 0.001:
+		push_error("GridBoardView: foot blob should follow the sprite on the ground plane")
+		return false
+	if blob.position.y <= cfg.tile_height or blob.position.y > cfg.tile_height + 0.05:
+		push_error("GridBoardView: foot blob y=%.3f should sit just above grass top" % blob.position.y)
+		return false
+	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
+	if view._unit_blobs.has(unit):
+		push_error("GridBoardView: foot blob should be freed with its unit")
 		return false
 	return true
 

@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="BoardConfig" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="BoardConfig" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/map/board_config.gd" id="1_boardcfg"]
+[ext_resource type="Resource" path="res://resources/map/board_look.tres" id="2_look"]
 
 [resource]
 script = ExtResource("1_boardcfg")
@@ -20,3 +21,4 @@ camera_zoom_max = 1.9
 camera_zoom_default = 1.0
 camera_pan_sensitivity = 0.02
 unit_world_height = 0.88
+look = ExtResource("2_look")
