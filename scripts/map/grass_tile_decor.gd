@@ -4,6 +4,8 @@ extends RefCounted
 
 const GLOBAL_SEED := 918273645
 const GRASS_TERRAIN_ID := &"grass"
+## 略高于草地格顶面（`tile_height`），避免与 toon 顶面共面闪烁（与 overlay 同量级）。
+const GRASS_PROP_FEET_LIFT := 0.006
 
 
 static func should_decorate(terrain_id: StringName) -> bool:
@@ -27,7 +29,7 @@ static func sync_cell(
 	var inset := config.cell_size * config.tile_inset
 	var half := inset * 0.42
 	var count := rng.randi_range(0, 3)
-	var top_y := config.tile_height
+	var slab_top := config.tile_height
 	for _i in count:
 		var tex: Texture2D = textures[rng.randi_range(0, textures.size() - 1)]
 		if tex == null:
@@ -35,7 +37,7 @@ static func sync_cell(
 		var spr := Sprite3D.new()
 		spr.name = "GrassProp"
 		spr.texture = tex
-		spr.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		spr.alpha_cut = SpriteBase3D.ALPHA_CUT_OPAQUE_PREPASS
 		spr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		spr.modulate = Color(1.0, 1.0, 1.0, rng.randf_range(0.92, 1.0))
@@ -43,9 +45,12 @@ static func sync_cell(
 		var tex_h := float(tex.get_height())
 		if tex_h > 0.0:
 			spr.pixel_size = world_h / tex_h
+		# Sprite3D 默认 centered：节点原点在中部，脚底 = position.y - world_h/2。
+		var feet_y := slab_top + GRASS_PROP_FEET_LIFT
+		var center_y := feet_y + world_h * 0.5
 		var ox := rng.randf_range(-half, half)
 		var oz := rng.randf_range(-half, half)
-		spr.position = Vector3(world_center.x + ox, top_y, world_center.z + oz)
+		spr.position = Vector3(world_center.x + ox, center_y, world_center.z + oz)
 		spr.rotation_degrees.y = rng.randf_range(0.0, 360.0)
 		host.add_child(spr)
 

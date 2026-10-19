@@ -349,8 +349,18 @@ func _test_grass_billboard_props() -> bool:
 			push_error("GridBoardView: grass prop should be Sprite3D")
 			return false
 		var spr := child as Sprite3D
-		if spr.billboard != BaseMaterial3D.BILLBOARD_FIXED_Y:
-			push_error("GridBoardView: grass prop should use Y-axis billboard")
+		if spr.billboard != BaseMaterial3D.BILLBOARD_ENABLED:
+			push_error("GridBoardView: grass prop should face camera like units (BILLBOARD_ENABLED)")
+			return false
+		var tex_h := float(spr.texture.get_height())
+		var world_h := spr.pixel_size * tex_h
+		var feet_y := spr.position.y - world_h * 0.5
+		var expect_feet := cfg.tile_height + GrassTileDecor.GRASS_PROP_FEET_LIFT
+		if absf(feet_y - expect_feet) > 0.002:
+			push_error(
+				"GridBoardView: grass prop feet y %.4f != slab top %.4f"
+				% [feet_y, expect_feet]
+			)
 			return false
 	view.set_terrain_cell(grass_cell, &"grass")
 	var grass_count_again := grass_host.get_child_count()
