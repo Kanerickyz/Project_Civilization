@@ -27,15 +27,15 @@ const WALL_GAP_U := 0.014
 const MERLON_SPANS_U: Array[Vector2] = [Vector2(-0.5, -0.29), Vector2(-0.11, 0.11), Vector2(0.29, 0.5)]
 const WALL_CLEAR_U := 0.15
 
-const GRASS_TOP_A := Color("7d9c42")
-const GRASS_TOP_B := Color("9aac52")
-const GRASS_SPOT := Color("b9a564")
-const GRASS_SIDE_TOP := Color("6c7f35")
-const GRASS_SIDE_BOTTOM := Color("5c4f33")
-const BLADE_BASE := Color("3b6222")
-const BLADE_TIP := Color("8fb443")
-const STONE_SIDE := Color("8e8a84")
-const STONE_TOP := Color("c4b896")
+const GRASS_TOP_A := Color("868d58")
+const GRASS_TOP_B := Color("9c9c62")
+const GRASS_SPOT := Color("b89c74")
+const GRASS_SIDE_TOP := Color("7a8150")
+const GRASS_SIDE_BOTTOM := Color("666242")
+const BLADE_BASE := Color("4f6a2a")
+const BLADE_TIP := Color("93a24a")
+const STONE_SIDE := Color("7f7a72")
+const STONE_TOP := Color("b5ae9b")
 const MORTAR := Color("3b352e")
 
 var _cell := 1.0
@@ -255,7 +255,7 @@ func _stone(st: SurfaceTool, rng: RandomNumberGenerator, x0: float, x1: float, y
 	var warm := rng.randf_range(0.0, 0.12)
 	var side := STONE_SIDE.lerp(STONE_TOP, warm)
 	side = Color(side.r + shade, side.g + shade, side.b + shade * 0.8)
-	var top := STONE_TOP.lerp(Color("e0d6bb"), 0.4 if crest else 0.0)
+	var top := STONE_TOP.lerp(Color("c6bfab"), 0.4 if crest else 0.0)
 	top = Color(top.r + shade * 0.6, top.g + shade * 0.6, top.b + shade * 0.5)
 	side.a = 0.0
 	top.a = 0.0
@@ -266,10 +266,13 @@ func _stone(st: SurfaceTool, rng: RandomNumberGenerator, x0: float, x1: float, y
 	_box(st, Vector3(lo_x, y0 + gap * 0.5, -t), Vector3(hi_x, h_top, t), side, top)
 
 
-## 五面盒（省略底面）；侧面自下而上微微提亮，顶面单独上色。
+## 五面盒（省略底面）；侧面下暗上亮（上沿近似手绘边缘高光），顶面单独上色。
 func _box(st: SurfaceTool, lo: Vector3, hi: Vector3, side: Color, top: Color) -> void:
-	var side_lo := side.darkened(0.12)
+	var side_lo := side.darkened(0.2)
 	side_lo.a = side.a
+	var side_hi := side.lightened(0.1)
+	side_hi.a = side.a
+	side = side_hi
 	_quad(st, Vector3(lo.x, hi.y, lo.z), Vector3(lo.x, hi.y, hi.z), Vector3(hi.x, hi.y, hi.z), Vector3(hi.x, hi.y, lo.z), Vector3.UP, top, top, top, top)
 	_quad(st, Vector3(hi.x, lo.y, lo.z), Vector3(hi.x, hi.y, lo.z), Vector3(hi.x, hi.y, hi.z), Vector3(hi.x, lo.y, hi.z), Vector3.RIGHT, side_lo, side, side, side_lo)
 	_quad(st, Vector3(lo.x, lo.y, lo.z), Vector3(lo.x, hi.y, lo.z), Vector3(lo.x, hi.y, hi.z), Vector3(lo.x, lo.y, hi.z), Vector3.LEFT, side_lo, side, side, side_lo)
