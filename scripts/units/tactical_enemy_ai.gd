@@ -7,6 +7,8 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 
 ## 对手行动段最小启发式：逐单位行动，能攻则攻，否则消耗移动力向最近玩家靠近。
 
+const _UNREACHABLE_BASE := 10000
+
 
 static func sorted_opponents(board: TacticalBoard) -> Array[TacticalUnitInstance]:
 	var opponents: Array[TacticalUnitInstance] = []
@@ -76,12 +78,17 @@ static func _best_step_toward_player(
 	if players.is_empty():
 		return reachable[0]
 
+	# 用路径距离（绕墙）而非切比雪夫，避免贴墙卡死；无墙时两者相同。
+	var player_dist: Array[Dictionary] = []
+	for p in players:
+		player_dist.append(board.path_distances_from(p.cell))
 	var best_dest: Vector2i = reachable[0]
 	var best_dist := 999999
 	for dest in reachable:
 		var min_d := 999999
-		for p in players:
-			min_d = mini(min_d, GridMathScript.chebyshev(dest, p.cell))
+		for i in players.size():
+			var d: int = int(player_dist[i].get(dest, _UNREACHABLE_BASE + GridMathScript.chebyshev(dest, players[i].cell)))
+			min_d = mini(min_d, d)
 		if min_d < best_dist:
 			best_dist = min_d
 			best_dest = dest
