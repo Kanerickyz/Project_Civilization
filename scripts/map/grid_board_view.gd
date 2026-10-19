@@ -15,8 +15,12 @@ var _units_root: Node3D
 var _camera: Camera3D
 var _pivot: Node3D
 var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
-var _mesh_cache: Dictionary = {}
-var _mat_cache: Dictionary = {}
+var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
+var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
+var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
+var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
+var _overlay_mesh: PlaneMesh
+var _catalog: TerrainCatalog
 
 var _target: Vector3 = Vector3.ZERO
 var _zoom: float = 1.0
@@ -28,9 +32,14 @@ var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
-const MapTerrainTypeScript := preload("res://scripts/map/map_terrain_type.gd")
+const OVERLAY_LIFT := 0.005
+const OVERLAY_COLORS := {
+	"s": Color(0.35, 0.56, 0.83, 0.5),
+	"m": Color(0.42, 1.0, 0.72, 0.58),
+	"a": Color(0.82, 0.28, 0.31, 0.5),
+}
 
-var _terrain_cells: Dictionary = {} # Vector2i -> int (MapTerrainType.Id)
+var _terrain_cells: Dictionary = {} # Vector2i -> StringName（TerrainTypeDef.id）
 
 var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite3D
 var _overlay_selected: Vector2i = Vector2i(-1, -1)
@@ -57,23 +66,54 @@ func setup(p_config: BoardConfig) -> void:
 	_apply_camera()
 
 
+func set_terrain_catalog(catalog: TerrainCatalog) -> void:
+	_catalog = catalog
+	for cell in _tile_nodes.keys():
+		_apply_tile_visual(cell)
+
+
 func clear_terrain_paint() -> void:
 	_terrain_cells.clear()
 	for cell in _tile_nodes.keys():
 		_apply_tile_visual(cell)
 
 
+## cells: Vector2i -> StringName 地块 id；未列出的格为 catalog.default_id。
 func set_terrain_cells(cells: Dictionary) -> void:
-	_terrain_cells = cells.duplicate()
+	_terrain_cells.clear()
+	for key in cells.keys():
+		if key is Vector2i:
+			_terrain_cells[key] = _normalize_terrain_id(cells[key])
 	for cell in _tile_nodes.keys():
 		_apply_tile_visual(cell)
 
 
-func set_terrain_cell(cell: Vector2i, terrain_id: int) -> void:
+func set_terrain_cell(cell: Vector2i, terrain_id: StringName) -> void:
 	if not _tile_nodes.has(cell):
 		return
-	_terrain_cells[cell] = terrain_id
+	_terrain_cells[cell] = _normalize_terrain_id(terrain_id)
 	_apply_tile_visual(cell)
+	for d in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		_apply_tile_visual(cell + (d as Vector2i))
+
+
+func terrain_id_at(cell: Vector2i) -> StringName:
+	var cat := _get_catalog()
+	return cat.resolve_id(StringName(_terrain_cells.get(cell, cat.default_id)))
+
+
+func _get_catalog() -> TerrainCatalog:
+	if _catalog == null:
+		_catalog = TerrainCatalog.load_default()
+	return _catalog
+
+
+func _normalize_terrain_id(value: Variant) -> StringName:
+	var cat := _get_catalog()
+	if value is int:
+		push_warning("GridBoardView: legacy int terrain code %d; pass TerrainTypeDef.id" % int(value))
+		return cat.from_legacy_code(int(value))
+	return cat.resolve_id(StringName(str(value)))
 
 
 func _ready() -> void:
@@ -103,18 +143,19 @@ func _ensure_viewport_tree() -> void:
 	_viewport.add_child(_world_root)
 
 	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-45.0, 45.0, 0.0)
-	light.light_energy = 1.25
+	light.rotation_degrees = Vector3(-52.0, 20.0, 0.0)
+	light.light_color = Color("fff6e6")
+	light.light_energy = 0.72
 	light.shadow_enabled = false
 	_world_root.add_child(light)
 
 	var ambient := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("1a2430")
+	env.background_color = Color("3a4629")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("6a7a8c")
-	env.ambient_light_energy = 0.55
+	env.ambient_light_color = Color("8a96a8")
+	env.ambient_light_energy = 0.26
 	ambient.environment = env
 	_world_root.add_child(ambient)
 
@@ -171,16 +212,29 @@ func _rebuild_board() -> void:
 	for child in _units_root.get_children():
 		child.queue_free()
 	_tile_nodes.clear()
+	_overlay_nodes.clear()
 
 	var cell_size := config.cell_size
+	_overlay_mesh = PlaneMesh.new()
+	_overlay_mesh.size = Vector2.ONE * cell_size * config.tile_inset
 	for gx in range(config.grid_width):
 		for gy in range(config.grid_height):
 			var cell := Vector2i(gx, gy)
 			var mi := MeshInstance3D.new()
+			mi.name = "Tile_%d_%d" % [gx, gy]
 			mi.position = _cell_to_world(cell, cell_size)
 			_tiles_root.add_child(mi)
 			_tile_nodes[cell] = mi
-			_apply_tile_visual(cell)
+			var ov := MeshInstance3D.new()
+			ov.name = "Overlay_%d_%d" % [gx, gy]
+			ov.mesh = _overlay_mesh
+			ov.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			ov.position = Vector3(mi.position.x, config.tile_height + OVERLAY_LIFT, mi.position.z)
+			ov.visible = false
+			_tiles_root.add_child(ov)
+			_overlay_nodes[cell] = ov
+	for cell in _tile_nodes.keys():
+		_apply_tile_visual(cell)
 
 
 func sync_tactical_units(
@@ -191,7 +245,6 @@ func sync_tactical_units(
 ) -> void:
 	if config == null or _units_root == null:
 		return
-	_mat_cache.clear()
 	_overlay_selected = selected_cell
 	_overlay_move.clear()
 	for c in move_cells:
@@ -210,8 +263,8 @@ func sync_tactical_units(
 	for key in _unit_sprites.keys():
 		if not alive.has(key):
 			_remove_unit_visual(key)
-	for cell in _tile_nodes.keys():
-		_apply_tile_visual(cell)
+	for cell in _overlay_nodes.keys():
+		_apply_overlay(cell)
 
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
@@ -373,47 +426,80 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	if config == null or not _tile_nodes.has(cell):
 		return
 	var mi: MeshInstance3D = _tile_nodes[cell] as MeshInstance3D
-	var inset := config.cell_size * config.tile_inset
-	var height := config.tile_height
-	var key := "%.3f_%.3f" % [inset, height]
-	if not _mesh_cache.has(key):
-		var box := BoxMesh.new()
-		box.size = Vector3(inset, height, inset)
-		_mesh_cache[key] = box
-	mi.mesh = _mesh_cache[key] as Mesh
-	var checker := (cell.x + cell.y) % 2 == 0
-	var color: Color
-	if _terrain_cells.has(cell):
-		var base := MapTerrainTypeScript.color_for(int(_terrain_cells[cell]))
-		color = base.lerp(config.color_light if checker else config.color_dark, 0.12)
+	var terrain_id := terrain_id_at(cell)
+	var def := _get_catalog().get_def(terrain_id)
+	if def != null and def.mesh != null:
+		if mi.mesh != def.mesh:
+			mi.mesh = def.mesh
+		for i in def.mesh.get_surface_count():
+			var mat: Material = def.surface_materials[i] if i < def.surface_materials.size() else null
+			mi.set_surface_override_material(i, mat)
 	else:
-		color = config.color_light if checker else config.color_dark
-	if cell == _overlay_selected:
-		color = color.lerp(Color("5a8fd4"), 0.52)
-	elif _overlay_attack.has(cell):
-		color = color.lerp(Color("d04850"), 0.58)
-	elif _overlay_move.has(cell):
-		color = color.lerp(Color("40c870"), 0.55)
-	var overlay_tag := "n"
-	if cell == _overlay_selected:
-		overlay_tag = "s"
-	elif _overlay_attack.has(cell):
-		overlay_tag = "a"
-	elif _overlay_move.has(cell):
-		overlay_tag = "m"
-	mi.material_override = _material_for(
-		"tile_%d_%d_%d_%s" % [int(checker), cell.x, cell.y, overlay_tag], color
-	)
+		mi.mesh = _fallback_mesh()
+		mi.set_surface_override_material(0, _fallback_material(terrain_id, def))
+	mi.rotation = Vector3(0.0, _tile_yaw(cell, terrain_id, def), 0.0)
+	_apply_overlay(cell)
 
 
-func _material_for(key: String, color: Color) -> StandardMaterial3D:
-	if _mat_cache.has(key):
-		return _mat_cache[key] as StandardMaterial3D
+## 直线型地块：仅南北有同类且东西都无同类时转 90°；其余地块按格哈希旋转 90° 倍数以打散重复纹样。
+func _tile_yaw(cell: Vector2i, terrain_id: StringName, def: TerrainTypeDef) -> float:
+	if def != null and def.orient_to_neighbors:
+		var ns := _same_terrain(cell + Vector2i.UP, terrain_id) or _same_terrain(cell + Vector2i.DOWN, terrain_id)
+		var ew := _same_terrain(cell + Vector2i.LEFT, terrain_id) or _same_terrain(cell + Vector2i.RIGHT, terrain_id)
+		return PI * 0.5 if ns and not ew else 0.0
+	var h := absi(cell.x * 73856093 ^ cell.y * 19349663)
+	return PI * 0.5 * float(h % 4)
+
+
+func _same_terrain(cell: Vector2i, terrain_id: StringName) -> bool:
+	return _tile_nodes.has(cell) and terrain_id_at(cell) == terrain_id
+
+
+func _apply_overlay(cell: Vector2i) -> void:
+	if not _overlay_nodes.has(cell):
+		return
+	var ov: MeshInstance3D = _overlay_nodes[cell] as MeshInstance3D
+	var tag := ""
+	if cell == _overlay_selected:
+		tag = "s"
+	elif _overlay_attack.has(cell):
+		tag = "a"
+	elif _overlay_move.has(cell):
+		tag = "m"
+	ov.visible = tag != ""
+	if tag != "":
+		ov.material_override = _overlay_material(tag)
+
+
+func _overlay_material(tag: String) -> StandardMaterial3D:
+	if _overlay_mat_cache.has(tag):
+		return _overlay_mat_cache[tag] as StandardMaterial3D
 	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
-	mat.albedo_color = color
-	mat.roughness = 0.88
-	_mat_cache[key] = mat
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_overlay_mat_cache[tag] = mat
+	return mat
+
+
+func _fallback_mesh() -> BoxMesh:
+	var inset := config.cell_size * config.tile_inset
+	var key := "%.3f_%.3f" % [inset, config.tile_height]
+	if not _fallback_mesh_cache.has(key):
+		var box := BoxMesh.new()
+		box.size = Vector3(inset, config.tile_height, inset)
+		_fallback_mesh_cache[key] = box
+	return _fallback_mesh_cache[key] as BoxMesh
+
+
+func _fallback_material(terrain_id: StringName, def: TerrainTypeDef) -> StandardMaterial3D:
+	if _fallback_mat_cache.has(terrain_id):
+		return _fallback_mat_cache[terrain_id] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = def.editor_color if def != null else Color("6f9a3c")
+	mat.roughness = 0.9
+	_fallback_mat_cache[terrain_id] = mat
 	return mat
 
 

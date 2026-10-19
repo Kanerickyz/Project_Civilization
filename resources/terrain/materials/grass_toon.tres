@@ -1,0 +1,21 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://resources/terrain/shaders/terrain_toon.gdshader" id="1_toon"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_toon")
+shader_parameter/albedo_tint = Color(1, 1, 1, 1)
+shader_parameter/shadow_level = 0.5
+shader_parameter/mid_level = 0.8
+shader_parameter/mid_threshold = 0.1
+shader_parameter/lit_threshold = 0.5
+shader_parameter/band_softness = 0.05
+shader_parameter/shadow_tint = Color(0.68, 0.74, 0.8, 1)
+shader_parameter/patch_color = Color(0.7, 0.6, 0.36, 1)
+shader_parameter/patch_strength = 0.42
+shader_parameter/patch_scale = 0.75
+shader_parameter/patch_coverage = 0.66
+shader_parameter/patch_edge = 0.05
+shader_parameter/grain_strength = 0.06
+shader_parameter/grain_scale = 9.0

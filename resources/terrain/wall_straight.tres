@@ -1,6 +1,9 @@
-[gd_resource type="Resource" script_class="TerrainTypeDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="TerrainTypeDef" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/map/terrain_type_def.gd" id="1_tdef"]
+[ext_resource type="ArrayMesh" path="res://resources/terrain/meshes/wall_straight.tres" id="2_mesh"]
+[ext_resource type="Material" path="res://resources/terrain/materials/grass_toon.tres" id="3_grass"]
+[ext_resource type="Material" path="res://resources/terrain/materials/stone_toon.tres" id="4_stone"]
 
 [resource]
 script = ExtResource("1_tdef")
@@ -9,4 +12,6 @@ display_name = "直城墙"
 passable = false
 legacy_code = 1
 editor_color = Color(0.556863, 0.533333, 0.5, 1)
+mesh = ExtResource("2_mesh")
+surface_materials = Array[Material]([ExtResource("3_grass"), ExtResource("4_stone")])
 orient_to_neighbors = true
