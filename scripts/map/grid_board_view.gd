@@ -11,16 +11,19 @@ var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _world_root: Node3D
 var _tiles_root: Node3D
+var _grass_props_root: Node3D
 var _units_root: Node3D
 var _camera: Camera3D
 var _pivot: Node3D
 var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
+var _grass_prop_hosts: Dictionary = {} # Vector2i -> Node3D
 var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
 var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
 var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
 var _overlay_mesh: PlaneMesh
 var _catalog: TerrainCatalog
+var _grass_props: GrassPropCatalog
 var _key_light: DirectionalLight3D
 var _environment: Environment
 var _blob_mesh: PlaneMesh
@@ -177,6 +180,10 @@ func _ensure_viewport_tree() -> void:
 	_tiles_root.name = "Tiles"
 	_world_root.add_child(_tiles_root)
 
+	_grass_props_root = Node3D.new()
+	_grass_props_root.name = "GrassProps"
+	_world_root.add_child(_grass_props_root)
+
 	_units_root = Node3D.new()
 	_units_root.name = "Units"
 	_world_root.add_child(_units_root)
@@ -250,6 +257,7 @@ func _rebuild_board() -> void:
 	for child in _units_root.get_children():
 		child.queue_free()
 	_tile_nodes.clear()
+	_grass_prop_hosts.clear()
 	_overlay_nodes.clear()
 	_unit_sprites.clear()
 	_unit_blobs.clear()
@@ -275,6 +283,10 @@ func _rebuild_board() -> void:
 			ov.visible = false
 			_tiles_root.add_child(ov)
 			_overlay_nodes[cell] = ov
+			var prop_host := Node3D.new()
+			prop_host.name = "GrassProps_%d_%d" % [gx, gy]
+			_grass_props_root.add_child(prop_host)
+			_grass_prop_hosts[cell] = prop_host
 	for cell in _tile_nodes.keys():
 		_apply_tile_visual(cell)
 
@@ -534,7 +546,29 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		mi.mesh = _fallback_mesh()
 		mi.set_surface_override_material(0, _fallback_material(terrain_id, def))
 	mi.rotation = Vector3(0.0, _tile_yaw(cell, terrain_id, def), 0.0)
+	_sync_grass_props(cell, terrain_id)
 	_apply_overlay(cell)
+
+
+func _grass_prop_catalog() -> GrassPropCatalog:
+	if _grass_props == null:
+		_grass_props = GrassPropCatalog.load_default()
+	return _grass_props
+
+
+func _sync_grass_props(cell: Vector2i, terrain_id: StringName) -> void:
+	if not _grass_prop_hosts.has(cell):
+		return
+	var host: Node3D = _grass_prop_hosts[cell] as Node3D
+	var catalog := _grass_prop_catalog()
+	GrassTileDecor.sync_cell(
+		host,
+		cell,
+		_cell_to_world(cell, config.cell_size),
+		config,
+		catalog.prop_textures,
+		terrain_id
+	)
 
 
 ## 直线型地块：仅南北有同类且东西都无同类时转 90°；其余地块按格哈希旋转 90° 倍数以打散重复纹样。

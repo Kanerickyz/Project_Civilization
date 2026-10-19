@@ -13,7 +13,6 @@ const WALL_OUT := OUT_DIR + "/wall_straight.tres"
 const GRASS_SEED := 20261019
 const WALL_SEED := 7731
 const GRASS_TOP_DIVS := 4
-const GRASS_TUFTS := 5
 
 ## 墙端石块齐 ±cell/2（相邻墙格首尾相接），灰缝芯体内缩一条缝宽，避免穿出与共面闪烁。
 ## 以下比例单位均为 U（= cell_size），来自三视图参考。
@@ -25,15 +24,11 @@ const WALL_ROWS := 4
 const WALL_STONE_LEN_U := 0.25
 const WALL_GAP_U := 0.014
 const MERLON_SPANS_U: Array[Vector2] = [Vector2(-0.5, -0.29), Vector2(-0.11, 0.11), Vector2(0.29, 0.5)]
-const WALL_CLEAR_U := 0.15
-
 const GRASS_TOP_A := Color("868d58")
 const GRASS_TOP_B := Color("9c9c62")
 const GRASS_SPOT := Color("b89c74")
 const GRASS_SIDE_TOP := Color("7a8150")
 const GRASS_SIDE_BOTTOM := Color("666242")
-const BLADE_BASE := Color("4f6a2a")
-const BLADE_TIP := Color("93a24a")
 const STONE_SIDE := Color("7f7a72")
 const STONE_TOP := Color("b5ae9b")
 const MORTAR := Color("3b352e")
@@ -55,9 +50,9 @@ func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 
 	var grass := ArrayMesh.new()
-	_add_surface(grass, _build_grass(GRASS_SEED, false))
+	_add_surface(grass, _build_grass(GRASS_SEED))
 	var wall := ArrayMesh.new()
-	_add_surface(wall, _build_grass(GRASS_SEED + 1, true))
+	_add_surface(wall, _build_grass(GRASS_SEED + 1))
 	_add_surface(wall, _build_wall_stone(WALL_SEED))
 
 	for pair in [[grass, GRASS_OUT], [wall, WALL_OUT]]:
@@ -110,7 +105,7 @@ func _vert(st: SurfaceTool, v: Vector3, n: Vector3, c: Color) -> void:
 	st.add_vertex(v)
 
 
-func _build_grass(seed_value: int, keep_center_clear: bool) -> SurfaceTool:
+func _build_grass(seed_value: int) -> SurfaceTool:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var st := SurfaceTool.new()
@@ -159,44 +154,7 @@ func _build_grass(seed_value: int, keep_center_clear: bool) -> SurfaceTool:
 			nn, side_b, side_t, side_t, side_b
 		)
 
-	var placed := 0
-	var guard := 0
-	while placed < GRASS_TUFTS and guard < 200:
-		guard += 1
-		var px := rng.randf_range(-half * 0.8, half * 0.8)
-		var pz := rng.randf_range(-half * 0.8, half * 0.8)
-		if keep_center_clear and absf(pz) < WALL_CLEAR_U * _cell:
-			continue
-		_add_tuft(st, rng, Vector3(px, top, pz))
-		placed += 1
 	return st
-
-
-func _add_tuft(st: SurfaceTool, rng: RandomNumberGenerator, base: Vector3) -> void:
-	var base_c := BLADE_BASE
-	var tip_c := BLADE_TIP.lerp(GRASS_TOP_B, rng.randf_range(0.0, 0.4))
-	base_c.a = 0.0
-	tip_c.a = 0.0
-	var yaw0 := rng.randf_range(0.0, TAU)
-	for i in 3:
-		var yaw := yaw0 + TAU * i / 3.0 + rng.randf_range(-0.3, 0.3)
-		var dir := Vector3(cos(yaw), 0.0, sin(yaw))
-		var side := Vector3(-dir.z, 0.0, dir.x)
-		var w := rng.randf_range(0.03, 0.04) * _cell
-		var h := rng.randf_range(0.065, 0.095) * _cell
-		var lean := rng.randf_range(0.02, 0.04) * _cell
-		var a := base - side * w * 0.5 + dir * 0.006
-		var b := base + side * w * 0.5 + dir * 0.006
-		var tip := base + dir * lean + Vector3(0.0, h, 0.0)
-		for flip in [false, true]:
-			if flip:
-				_vert(st, a, Vector3.UP, base_c)
-				_vert(st, b, Vector3.UP, base_c)
-				_vert(st, tip, Vector3.UP, tip_c)
-			else:
-				_vert(st, a, Vector3.UP, base_c)
-				_vert(st, tip, Vector3.UP, tip_c)
-				_vert(st, b, Vector3.UP, base_c)
 
 
 func _build_wall_stone(seed_value: int) -> SurfaceTool:

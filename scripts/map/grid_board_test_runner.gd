@@ -31,6 +31,9 @@ func _initialize() -> void:
 	if not _test_board_look_and_unit_blob():
 		quit(1)
 		return
+	if not _test_grass_billboard_props():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -310,6 +313,51 @@ func _surface_aabb(mesh: Mesh, surface: int) -> AABB:
 	for v in verts:
 		box = box.expand(v)
 	return box
+
+
+func _test_grass_billboard_props() -> bool:
+	var catalog := GrassPropCatalog.load_default()
+	if catalog.prop_textures.is_empty():
+		push_error("GridBoardView: grass prop catalog textures missing")
+		return false
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 6
+	cfg.grid_height = 6
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var grass_cell := Vector2i(2, 2)
+	var wall_cell := Vector2i(1, 1)
+	view.set_terrain_cells({wall_cell: &"wall_straight"})
+	var grass_host: Node3D = view._grass_prop_hosts[grass_cell] as Node3D
+	var wall_host: Node3D = view._grass_prop_hosts[wall_cell] as Node3D
+	if grass_host == null or wall_host == null:
+		push_error("GridBoardView: grass prop host nodes missing")
+		return false
+	var grass_count := grass_host.get_child_count()
+	if grass_count < 0 or grass_count > 3:
+		push_error("GridBoardView: grass cell prop count %d out of 0..3" % grass_count)
+		return false
+	if wall_host.get_child_count() != 0:
+		push_error("GridBoardView: wall cell should have no grass billboards")
+		return false
+	for child in grass_host.get_children():
+		if not child is Sprite3D:
+			push_error("GridBoardView: grass prop should be Sprite3D")
+			return false
+		var spr := child as Sprite3D
+		if spr.billboard != BaseMaterial3D.BILLBOARD_FIXED_Y:
+			push_error("GridBoardView: grass prop should use Y-axis billboard")
+			return false
+	view.set_terrain_cell(grass_cell, &"grass")
+	var grass_count_again := grass_host.get_child_count()
+	if grass_count_again != grass_count:
+		push_error("GridBoardView: grass props should be stable for the same cell seed")
+		return false
+	return true
 
 
 func _test_pan_vertical_intuitive() -> bool:
