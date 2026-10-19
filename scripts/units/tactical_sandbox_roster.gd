@@ -21,10 +21,10 @@ const PLAYER_CELLS: Array[Vector2i] = [
 ]
 
 const OPPONENT_CELLS: Array[Vector2i] = [
-	Vector2i(8, 2),
-	Vector2i(8, 4),
-	Vector2i(8, 6),
-	Vector2i(7, 4),
+	Vector2i(6, 2),
+	Vector2i(6, 4),
+	Vector2i(6, 6),
+	Vector2i(5, 4),
 ]
 
 
