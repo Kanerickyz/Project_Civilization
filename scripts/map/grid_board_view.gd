@@ -18,6 +18,8 @@ var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
 var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
+var _grass_checker_mats: Dictionary = {} # int parity -> Material（棋盘格 + 收影）
+var _wall_stone_unshaded: StandardMaterial3D
 var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
 var _overlay_mesh: PlaneMesh
 var _catalog: TerrainCatalog
@@ -44,6 +46,12 @@ const OVERLAY_COLORS := {
 	"m": Color(0.42, 1.0, 0.72, 0.58),
 	"a": Color(0.82, 0.28, 0.31, 0.5),
 }
+## 草地棋盘格：浅 / 深（按格 (x+y)%2）；城墙等地块用 catalog 原材质。
+const GRASS_CHECKER_LIGHT := Color("B4A158")
+const GRASS_CHECKER_DARK := Color("8F884C")
+## 墙身石砖顶点色（与 generate_terrain_meshes 一致；材质 UNSHADED + 顶点色作 albedo）
+const WALL_STONE_LIGHT := Color("9c958c")
+const WALL_STONE_DARK := Color("716c65")
 
 var _terrain_cells: Dictionary = {} # Vector2i -> StringName（TerrainTypeDef.id）
 
@@ -188,8 +196,8 @@ func _look() -> BoardLook:
 	return BoardLook.new()
 
 
-## 暖色主光 + 冷色天光（环境光）+ 柔和投影 + tonemap / 调色。Compatibility 与 Web 均支持；
-## Web 回退见 BoardLook.shadow_active() / post_adjust_active()。
+## 暖色主光 + 冷色天光（环境光）+ 柔和投影。Compatibility 与 Web 均支持；
+## Web 回退见 BoardLook.shadow_active()。
 func _apply_look() -> void:
 	if _key_light == null or _environment == null:
 		return
@@ -207,13 +215,6 @@ func _apply_look() -> void:
 	_environment.background_color = look.background_color
 	_environment.ambient_light_color = look.ambient_color
 	_environment.ambient_light_energy = look.ambient_energy
-	_environment.tonemap_mode = look.tonemap_mode
-	_environment.tonemap_exposure = look.tonemap_exposure
-	_environment.tonemap_white = look.tonemap_white
-	_environment.adjustment_enabled = look.post_adjust_active()
-	_environment.adjustment_brightness = look.adjust_brightness
-	_environment.adjustment_contrast = look.adjust_contrast
-	_environment.adjustment_saturation = look.adjust_saturation
 	_blob_mesh = null
 	_blob_material = null
 
@@ -518,6 +519,43 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 		bar.modulate = Color("e8f0ff")
 
 
+func _terrain_surface_material(cell: Vector2i, terrain_id: StringName, def: TerrainTypeDef, surface: int) -> Material:
+	if def.surface_materials.size() <= surface:
+		return null
+	var base: Material = def.surface_materials[surface]
+	if surface == 0 and _uses_grass_checker_surface(terrain_id):
+		var parity: int = (cell.x + cell.y) & 1
+		return _grass_checker_material(parity)
+	if surface == 1 and terrain_id == &"wall_straight":
+		return _wall_stone_unshaded_material(def)
+	return base
+
+
+func _uses_grass_checker_surface(terrain_id: StringName) -> bool:
+	return terrain_id == _get_catalog().default_id or terrain_id == &"wall_straight"
+
+
+func _grass_checker_material(parity: int) -> Material:
+	if _grass_checker_mats.has(parity):
+		return _grass_checker_mats[parity] as Material
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
+	_grass_checker_mats[parity] = mat
+	return mat
+
+
+func _wall_stone_unshaded_material(def: TerrainTypeDef) -> StandardMaterial3D:
+	if _wall_stone_unshaded != null:
+		return _wall_stone_unshaded
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color.WHITE
+	mat.vertex_color_use_as_albedo = true
+	_wall_stone_unshaded = mat
+	return mat
+
+
 func _apply_tile_visual(cell: Vector2i) -> void:
 	if config == null or not _tile_nodes.has(cell):
 		return
@@ -528,7 +566,7 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		if mi.mesh != def.mesh:
 			mi.mesh = def.mesh
 		for i in def.mesh.get_surface_count():
-			var mat: Material = def.surface_materials[i] if i < def.surface_materials.size() else null
+			var mat: Material = _terrain_surface_material(cell, terrain_id, def, i)
 			mi.set_surface_override_material(i, mat)
 	else:
 		mi.mesh = _fallback_mesh()

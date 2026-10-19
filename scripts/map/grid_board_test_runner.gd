@@ -22,6 +22,9 @@ func _initialize() -> void:
 	if not _test_overlay_planes():
 		quit(1)
 		return
+	if not _test_grass_checker_materials():
+		quit(1)
+		return
 	if not _test_terrain_meshes_and_orientation():
 		quit(1)
 		return
@@ -99,22 +102,18 @@ func _test_board_look_and_unit_blob() -> bool:
 	if not view._key_light.light_color.is_equal_approx(look.key_color):
 		push_error("GridBoardView: key light color should come from BoardLook")
 		return false
-	if view._environment.adjustment_enabled != look.post_adjust_active():
-		push_error("GridBoardView: environment adjustment should follow BoardLook.post_adjust_active()")
-		return false
-	if not is_equal_approx(view._environment.adjustment_saturation, look.adjust_saturation):
-		push_error("GridBoardView: saturation should come from BoardLook")
+	if view._environment.adjustment_enabled:
+		push_error("GridBoardView: environment should not enable full-screen color adjustment")
 		return false
 	var web_look := look.duplicate() as BoardLook
 	web_look.shadow_enabled = true
-	web_look.shadow_on_web = false
-	web_look.post_adjust_enabled = true
-	web_look.post_adjust_on_web = false
-	if not web_look.shadow_active(false) or web_look.shadow_active(true):
-		push_error("BoardLook: shadow should stay on natively and fall back off on Web")
+	web_look.shadow_on_web = true
+	if not web_look.shadow_active(false) or not web_look.shadow_active(true):
+		push_error("BoardLook: shadow should stay on for desktop and Web when shadow_on_web=true")
 		return false
-	if not web_look.post_adjust_active(false) or web_look.post_adjust_active(true):
-		push_error("BoardLook: post adjust should stay on natively and fall back off on Web")
+	web_look.shadow_on_web = false
+	if web_look.shadow_active(true):
+		push_error("BoardLook: shadow_on_web=false should disable shadows on Web only")
 		return false
 	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
 	if def == null:
@@ -212,6 +211,76 @@ func _test_overlay_planes() -> bool:
 	return true
 
 
+func _test_grass_checker_materials() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 3
+	cfg.grid_height = 3
+	var host := Control.new()
+	host.size = Vector2(320, 240)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var a := Vector2i(0, 0)
+	var b := Vector2i(1, 0)
+	var wall := Vector2i(0, 1)
+	view.set_terrain_cell(wall, &"wall_straight")
+	var mat_a: Material = view._tile_nodes[a].get_surface_override_material(0) as Material
+	var mat_b: Material = view._tile_nodes[b].get_surface_override_material(0) as Material
+	if mat_a == null or mat_b == null:
+		push_error("GridBoardView: grass checker materials missing")
+		return false
+	if mat_a == mat_b:
+		push_error("GridBoardView: adjacent parity grass should use different checker tints")
+		return false
+	if not _is_grass_checker_material(mat_a) or not _is_grass_checker_material(mat_b):
+		push_error("GridBoardView: grass should use unshaded checker StandardMaterial3D")
+		return false
+	var std_a := mat_a as StandardMaterial3D
+	var std_b := mat_b as StandardMaterial3D
+	if not std_a.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
+		push_error("GridBoardView: (0,0) should use light checker, got %s" % std_a.albedo_color)
+		return false
+	if not std_b.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: (1,0) should use dark checker, got %s" % std_b.albedo_color)
+		return false
+	var wall_mi: MeshInstance3D = view._tile_nodes[wall] as MeshInstance3D
+	var wall_top: Material = wall_mi.get_surface_override_material(0)
+	if not _is_grass_checker_material(wall_top):
+		push_error("GridBoardView: wall grass surface should use same checker material as plain grass")
+		return false
+	var wall_std := wall_top as StandardMaterial3D
+	if not wall_std.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: wall at (0,1) should use dark checker parity, got %s" % wall_std.albedo_color)
+		return false
+	var wall_stone: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
+	if not _is_wall_stone_checker_material(wall_stone):
+		push_error("GridBoardView: wall stone surface should be unshaded vertex-color StandardMaterial3D")
+		return false
+	if wall_mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_ON:
+		push_error("GridBoardView: terrain tiles should cast realtime shadows (wall included)")
+		return false
+	return true
+
+
+func _is_grass_checker_material(mat: Material) -> bool:
+	if mat is StandardMaterial3D:
+		var std := mat as StandardMaterial3D
+		return std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
+	return false
+
+
+func _is_wall_stone_checker_material(mat: Material) -> bool:
+	if mat is StandardMaterial3D:
+		var std := mat as StandardMaterial3D
+		return (
+			std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
+			and std.vertex_color_use_as_albedo
+			and std.albedo_color.is_equal_approx(Color.WHITE)
+		)
+	return false
+
+
 func _test_terrain_meshes_and_orientation() -> bool:
 	var catalog := TerrainCatalog.load_default()
 	var grass_def := catalog.get_def(&"grass")
@@ -245,8 +314,12 @@ func _test_terrain_meshes_and_orientation() -> bool:
 	if grass_mi.mesh != grass_def.mesh:
 		push_error("GridBoardView: grass cell mesh should be grass def mesh")
 		return false
-	if wall_mi.get_surface_override_material(1) != wall_def.surface_materials[1]:
-		push_error("GridBoardView: wall stone surface should use shared def material")
+	var stone_mat: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
+	if stone_mat == null or stone_mat.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
+		push_error("GridBoardView: wall stone surface should be unshaded override")
+		return false
+	if not _is_wall_stone_checker_material(stone_mat):
+		push_error("GridBoardView: wall stone should use unshaded two-gray vertex-color material")
 		return false
 	if not is_equal_approx(wall_mi.rotation.y, PI * 0.5):
 		push_error("GridBoardView: vertical wall run should rotate 90° (got %.3f)" % wall_mi.rotation.y)

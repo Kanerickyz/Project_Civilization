@@ -21,7 +21,7 @@ extends Resource
 @export var camera_zoom_max: float = 1.9
 @export var camera_zoom_default: float = 1.0
 @export var camera_pan_sensitivity: float = 0.02
-## 灯光 / 投影 / 调色（resources/map/board_look.tres）；为空时用 BoardLook 默认值。
+## 灯光 / 投影 / 背景（resources/map/board_look.tres）；为空时用 BoardLook 默认值。
 @export var look: BoardLook
 ## 剪纸 Billboard 在格内的目标世界高度（约一格内可辨认，不压满半盘）。
 @export var unit_world_height: float = 0.88

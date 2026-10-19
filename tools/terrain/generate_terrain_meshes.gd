@@ -27,16 +27,16 @@ const WALL_GAP_U := 0.014
 const MERLON_SPANS_U: Array[Vector2] = [Vector2(-0.5, -0.29), Vector2(-0.11, 0.11), Vector2(0.29, 0.5)]
 const WALL_CLEAR_U := 0.15
 
-const GRASS_TOP_A := Color("868d58")
-const GRASS_TOP_B := Color("9c9c62")
-const GRASS_SPOT := Color("b89c74")
+## 顶面顶点色保持中性白，棋盘深浅由 GridBoardView 按格乘 grass_toon.albedo_tint。
+const GRASS_TOP_NEUTRAL := Color(1.0, 1.0, 1.0, 1.0)
 const GRASS_SIDE_TOP := Color("7a8150")
 const GRASS_SIDE_BOTTOM := Color("666242")
 const BLADE_BASE := Color("4f6a2a")
 const BLADE_TIP := Color("93a24a")
-const STONE_SIDE := Color("7f7a72")
-const STONE_TOP := Color("b5ae9b")
 const MORTAR := Color("3b352e")
+## 墙身石砖两色（近 editor_color #8e887f，无光照时仍能分辨块面）
+const WALL_STONE_LIGHT := Color("9c958c")
+const WALL_STONE_DARK := Color("716c65")
 
 var _cell := 1.0
 var _tile_h := 0.14
@@ -44,7 +44,7 @@ var _inset := 0.94
 
 
 func _initialize() -> void:
-	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
+	var cfg = load(BOARD_CONFIG_PATH)
 	if cfg == null:
 		push_error("generate_terrain_meshes: missing %s" % BOARD_CONFIG_PATH)
 		quit(1)
@@ -120,15 +120,9 @@ func _build_grass(seed_value: int, keep_center_clear: bool) -> SurfaceTool:
 	var bottom := -_tile_h * 0.5
 
 	var colors: Array[Color] = []
-	var spot := Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)) * _inset
 	for iz in GRASS_TOP_DIVS + 1:
 		for ix in GRASS_TOP_DIVS + 1:
-			var p := Vector2(-half + _inset * ix / GRASS_TOP_DIVS, -half + _inset * iz / GRASS_TOP_DIVS)
-			var c := GRASS_TOP_A.lerp(GRASS_TOP_B, rng.randf_range(0.0, 0.7))
-			var spot_w := clampf(1.0 - p.distance_to(spot) / (_inset * 0.32), 0.0, 1.0)
-			c = c.lerp(GRASS_SPOT, spot_w * 0.35)
-			c.a = 1.0
-			colors.append(c)
+			colors.append(GRASS_TOP_NEUTRAL)
 	var row := GRASS_TOP_DIVS + 1
 	for iz in GRASS_TOP_DIVS:
 		for ix in GRASS_TOP_DIVS:
@@ -174,7 +168,7 @@ func _build_grass(seed_value: int, keep_center_clear: bool) -> SurfaceTool:
 
 func _add_tuft(st: SurfaceTool, rng: RandomNumberGenerator, base: Vector3) -> void:
 	var base_c := BLADE_BASE
-	var tip_c := BLADE_TIP.lerp(GRASS_TOP_B, rng.randf_range(0.0, 0.4))
+	var tip_c := BLADE_TIP.lerp(GRASS_TOP_NEUTRAL, rng.randf_range(0.0, 0.25))
 	base_c.a = 0.0
 	tip_c.a = 0.0
 	var yaw0 := rng.randf_range(0.0, TAU)
@@ -225,6 +219,7 @@ func _build_wall_stone(seed_value: int) -> SurfaceTool:
 
 	var row_h := (body_top - ground) / WALL_ROWS
 	var stone_len := WALL_STONE_LEN_U * _cell
+	var brick_i := 0
 	for r in WALL_ROWS:
 		var y0 := ground + row_h * r
 		var y1 := y0 + row_h
@@ -238,27 +233,26 @@ func _build_wall_stone(seed_value: int) -> SurfaceTool:
 				edges.append(x)
 		edges.append(half_len)
 		for i in edges.size() - 1:
-			_stone(st, rng, edges[i], edges[i + 1], y0, y1, stone_half, gap, false)
+			_stone(st, rng, edges[i], edges[i + 1], y0, y1, stone_half, gap, false, brick_i & 1)
+			brick_i += 1
 
 	for span in MERLON_SPANS_U:
 		var x0 := span.x * _cell
 		var x1 := span.y * _cell
 		var mid := (x0 + x1) * 0.5 + rng.randf_range(-0.015, 0.015) * _cell
-		_stone(st, rng, x0, mid, body_top, crest_top, stone_half, gap, true)
-		_stone(st, rng, mid, x1, body_top, crest_top, stone_half, gap, true)
+		_stone(st, rng, x0, mid, body_top, crest_top, stone_half, gap, true, brick_i & 1)
+		brick_i += 1
+		_stone(st, rng, mid, x1, body_top, crest_top, stone_half, gap, true, brick_i & 1)
+		brick_i += 1
 	return st
 
 
-func _stone(st: SurfaceTool, rng: RandomNumberGenerator, x0: float, x1: float, y0: float, y1: float, half_t: float, gap: float, crest: bool) -> void:
+func _stone(st: SurfaceTool, rng: RandomNumberGenerator, x0: float, x1: float, y0: float, y1: float, half_t: float, gap: float, crest: bool, parity: int) -> void:
 	var t := half_t + rng.randf_range(-0.006, 0.004) * _cell
-	var shade := rng.randf_range(-0.07, 0.07)
-	var warm := rng.randf_range(0.0, 0.12)
-	var side := STONE_SIDE.lerp(STONE_TOP, warm)
-	side = Color(side.r + shade, side.g + shade, side.b + shade * 0.8)
-	var top := STONE_TOP.lerp(Color("c6bfab"), 0.4 if crest else 0.0)
-	top = Color(top.r + shade * 0.6, top.g + shade * 0.6, top.b + shade * 0.5)
-	side.a = 0.0
-	top.a = 0.0
+	var brick := WALL_STONE_LIGHT if parity == 0 else WALL_STONE_DARK
+	brick.a = 0.0
+	var side := brick
+	var top := brick
 	var h_top := y1 - gap * 0.5 + (rng.randf_range(-0.004, 0.004) * _cell if not crest else 0.0)
 	var half_len := _cell * 0.5
 	var lo_x := x0 if is_equal_approx(x0, -half_len) else x0 + gap * 0.5
