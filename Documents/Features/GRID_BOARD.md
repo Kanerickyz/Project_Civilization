@@ -21,14 +21,17 @@
 - **坐标**：整数方格 `(x, y)`，原点在盘心。
 - **视角**：正交相机，相对水平面约 **45°** 仰角 + **45°** 偏航。
 - **地块模型**：低多边形 + toon 渲染。尺寸按 `cell_size`（1U）与 `tile_height` 换算：
-  - 草地底板 `cell_size × tile_inset`（0.94U，保留格缝）见方、厚 `tile_height`；顶面顶点色斑块 + 世界坐标噪声黄褐斑 + 少量草簇。
-  - 直城墙在草地底板上，居中、沿格子中线贯穿 1U，高 0.6U（墙身 0.46U + 3 个城齿），厚 0.16U；错缝石块、砂色顶面、深色描边。
-  - 生成脚本 `tools/terrain/generate_terrain_meshes.gd`（headless 运行，输出 `resources/terrain/meshes/*.tres`）；shader `resources/terrain/shaders/`（三级明暗 + 反壳描边，兼容 GL Compatibility / Web）；材质 `resources/terrain/materials/`。
+  - 草地底板 `cell_size × tile_inset`（0.94U，保留格缝）见方、厚 `tile_height`；橄榄绿底，shader 叠世界坐标噪声的黄绿色块、金褐土斑、斜向笔触与逐格色差，少量草簇。
+  - 直城墙在草地底板上，居中、沿格子中线贯穿 1U，高 0.6U（墙身 0.46U + 3 个城齿），厚 0.16U；暖灰错缝石块、侧面上沿提亮作边缘高光、浅砂色顶面、深褐描边。
+  - 生成脚本 `tools/terrain/generate_terrain_meshes.gd`（headless 运行，输出 `resources/terrain/meshes/*.tres`）；shader `resources/terrain/shaders/`（三级明暗、投影压到暗档并偏冷 + 反壳描边，兼容 GL Compatibility / Web）；材质 `resources/terrain/materials/`。
+- **光照与调色**：`BoardConfig.look` → `resources/map/board_look.tres`（`BoardLook`）。暖色主光（左上方斜照，影子落向右下）+ 冷色天光环境光 + 正交柔和投影；`WorldEnvironment` Linear tonemap + 轻微对比 / 降饱和。
+  - Web 回退：默认不画实时投影（`shadow_on_web`，Compatibility 下带影灯多一遍绘制）；全屏调色可经 `post_adjust_on_web` 关闭。
+- **单位脚下软影**：每个单位一片径向渐变平面，贴草面跟随 Sprite（不作 Sprite 子节点，否则被 billboard 卡片吞掉）；Sprite 不投实时影，乘 `unit_modulate` 暖色与场景同调。
 - **单位表现**：Billboard `Sprite3D`；`unit_world_height`（默认 **0.88**）按纹理换算 `pixel_size`；正交 `camera_ortho_size` 约 **5.4**。
 - **选中高亮**：格面上方半透明平面——选中（蓝）、移动（绿）、攻击距离（红）。
 - **不做**：WFC、迷雾、六边格。
 
 ## 验收（开发）
 
-- Headless：`scripts/map/grid_board_test_runner.gd` 打印 `GRID_BOARD_OK`（含地块网格、城墙尺寸与转向、overlay）；`scripts/units/terrain_movement_test_runner.gd` 打印 `TERRAIN_MOVEMENT_OK`（城墙阻挡、绕路、禁斜穿墙角、沙盘布局）。
+- Headless：`scripts/map/grid_board_test_runner.gd` 打印 `GRID_BOARD_OK`（含地块网格、城墙尺寸与转向、overlay、光照 / 调色来自 BoardLook、脚下软影跟随与释放）；`scripts/units/terrain_movement_test_runner.gd` 打印 `TERRAIN_MOVEMENT_OK`（城墙阻挡、绕路、禁斜穿墙角、沙盘布局）。
 - 完全：`bash tools/run_verify_runners.sh`。
