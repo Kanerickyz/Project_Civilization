@@ -46,7 +46,3 @@
 
 - Headless：`scripts/map/map_editor_test_runner.gd` 打印 `MAP_EDITOR_OK`（v2 存读、v1 迁移、未知 id 回退、点格轮换）。
 - 完全：`bash tools/run_verify_runners.sh`。
-
-## 未做（下一刀）
-
-- 沙盘对战从玩家自存的 `user://maps/` JSON 开局（目前只读 `board_config.terrain_map_path`）。
