@@ -105,11 +105,24 @@ func _test_board_look_and_unit_blob() -> bool:
 	if not is_equal_approx(view._environment.adjustment_saturation, look.adjust_saturation):
 		push_error("GridBoardView: saturation should come from BoardLook")
 		return false
+	var web_look := look.duplicate() as BoardLook
+	web_look.shadow_enabled = true
+	web_look.shadow_on_web = false
+	web_look.post_adjust_enabled = true
+	web_look.post_adjust_on_web = false
+	if not web_look.shadow_active(false) or web_look.shadow_active(true):
+		push_error("BoardLook: shadow should stay on natively and fall back off on Web")
+		return false
+	if not web_look.post_adjust_active(false) or web_look.post_adjust_active(true):
+		push_error("BoardLook: post adjust should stay on natively and fall back off on Web")
+		return false
 	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
 	if def == null:
-		return true
+		push_error("GridBoardView: knight.tres missing for foot blob test")
+		return false
 	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
-	var unit: TacticalUnitInstance = UnitInstScript.new(def, 0, Vector2i(1, 1))
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
 	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
 	var spr := view._unit_sprites[unit] as Sprite3D
 	if spr.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
@@ -129,8 +142,17 @@ func _test_board_look_and_unit_blob() -> bool:
 	if blob.position.y <= cfg.tile_height or blob.position.y > cfg.tile_height + 0.05:
 		push_error("GridBoardView: foot blob y=%.3f should sit just above grass top" % blob.position.y)
 		return false
+	spr.scale = Vector3.ONE * 0.5
+	spr.modulate.a = 0.3
+	view._process(0.0)
+	if absf(blob.scale.x - 0.5) > 0.001:
+		push_error("GridBoardView: foot blob should follow sprite scale")
+		return false
+	if blob.visible:
+		push_error("GridBoardView: foot blob should hide while the sprite fades")
+		return false
 	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
-	if view._unit_blobs.has(unit):
+	if view._unit_blobs.has(unit) or not blob.is_queued_for_deletion():
 		push_error("GridBoardView: foot blob should be freed with its unit")
 		return false
 	return true

@@ -38,6 +38,7 @@ const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const OVERLAY_LIFT := 0.005
 const BLOB_LIFT := 0.02
+const BLOB_HIDE_ALPHA := 0.6
 const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
@@ -250,6 +251,10 @@ func _rebuild_board() -> void:
 		child.queue_free()
 	_tile_nodes.clear()
 	_overlay_nodes.clear()
+	_unit_sprites.clear()
+	_unit_blobs.clear()
+	_hp_bars.clear()
+	_last_unit_cells.clear()
 
 	var cell_size := config.cell_size
 	_overlay_mesh = PlaneMesh.new()
@@ -437,7 +442,8 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	_ensure_hp_bar(unit)
 
 
-## 脚下软影：与 Sprite 同级（挂在 Sprite 下时会被 billboard 卡片吞掉），每帧跟随其水平位置 / 缩放 / 透明度。
+## 脚下软影：与 Sprite 同级（挂在 Sprite 下时会被 billboard 卡片吞掉），每帧跟随其水平位置 / 缩放；
+## Compatibility 不支持 GeometryInstance3D.transparency，Sprite 半透（阵亡灰化 / 死亡淡出）时直接隐藏。
 func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
 	var look := _look()
 	if look.unit_blob_opacity <= 0.0:
@@ -480,7 +486,7 @@ func _process(_delta: float) -> void:
 		var s := spr.scale.x
 		blob.position = Vector3(spr.position.x, config.tile_height + BLOB_LIFT, spr.position.z)
 		blob.scale = Vector3(s, 1.0, s * 0.7)
-		blob.transparency = 1.0 - clampf(spr.modulate.a, 0.0, 1.0)
+		blob.visible = spr.modulate.a > BLOB_HIDE_ALPHA
 
 
 func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:

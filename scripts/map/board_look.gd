@@ -8,7 +8,7 @@ extends Resource
 @export_group("Key light")
 @export var key_color: Color = Color("ffefd6")
 @export var key_energy: float = 0.8
-## 俯角（度，负值朝下）与偏航（度）。偏航 -90° ≈ 影子落向屏幕右下。
+## 俯角（度，负值朝下）与偏航（度）。默认 -70° 时影子落向屏幕右下。
 @export var key_pitch_deg: float = -50.0
 @export var key_yaw_deg: float = -70.0
 
@@ -46,17 +46,17 @@ extends Resource
 @export var unit_modulate: Color = Color("fff6e8")
 
 
-func shadow_active() -> bool:
+func shadow_active(is_web: bool = OS.has_feature("web")) -> bool:
 	if not shadow_enabled:
 		return false
-	if OS.has_feature("web") and not shadow_on_web:
+	if is_web and not shadow_on_web:
 		return false
 	return true
 
 
-func post_adjust_active() -> bool:
+func post_adjust_active(is_web: bool = OS.has_feature("web")) -> bool:
 	if not post_adjust_enabled:
 		return false
-	if OS.has_feature("web") and not post_adjust_on_web:
+	if is_web and not post_adjust_on_web:
 		return false
 	return true

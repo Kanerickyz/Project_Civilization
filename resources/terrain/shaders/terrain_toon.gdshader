@@ -100,6 +100,6 @@ void light() {
 	float shadow_mix = 1.0 - clamp(ATTENUATION, 0.0, 1.0);
 	level = mix(level, min(level, cast_shadow_level), shadow_mix);
 	vec3 tint = mix(shadow_tint.rgb, vec3(1.0), to_mid * (1.0 - shadow_mix));
-	// 不除 PI：满光面 ≈ 顶点色原值，便于按参考图直接调色。
+	// 不除 PI：LIGHT_COLOR 已含 PI，满光面 ≈ albedo × key_energy × PI；整体亮度按 BoardLook.key_energy 调。
 	DIFFUSE_LIGHT += LIGHT_COLOR * level * tint;
 }
