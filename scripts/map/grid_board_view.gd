@@ -142,6 +142,10 @@ func _ensure_viewport_tree() -> void:
 func _on_resized() -> void:
 	if config == null:
 		return
+	if _viewport != null and _viewport_container != null:
+		var sz := _viewport_container.size
+		if sz.x > 1.0 and sz.y > 1.0:
+			_viewport.size = Vector2i(sz)
 	if _needs_center:
 		_try_center_on_board()
 	_apply_camera()
@@ -448,13 +452,13 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 		return
 	if event is InputEventScreenTouch:
-		_handle_screen_touch(event as InputEventScreenTouch)
+		_handle_screen_touch(make_input_local(event) as InputEventScreenTouch)
 		return
 	if event is InputEventScreenDrag:
-		_handle_screen_drag(event as InputEventScreenDrag)
+		_handle_screen_drag(make_input_local(event) as InputEventScreenDrag)
 		return
 	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
+		var mb := make_input_local(event) as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			_set_zoom(_zoom * 1.1)
 			accept_event()
@@ -475,7 +479,7 @@ func _gui_input(event: InputEvent) -> void:
 					_handle_click(mb.position)
 				accept_event()
 	elif event is InputEventMouseMotion:
-		var mm := event as InputEventMouseMotion
+		var mm := make_input_local(event) as InputEventMouseMotion
 		if _dragging and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			var delta := mm.position - _drag_last
 			_drag_last = mm.position
@@ -583,7 +587,7 @@ func _handle_click(local_pos: Vector2) -> void:
 func _pick_cell(local_pos: Vector2) -> Variant:
 	if _camera == null or size.y <= 0.0 or not _camera.is_inside_tree():
 		return null
-	var vp_pos := _pick_viewport_pos(local_pos)
+	var vp_pos := _to_viewport_pos(local_pos)
 	var from := _camera.project_ray_origin(vp_pos)
 	var dir := _camera.project_ray_normal(vp_pos)
 	if absf(dir.y) < 0.0001:
@@ -606,7 +610,7 @@ func _world_to_cell(world: Vector3) -> Variant:
 	return Vector2i(gx, gy)
 
 
-func _pick_viewport_pos(local_pos: Vector2) -> Vector2:
+func _to_viewport_pos(local_pos: Vector2) -> Vector2:
 	if _viewport == null or _viewport_container == null:
 		return local_pos
 	var container_size := _viewport_container.size
