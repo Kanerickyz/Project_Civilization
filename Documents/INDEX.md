@@ -13,6 +13,7 @@
 | [GAME_VISION.md](./GAME_VISION.md) | 这是什么游戏、边界、当前做到哪 |
 | [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) | **回合钟**（已实现） |
 | [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **3D ~45° 俯视** · 占位单位 |
+| [Features/MAP_EDITOR.md](./Features/MAP_EDITOR.md) | **地图编辑器 v1** · 8×8 · JSON 存读 |
 
 ## 仓库里有什么
 
@@ -21,6 +22,7 @@
 ├── Documents/
 ├── scenes/main/main_menu.tscn    # 主菜单
 ├── scenes/main/sandbox.tscn      # 对战沙盘
+├── scenes/main/map_editor.tscn   # 地图编辑器
 ├── scripts/core/turn_clock.gd    # 回合钟
 ├── scripts/map/                  # 方格盘视图与配置
 ├── resources/map/board_config.tres
@@ -52,7 +54,7 @@
 |----|-----|
 | 引擎 | Godot **4.6**（安装脚本固定 4.6.3） |
 | 项目名 | 战术战棋 |
-| 版本 | `0.5.0`（主菜单显示） |
+| 版本 | `0.6.0`（主菜单显示） |
 | 特性标签 | `4.6`, `GL Compatibility` |
 | 渲染器 | `gl_compatibility` |
 | 窗口 | 852×393（iPhone 14 Pro 横屏逻辑点），桌面覆盖 1704×786；`canvas_items` + `expand`；handheld 横屏 |

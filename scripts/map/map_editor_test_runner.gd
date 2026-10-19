@@ -1,0 +1,66 @@
+extends SceneTree
+## 地图 JSON 存读 roundtrip 与编辑器场景烟测。
+
+
+const MapDataScript := preload("res://scripts/map/map_data.gd")
+const MapTerrainTypeScript := preload("res://scripts/map/map_terrain_type.gd")
+
+
+func _initialize() -> void:
+	if not _test_roundtrip_json():
+		quit(1)
+		return
+	if not _test_map_editor_scene_loads():
+		quit(1)
+		return
+	print("MAP_EDITOR_OK")
+	quit(0)
+
+
+func _test_roundtrip_json() -> bool:
+	if not MapDataScript.ensure_maps_dir():
+		push_error("MapEditorTest: cannot create maps dir")
+		return false
+	var data := MapDataScript.create_filled(8, 8, MapTerrainType.Id.WALKABLE)
+	data.set_cell(0, 0, MapTerrainType.Id.BLOCKED)
+	data.set_cell(3, 4, MapTerrainType.Id.BLOCKED)
+	data.set_cell(7, 7, MapTerrainType.Id.WALKABLE)
+	var path := MapDataScript.MAPS_USER_DIR.path_join("_test_roundtrip.json")
+	if not data.save_json_to_path(path):
+		push_error("MapEditorTest: save failed")
+		return false
+	var loaded := MapDataScript.load_json_from_path(path)
+	if loaded == null:
+		push_error("MapEditorTest: load failed")
+		return false
+	if loaded.width != 8 or loaded.height != 8:
+		push_error("MapEditorTest: size mismatch")
+		return false
+	for y in range(8):
+		for x in range(8):
+			if loaded.get_cell(x, y) != data.get_cell(x, y):
+				push_error("MapEditorTest: cell mismatch at %s" % Vector2i(x, y))
+				return false
+	var dict := loaded.to_dict()
+	if str(dict.get("format")) != MapDataScript.FORMAT_ID:
+		push_error("MapEditorTest: format id mismatch")
+		return false
+	DirAccess.remove_absolute(path)
+	return true
+
+
+func _test_map_editor_scene_loads() -> bool:
+	var path := "res://scenes/main/map_editor.tscn"
+	if not ResourceLoader.exists(path):
+		push_error("MapEditorTest: missing scene")
+		return false
+	var packed := load(path) as PackedScene
+	if packed == null:
+		push_error("MapEditorTest: load scene failed")
+		return false
+	var node := packed.instantiate()
+	if node == null:
+		push_error("MapEditorTest: instantiate failed")
+		return false
+	node.free()
+	return true
