@@ -192,8 +192,8 @@ func _look() -> BoardLook:
 	return BoardLook.new()
 
 
-## 暖色主光 + 冷色天光（环境光）+ 柔和投影 + tonemap / 调色。Compatibility 与 Web 均支持；
-## Web 回退见 BoardLook.shadow_active() / post_adjust_active()。
+## 暖色主光 + 冷色天光（环境光）+ 柔和投影。Compatibility 与 Web 均支持；
+## Web 回退见 BoardLook.shadow_active()。
 func _apply_look() -> void:
 	if _key_light == null or _environment == null:
 		return
@@ -211,13 +211,6 @@ func _apply_look() -> void:
 	_environment.background_color = look.background_color
 	_environment.ambient_light_color = look.ambient_color
 	_environment.ambient_light_energy = look.ambient_energy
-	_environment.tonemap_mode = look.tonemap_mode
-	_environment.tonemap_exposure = look.tonemap_exposure
-	_environment.tonemap_white = look.tonemap_white
-	_environment.adjustment_enabled = look.post_adjust_active()
-	_environment.adjustment_brightness = look.adjust_brightness
-	_environment.adjustment_contrast = look.adjust_contrast
-	_environment.adjustment_saturation = look.adjust_saturation
 	_blob_mesh = null
 	_blob_material = null
 

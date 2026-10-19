@@ -102,22 +102,14 @@ func _test_board_look_and_unit_blob() -> bool:
 	if not view._key_light.light_color.is_equal_approx(look.key_color):
 		push_error("GridBoardView: key light color should come from BoardLook")
 		return false
-	if view._environment.adjustment_enabled != look.post_adjust_active():
-		push_error("GridBoardView: environment adjustment should follow BoardLook.post_adjust_active()")
-		return false
-	if not is_equal_approx(view._environment.adjustment_saturation, look.adjust_saturation):
-		push_error("GridBoardView: saturation should come from BoardLook")
+	if view._environment.adjustment_enabled:
+		push_error("GridBoardView: environment should not enable full-screen color adjustment")
 		return false
 	var web_look := look.duplicate() as BoardLook
 	web_look.shadow_enabled = true
 	web_look.shadow_on_web = false
-	web_look.post_adjust_enabled = true
-	web_look.post_adjust_on_web = false
 	if not web_look.shadow_active(false) or web_look.shadow_active(true):
 		push_error("BoardLook: shadow should stay on natively and fall back off on Web")
-		return false
-	if not web_look.post_adjust_active(false) or web_look.post_adjust_active(true):
-		push_error("BoardLook: post adjust should stay on natively and fall back off on Web")
 		return false
 	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
 	if def == null:
