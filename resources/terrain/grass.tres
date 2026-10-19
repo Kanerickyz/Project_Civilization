@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="TerrainTypeDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/map/terrain_type_def.gd" id="1_tdef"]
+
+[resource]
+script = ExtResource("1_tdef")
+id = &"grass"
+display_name = "空草地"
+passable = true
+legacy_code = 0
+editor_color = Color(0.435294, 0.603922, 0.235294, 1)

@@ -9,6 +9,7 @@ grid_height = 8
 cell_size = 1.0
 tile_height = 0.14
 tile_inset = 0.94
+terrain_map_path = "res://resources/map/sandbox_battle_map.json"
 color_light = Color(0.239216, 0.290196, 0.345098, 1)
 color_dark = Color(0.164706, 0.203922, 0.25098, 1)
 camera_pitch_deg = 45.0

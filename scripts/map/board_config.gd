@@ -8,6 +8,8 @@ extends Resource
 @export var cell_size: float = 1.0
 @export var tile_height: float = 0.14
 @export var tile_inset: float = 0.94
+## 对战开局地块布局（tactical_map JSON，尺寸须与 grid_width/height 一致）；空 = 全默认地块。
+@export_file("*.json") var terrain_map_path: String = ""
 @export var color_light: Color = Color("3d4a58")
 @export var color_dark: Color = Color("2a3440")
 ## 相对水平面的仰角（度）。战术战棋式斜俯视约 45°。
