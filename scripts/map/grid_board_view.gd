@@ -28,6 +28,9 @@ var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const MapTerrainTypeScript := preload("res://scripts/map/map_terrain_type.gd")
+
+var _terrain_cells: Dictionary = {} # Vector2i -> int (MapTerrainType.Id)
 
 var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite3D
 var _overlay_selected: Vector2i = Vector2i(-1, -1)
@@ -52,6 +55,25 @@ func setup(p_config: BoardConfig) -> void:
 	_rebuild_board()
 	_try_center_on_board()
 	_apply_camera()
+
+
+func clear_terrain_paint() -> void:
+	_terrain_cells.clear()
+	for cell in _tile_nodes.keys():
+		_apply_tile_visual(cell)
+
+
+func set_terrain_cells(cells: Dictionary) -> void:
+	_terrain_cells = cells.duplicate()
+	for cell in _tile_nodes.keys():
+		_apply_tile_visual(cell)
+
+
+func set_terrain_cell(cell: Vector2i, terrain_id: int) -> void:
+	if not _tile_nodes.has(cell):
+		return
+	_terrain_cells[cell] = terrain_id
+	_apply_tile_visual(cell)
 
 
 func _ready() -> void:
@@ -356,7 +378,12 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		_mesh_cache[key] = box
 	mi.mesh = _mesh_cache[key] as Mesh
 	var checker := (cell.x + cell.y) % 2 == 0
-	var color := config.color_light if checker else config.color_dark
+	var color: Color
+	if _terrain_cells.has(cell):
+		var base := MapTerrainTypeScript.color_for(int(_terrain_cells[cell]))
+		color = base.lerp(config.color_light if checker else config.color_dark, 0.12)
+	else:
+		color = config.color_light if checker else config.color_dark
 	if cell == _overlay_selected:
 		color = color.lerp(Color("5a8fd4"), 0.52)
 	elif _overlay_attack.has(cell):
