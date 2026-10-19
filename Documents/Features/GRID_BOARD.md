@@ -22,7 +22,7 @@
 - **视角**：正交相机，相对水平面约 **45°** 仰角 + **45°** 偏航。
 - **地块模型**：低多边形 + toon 渲染。尺寸按 `cell_size`（1U）与 `tile_height` 换算：
   - 草地底板 `cell_size × tile_inset`（默认 **0.98U**，仅留近原画级细缝；背景色在缝内露出）见方、厚 `tile_height`；**草地顶面**（含城墙格 surface 0）按 `(x+y)%2` 无光照平面色 `#B4A158` / `#8F884C`（`StandardMaterial3D` UNSHADED：格色不被主光洗黄，仍接收实时投影）；侧缘与草簇仍来自低模 mesh。
-  - 直城墙在草地底板上，居中、沿格子中线贯穿 1U，高 0.6U（墙身 0.46U + 3 个城齿），厚 0.16U；**墙身石面**无光照纯色（`TerrainTypeDef.editor_color`）、仍投射实时阴影；顶面草地与棋盘格一致。
+  - 直城墙在草地底板上，居中、沿格子中线贯穿 1U，高 0.6U（墙身 0.46U + 3 个城齿），厚 0.16U；**墙身石面**无光照双色灰砖（`#9C958C` / `#716C65`，mesh 顶点色 + UNSHADED）、仍投射实时阴影；顶面草地与棋盘格一致。
   - 生成脚本 `tools/terrain/generate_terrain_meshes.gd`（headless 运行，输出 `resources/terrain/meshes/*.tres`）；shader `resources/terrain/shaders/`（三级明暗、投影压到暗档并偏冷 + 反壳描边，兼容 GL Compatibility / Web）；材质 `resources/terrain/materials/`。
 - **光照**：`BoardConfig.look` → `resources/map/board_look.tres`（`BoardLook`）。暖色主光（左上方斜照，影子落向右下）+ 冷色天光环境光 + 正交柔和投影；`WorldEnvironment` 仅设背景色与天光，不做全屏对比 / 饱和 / 曝光调色。
   - Web 与桌面默认均开实时投影（`shadow_on_web=true`；Compatibility 下带影灯多一遍绘制，可关以省帧时）。

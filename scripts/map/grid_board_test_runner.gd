@@ -254,8 +254,8 @@ func _test_grass_checker_materials() -> bool:
 		push_error("GridBoardView: wall at (0,1) should use dark checker parity, got %s" % wall_std.albedo_color)
 		return false
 	var wall_stone: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
-	if wall_stone == null or wall_stone.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
-		push_error("GridBoardView: wall stone surface should be unshaded StandardMaterial3D")
+	if not _is_wall_stone_checker_material(wall_stone):
+		push_error("GridBoardView: wall stone surface should be unshaded vertex-color StandardMaterial3D")
 		return false
 	if wall_mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_ON:
 		push_error("GridBoardView: terrain tiles should cast realtime shadows (wall included)")
@@ -267,6 +267,17 @@ func _is_grass_checker_material(mat: Material) -> bool:
 	if mat is StandardMaterial3D:
 		var std := mat as StandardMaterial3D
 		return std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
+	return false
+
+
+func _is_wall_stone_checker_material(mat: Material) -> bool:
+	if mat is StandardMaterial3D:
+		var std := mat as StandardMaterial3D
+		return (
+			std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
+			and std.vertex_color_use_as_albedo
+			and std.albedo_color.is_equal_approx(Color.WHITE)
+		)
 	return false
 
 
@@ -307,8 +318,8 @@ func _test_terrain_meshes_and_orientation() -> bool:
 	if stone_mat == null or stone_mat.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
 		push_error("GridBoardView: wall stone surface should be unshaded override")
 		return false
-	if not stone_mat.albedo_color.is_equal_approx(wall_def.editor_color):
-		push_error("GridBoardView: wall stone should use TerrainTypeDef editor_color")
+	if not _is_wall_stone_checker_material(stone_mat):
+		push_error("GridBoardView: wall stone should use unshaded two-gray vertex-color material")
 		return false
 	if not is_equal_approx(wall_mi.rotation.y, PI * 0.5):
 		push_error("GridBoardView: vertical wall run should rotate 90° (got %.3f)" % wall_mi.rotation.y)

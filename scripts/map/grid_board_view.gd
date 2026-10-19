@@ -49,6 +49,9 @@ const OVERLAY_COLORS := {
 ## 草地棋盘格：浅 / 深（按格 (x+y)%2）；城墙等地块用 catalog 原材质。
 const GRASS_CHECKER_LIGHT := Color("B4A158")
 const GRASS_CHECKER_DARK := Color("8F884C")
+## 墙身石砖顶点色（与 generate_terrain_meshes 一致；材质 UNSHADED + 顶点色作 albedo）
+const WALL_STONE_LIGHT := Color("9c958c")
+const WALL_STONE_DARK := Color("716c65")
 
 var _terrain_cells: Dictionary = {} # Vector2i -> StringName（TerrainTypeDef.id）
 
@@ -547,7 +550,8 @@ func _wall_stone_unshaded_material(def: TerrainTypeDef) -> StandardMaterial3D:
 		return _wall_stone_unshaded
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = def.editor_color if def != null else Color("8e887f")
+	mat.albedo_color = Color.WHITE
+	mat.vertex_color_use_as_albedo = true
 	_wall_stone_unshaded = mat
 	return mat
 
