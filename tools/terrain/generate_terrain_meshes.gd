@@ -27,9 +27,8 @@ const WALL_GAP_U := 0.014
 const MERLON_SPANS_U: Array[Vector2] = [Vector2(-0.5, -0.29), Vector2(-0.11, 0.11), Vector2(0.29, 0.5)]
 const WALL_CLEAR_U := 0.15
 
-const GRASS_TOP_A := Color("868d58")
-const GRASS_TOP_B := Color("9c9c62")
-const GRASS_SPOT := Color("b89c74")
+## 顶面顶点色保持中性白，棋盘深浅由 GridBoardView 按格乘 grass_toon.albedo_tint。
+const GRASS_TOP_NEUTRAL := Color(1.0, 1.0, 1.0, 1.0)
 const GRASS_SIDE_TOP := Color("7a8150")
 const GRASS_SIDE_BOTTOM := Color("666242")
 const BLADE_BASE := Color("4f6a2a")
@@ -44,7 +43,7 @@ var _inset := 0.94
 
 
 func _initialize() -> void:
-	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
+	var cfg = load(BOARD_CONFIG_PATH)
 	if cfg == null:
 		push_error("generate_terrain_meshes: missing %s" % BOARD_CONFIG_PATH)
 		quit(1)
@@ -120,15 +119,9 @@ func _build_grass(seed_value: int, keep_center_clear: bool) -> SurfaceTool:
 	var bottom := -_tile_h * 0.5
 
 	var colors: Array[Color] = []
-	var spot := Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)) * _inset
 	for iz in GRASS_TOP_DIVS + 1:
 		for ix in GRASS_TOP_DIVS + 1:
-			var p := Vector2(-half + _inset * ix / GRASS_TOP_DIVS, -half + _inset * iz / GRASS_TOP_DIVS)
-			var c := GRASS_TOP_A.lerp(GRASS_TOP_B, rng.randf_range(0.0, 0.7))
-			var spot_w := clampf(1.0 - p.distance_to(spot) / (_inset * 0.32), 0.0, 1.0)
-			c = c.lerp(GRASS_SPOT, spot_w * 0.35)
-			c.a = 1.0
-			colors.append(c)
+			colors.append(GRASS_TOP_NEUTRAL)
 	var row := GRASS_TOP_DIVS + 1
 	for iz in GRASS_TOP_DIVS:
 		for ix in GRASS_TOP_DIVS:
@@ -174,7 +167,7 @@ func _build_grass(seed_value: int, keep_center_clear: bool) -> SurfaceTool:
 
 func _add_tuft(st: SurfaceTool, rng: RandomNumberGenerator, base: Vector3) -> void:
 	var base_c := BLADE_BASE
-	var tip_c := BLADE_TIP.lerp(GRASS_TOP_B, rng.randf_range(0.0, 0.4))
+	var tip_c := BLADE_TIP.lerp(GRASS_TOP_NEUTRAL, rng.randf_range(0.0, 0.25))
 	base_c.a = 0.0
 	tip_c.a = 0.0
 	var yaw0 := rng.randf_range(0.0, TAU)

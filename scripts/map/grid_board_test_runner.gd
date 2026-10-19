@@ -22,6 +22,9 @@ func _initialize() -> void:
 	if not _test_overlay_planes():
 		quit(1)
 		return
+	if not _test_grass_checker_materials():
+		quit(1)
+		return
 	if not _test_terrain_meshes_and_orientation():
 		quit(1)
 		return
@@ -209,6 +212,44 @@ func _test_overlay_planes() -> bool:
 		if (view._overlay_nodes[cell] as MeshInstance3D).visible:
 			push_error("GridBoardView: overlay %s should hide after clear" % cell)
 			return false
+	return true
+
+
+func _test_grass_checker_materials() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 3
+	cfg.grid_height = 3
+	var host := Control.new()
+	host.size = Vector2(320, 240)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var a := Vector2i(0, 0)
+	var b := Vector2i(1, 0)
+	var wall := Vector2i(0, 1)
+	view.set_terrain_cell(wall, &"wall_straight")
+	var mat_a: ShaderMaterial = view._tile_nodes[a].get_surface_override_material(0) as ShaderMaterial
+	var mat_b: ShaderMaterial = view._tile_nodes[b].get_surface_override_material(0) as ShaderMaterial
+	if mat_a == null or mat_b == null:
+		push_error("GridBoardView: grass checker materials missing")
+		return false
+	if mat_a == mat_b:
+		push_error("GridBoardView: adjacent parity grass should use different checker tints")
+		return false
+	var tint_a: Color = mat_a.get_shader_parameter(&"albedo_tint") as Color
+	var tint_b: Color = mat_b.get_shader_parameter(&"albedo_tint") as Color
+	if not tint_a.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
+		push_error("GridBoardView: (0,0) should use light checker, got %s" % tint_a)
+		return false
+	if not tint_b.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: (1,0) should use dark checker, got %s" % tint_b)
+		return false
+	var wall_mat := (view._tile_nodes[wall] as MeshInstance3D).get_surface_override_material(0)
+	var catalog := TerrainCatalog.load_default()
+	if wall_mat != catalog.get_def(&"wall_straight").surface_materials[0]:
+		push_error("GridBoardView: wall grass surface should keep shared catalog material")
+		return false
 	return true
 
 

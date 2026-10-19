@@ -18,6 +18,7 @@ var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
 var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
+var _grass_checker_mats: Dictionary = {} # int parity -> ShaderMaterial
 var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
 var _overlay_mesh: PlaneMesh
 var _catalog: TerrainCatalog
@@ -44,6 +45,9 @@ const OVERLAY_COLORS := {
 	"m": Color(0.42, 1.0, 0.72, 0.58),
 	"a": Color(0.82, 0.28, 0.31, 0.5),
 }
+## 草地棋盘格：浅 / 深（按格 (x+y)%2）；城墙等地块用 catalog 原材质。
+const GRASS_CHECKER_LIGHT := Color("B4A158")
+const GRASS_CHECKER_DARK := Color("8F884C")
 
 var _terrain_cells: Dictionary = {} # Vector2i -> StringName（TerrainTypeDef.id）
 
@@ -518,6 +522,30 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 		bar.modulate = Color("e8f0ff")
 
 
+func _terrain_surface_material(cell: Vector2i, terrain_id: StringName, def: TerrainTypeDef, surface: int) -> Material:
+	if def.surface_materials.size() <= surface:
+		return null
+	var base: Material = def.surface_materials[surface]
+	if surface == 0 and _uses_grass_checker(terrain_id):
+		var parity: int = (cell.x + cell.y) & 1
+		return _grass_checker_material(parity, base)
+	return base
+
+
+func _uses_grass_checker(terrain_id: StringName) -> bool:
+	return terrain_id == _get_catalog().default_id
+
+
+func _grass_checker_material(parity: int, base: Material) -> ShaderMaterial:
+	if _grass_checker_mats.has(parity):
+		return _grass_checker_mats[parity] as ShaderMaterial
+	var dup := (base as ShaderMaterial).duplicate() as ShaderMaterial
+	var tint := GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
+	dup.set_shader_parameter(&"albedo_tint", tint)
+	_grass_checker_mats[parity] = dup
+	return dup
+
+
 func _apply_tile_visual(cell: Vector2i) -> void:
 	if config == null or not _tile_nodes.has(cell):
 		return
@@ -528,7 +556,7 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		if mi.mesh != def.mesh:
 			mi.mesh = def.mesh
 		for i in def.mesh.get_surface_count():
-			var mat: Material = def.surface_materials[i] if i < def.surface_materials.size() else null
+			var mat: Material = _terrain_surface_material(cell, terrain_id, def, i)
 			mi.set_surface_override_material(i, mat)
 	else:
 		mi.mesh = _fallback_mesh()
