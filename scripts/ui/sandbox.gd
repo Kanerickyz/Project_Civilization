@@ -34,9 +34,7 @@ func _ready() -> void:
 	UiThemeScript.apply(self)
 	_clock = TurnClockScript.new()
 	_board_config = _load_board_config()
-	_board = TacticalSandboxRosterScript.build_demo_board(
-		_board_config.grid_width, _board_config.grid_height
-	)
+	_board = TacticalSandboxRosterScript.build_board_for_config(_board_config)
 	_board.changed.connect(_on_board_changed)
 	_build()
 	_fire_battle_start_triggers()
@@ -79,6 +77,7 @@ func _build() -> void:
 	_board_view.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_board_view)
 	_board_view.setup(_board_config)
+	_board_view.set_terrain_cells(_board.terrain_cells())
 	_board_view.cell_clicked.connect(_on_cell_clicked)
 
 	var top_bar := MarginContainer.new()
@@ -302,6 +301,11 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		):
 			_run_player_attack_async(cell, clicked)
 			return
+		_refresh_all()
+		return
+
+	if not _board.is_passable(cell):
+		_last_log = "%s不可通行" % _board.terrain_display_name(cell)
 		_refresh_all()
 		return
 

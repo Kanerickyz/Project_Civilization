@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="TerrainCatalog" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/map/terrain_catalog.gd" id="1_tcat"]
+[ext_resource type="Script" path="res://scripts/map/terrain_type_def.gd" id="4_tdef"]
+[ext_resource type="Resource" path="res://resources/terrain/grass.tres" id="2_grass"]
+[ext_resource type="Resource" path="res://resources/terrain/wall_straight.tres" id="3_wall"]
+
+[resource]
+script = ExtResource("1_tcat")
+types = Array[ExtResource("4_tdef")]([ExtResource("2_grass"), ExtResource("3_wall")])
+default_id = &"grass"

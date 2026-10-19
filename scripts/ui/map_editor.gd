@@ -110,7 +110,7 @@ func _build() -> void:
 	add_child(bottom)
 
 	_status_label = Label.new()
-	_status_label.text = "点击格子切换：可走 ↔ 不可走"
+	_status_label.text = "点击格子切换：%s" % MapTerrainTypeScript.cycle_hint()
 	_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom.add_child(_status_label)
 
@@ -143,10 +143,12 @@ func _spacer() -> Control:
 
 
 func _on_cell_clicked(cell: Vector2i) -> void:
-	var next := MapTerrainTypeScript.toggle(_map_data.get_cell_vec(cell))
+	var next := MapTerrainTypeScript.next_id(_map_data.get_cell_vec(cell))
 	_map_data.set_cell_vec(cell, next)
 	_board_view.set_terrain_cell(cell, next)
-	_status_label.text = "本格：%s（再点切换）" % MapTerrainTypeScript.label_for(next)
+	_status_label.text = "本格 (%d,%d)：%s · 点击格子切换：%s" % [
+		cell.x, cell.y, MapTerrainTypeScript.label_for(next), MapTerrainTypeScript.cycle_hint()
+	]
 
 
 func _apply_map_to_view() -> void:
