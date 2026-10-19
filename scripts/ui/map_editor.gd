@@ -38,6 +38,7 @@ func _load_board_config() -> BoardConfig:
 
 func _build() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var bg := ColorRect.new()
 	bg.color = Color("121820")
@@ -54,7 +55,8 @@ func _build() -> void:
 
 	var top_bar := MarginContainer.new()
 	top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	top_bar.mouse_filter = Control.MOUSE_FILTER_PASS
+	top_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_bar.add_theme_constant_override("margin_left", 10)
 	top_bar.add_theme_constant_override("margin_top", 6)
 	top_bar.add_theme_constant_override("margin_right", 10)
@@ -62,6 +64,7 @@ func _build() -> void:
 
 	var top_row := HBoxContainer.new()
 	top_row.add_theme_constant_override("separation", 8)
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_bar.add_child(top_row)
 
 	var back_btn := Button.new()
@@ -72,12 +75,14 @@ func _build() -> void:
 	var title := Label.new()
 	title.text = "地图编辑"
 	title.add_theme_font_size_override("font_size", 18)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_row.add_child(title)
 
 	top_row.add_child(_spacer())
 
 	var file_label := Label.new()
 	file_label.text = "文件名"
+	file_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_row.add_child(file_label)
 
 	_file_name_edit = LineEdit.new()
@@ -97,6 +102,8 @@ func _build() -> void:
 
 	var bottom := MarginContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom.add_theme_constant_override("margin_left", 12)
 	bottom.add_theme_constant_override("margin_bottom", 8)
@@ -104,9 +111,11 @@ func _build() -> void:
 
 	_status_label = Label.new()
 	_status_label.text = "点击格子切换：可走 ↔ 不可走"
+	_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom.add_child(_status_label)
 
 	_load_dialog = FileDialog.new()
+	_load_dialog.exclusive = false
 	_load_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	_load_dialog.access = FileDialog.ACCESS_USERDATA
 	_load_dialog.filters = PackedStringArray(["*.json ; JSON 地图"])
@@ -116,6 +125,7 @@ func _build() -> void:
 	add_child(_load_dialog)
 
 	_save_dialog = FileDialog.new()
+	_save_dialog.exclusive = false
 	_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
 	_save_dialog.access = FileDialog.ACCESS_USERDATA
 	_save_dialog.filters = PackedStringArray(["*.json ; JSON 地图"])
@@ -128,6 +138,7 @@ func _build() -> void:
 func _spacer() -> Control:
 	var c := Control.new()
 	c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return c
 
 
