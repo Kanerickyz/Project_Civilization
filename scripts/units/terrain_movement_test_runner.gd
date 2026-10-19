@@ -13,8 +13,7 @@ const WALL := &"wall_straight"
 const SANDBOX_MAP_PATH := "res://resources/map/sandbox_battle_map.json"
 const BOARD_CONFIG_PATH := "res://resources/map/board_config.tres"
 const SANDBOX_WALLS: Array[Vector2i] = [
-	Vector2i(4, 1), Vector2i(4, 2), Vector2i(4, 3),
-	Vector2i(5, 4), Vector2i(5, 5), Vector2i(5, 6),
+	Vector2i(1, 3), Vector2i(2, 3), Vector2i(4, 3), Vector2i(5, 3), Vector2i(7, 3),
 ]
 
 
@@ -245,8 +244,8 @@ func _test_no_wall_matches_legacy() -> bool:
 
 func _test_sandbox_map_loads() -> bool:
 	var map := MapDataScript.load_json_from_path(SANDBOX_MAP_PATH)
-	if map == null or map.width != 10 or map.height != 8:
-		push_error("TerrainMove: sandbox map should load as 10x8")
+	if map == null or map.width != 8 or map.height != 8:
+		push_error("TerrainMove: sandbox map should load as 8x8")
 		return false
 	for y in range(map.height):
 		for x in range(map.width):
@@ -277,7 +276,7 @@ func _test_sandbox_board_walls() -> bool:
 				push_error("TerrainMove: %s can reach wall %s" % [u.def.id, c])
 				return false
 	var dict := board.terrain_cells()
-	if dict.size() != 80 or dict[Vector2i(4, 2)] != WALL or dict[Vector2i(0, 0)] != &"grass":
+	if dict.size() != 64 or dict[Vector2i(1, 3)] != WALL or dict[Vector2i(0, 0)] != &"grass":
 		push_error("TerrainMove: board terrain_cells mismatch")
 		return false
 	return true

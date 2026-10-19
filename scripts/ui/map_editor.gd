@@ -19,7 +19,7 @@ var _save_dialog: FileDialog
 
 func _ready() -> void:
 	UiThemeScript.apply(self)
-	_map_data = MapDataScript.create_filled(MapDataScript.DEFAULT_WIDTH, MapDataScript.DEFAULT_HEIGHT)
+	_map_data = MapDataScript.create_example_layout()
 	_board_config = _load_board_config()
 	_build()
 	_apply_map_to_view()
