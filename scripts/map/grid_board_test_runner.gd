@@ -107,9 +107,13 @@ func _test_board_look_and_unit_blob() -> bool:
 		return false
 	var web_look := look.duplicate() as BoardLook
 	web_look.shadow_enabled = true
+	web_look.shadow_on_web = true
+	if not web_look.shadow_active(false) or not web_look.shadow_active(true):
+		push_error("BoardLook: shadow should stay on for desktop and Web when shadow_on_web=true")
+		return false
 	web_look.shadow_on_web = false
-	if not web_look.shadow_active(false) or web_look.shadow_active(true):
-		push_error("BoardLook: shadow should stay on natively and fall back off on Web")
+	if web_look.shadow_active(true):
+		push_error("BoardLook: shadow_on_web=false should disable shadows on Web only")
 		return false
 	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
 	if def == null:
@@ -221,29 +225,49 @@ func _test_grass_checker_materials() -> bool:
 	var b := Vector2i(1, 0)
 	var wall := Vector2i(0, 1)
 	view.set_terrain_cell(wall, &"wall_straight")
-	var mat_a: StandardMaterial3D = view._tile_nodes[a].get_surface_override_material(0) as StandardMaterial3D
-	var mat_b: StandardMaterial3D = view._tile_nodes[b].get_surface_override_material(0) as StandardMaterial3D
+	var mat_a: Material = view._tile_nodes[a].get_surface_override_material(0) as Material
+	var mat_b: Material = view._tile_nodes[b].get_surface_override_material(0) as Material
 	if mat_a == null or mat_b == null:
 		push_error("GridBoardView: grass checker materials missing")
 		return false
 	if mat_a == mat_b:
 		push_error("GridBoardView: adjacent parity grass should use different checker tints")
 		return false
-	if mat_a.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
-		push_error("GridBoardView: grass checker should be unshaded")
+	if not _is_grass_checker_material(mat_a) or not _is_grass_checker_material(mat_b):
+		push_error("GridBoardView: grass should use unshaded checker StandardMaterial3D")
 		return false
-	if not mat_a.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
-		push_error("GridBoardView: (0,0) should use light checker, got %s" % mat_a.albedo_color)
+	var std_a := mat_a as StandardMaterial3D
+	var std_b := mat_b as StandardMaterial3D
+	if not std_a.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
+		push_error("GridBoardView: (0,0) should use light checker, got %s" % std_a.albedo_color)
 		return false
-	if not mat_b.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
-		push_error("GridBoardView: (1,0) should use dark checker, got %s" % mat_b.albedo_color)
+	if not std_b.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: (1,0) should use dark checker, got %s" % std_b.albedo_color)
 		return false
-	var wall_mat := (view._tile_nodes[wall] as MeshInstance3D).get_surface_override_material(0)
-	var catalog := TerrainCatalog.load_default()
-	if wall_mat != catalog.get_def(&"wall_straight").surface_materials[0]:
-		push_error("GridBoardView: wall grass surface should keep shared catalog material")
+	var wall_mi: MeshInstance3D = view._tile_nodes[wall] as MeshInstance3D
+	var wall_top: Material = wall_mi.get_surface_override_material(0)
+	if not _is_grass_checker_material(wall_top):
+		push_error("GridBoardView: wall grass surface should use same checker material as plain grass")
+		return false
+	var wall_std := wall_top as StandardMaterial3D
+	if not wall_std.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: wall at (0,1) should use dark checker parity, got %s" % wall_std.albedo_color)
+		return false
+	var wall_stone: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
+	if wall_stone == null or wall_stone.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
+		push_error("GridBoardView: wall stone surface should be unshaded StandardMaterial3D")
+		return false
+	if wall_mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_ON:
+		push_error("GridBoardView: terrain tiles should cast realtime shadows (wall included)")
 		return false
 	return true
+
+
+func _is_grass_checker_material(mat: Material) -> bool:
+	if mat is StandardMaterial3D:
+		var std := mat as StandardMaterial3D
+		return std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
+	return false
 
 
 func _test_terrain_meshes_and_orientation() -> bool:
@@ -279,8 +303,12 @@ func _test_terrain_meshes_and_orientation() -> bool:
 	if grass_mi.mesh != grass_def.mesh:
 		push_error("GridBoardView: grass cell mesh should be grass def mesh")
 		return false
-	if wall_mi.get_surface_override_material(1) != wall_def.surface_materials[1]:
-		push_error("GridBoardView: wall stone surface should use shared def material")
+	var stone_mat: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
+	if stone_mat == null or stone_mat.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
+		push_error("GridBoardView: wall stone surface should be unshaded override")
+		return false
+	if not stone_mat.albedo_color.is_equal_approx(wall_def.editor_color):
+		push_error("GridBoardView: wall stone should use TerrainTypeDef editor_color")
 		return false
 	if not is_equal_approx(wall_mi.rotation.y, PI * 0.5):
 		push_error("GridBoardView: vertical wall run should rotate 90° (got %.3f)" % wall_mi.rotation.y)

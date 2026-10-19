@@ -18,7 +18,8 @@ var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
 var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
-var _grass_checker_mats: Dictionary = {} # int parity -> StandardMaterial3D
+var _grass_checker_mats: Dictionary = {} # int parity -> Material（棋盘格 + 收影）
+var _wall_stone_unshaded: StandardMaterial3D
 var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
 var _overlay_mesh: PlaneMesh
 var _catalog: TerrainCatalog
@@ -519,23 +520,35 @@ func _terrain_surface_material(cell: Vector2i, terrain_id: StringName, def: Terr
 	if def.surface_materials.size() <= surface:
 		return null
 	var base: Material = def.surface_materials[surface]
-	if surface == 0 and _uses_grass_checker(terrain_id):
+	if surface == 0 and _uses_grass_checker_surface(terrain_id):
 		var parity: int = (cell.x + cell.y) & 1
-		return _grass_checker_material(parity, base)
+		return _grass_checker_material(parity)
+	if surface == 1 and terrain_id == &"wall_straight":
+		return _wall_stone_unshaded_material(def)
 	return base
 
 
-func _uses_grass_checker(terrain_id: StringName) -> bool:
-	return terrain_id == _get_catalog().default_id
+func _uses_grass_checker_surface(terrain_id: StringName) -> bool:
+	return terrain_id == _get_catalog().default_id or terrain_id == &"wall_straight"
 
 
-func _grass_checker_material(parity: int, _base: Material) -> StandardMaterial3D:
+func _grass_checker_material(parity: int) -> Material:
 	if _grass_checker_mats.has(parity):
-		return _grass_checker_mats[parity] as StandardMaterial3D
+		return _grass_checker_mats[parity] as Material
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
 	_grass_checker_mats[parity] = mat
+	return mat
+
+
+func _wall_stone_unshaded_material(def: TerrainTypeDef) -> StandardMaterial3D:
+	if _wall_stone_unshaded != null:
+		return _wall_stone_unshaded
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = def.editor_color if def != null else Color("8e887f")
+	_wall_stone_unshaded = mat
 	return mat
 
 

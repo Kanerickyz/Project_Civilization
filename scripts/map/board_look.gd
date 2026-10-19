@@ -1,8 +1,8 @@
 class_name BoardLook
 extends Resource
 ## 棋盘画面：主光 / 天光补光 / 投影 / 背景。正式数值见 resources/map/board_look.tres。
-## 全部效果在 GL Compatibility（含 Web）可用。Web 回退：shadow_on_web=false 时不画实时投影（Compatibility
-## 每盏带影灯多一遍绘制），角色仍有脚下软影。
+## 全部效果在 GL Compatibility（含 Web）可用。shadow_on_web=false 时 Web 不画实时投影（Compatibility
+## 每盏带影灯多一遍绘制）；默认与桌面一致开启，角色仍有脚下软影。
 
 
 @export_group("Key light")
@@ -14,8 +14,8 @@ extends Resource
 
 @export_group("Shadow")
 @export var shadow_enabled: bool = true
-## Web 上是否画实时投影；默认关以保帧时，城墙影子在 Web 上缺席。
-@export var shadow_on_web: bool = false
+## Web 上是否画实时投影（GitHub Pages 与桌面一致默认开；关则可省 Compatibility 带影灯绘制）。
+@export var shadow_on_web: bool = true
 @export var shadow_opacity: float = 1.0
 @export var shadow_blur: float = 0.6
 @export var shadow_max_distance: float = 70.0
