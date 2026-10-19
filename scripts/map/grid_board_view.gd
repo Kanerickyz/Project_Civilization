@@ -18,7 +18,7 @@ var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
 var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
 var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
-var _grass_checker_mats: Dictionary = {} # int parity -> ShaderMaterial
+var _grass_checker_mats: Dictionary = {} # int parity -> StandardMaterial3D
 var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
 var _overlay_mesh: PlaneMesh
 var _catalog: TerrainCatalog
@@ -529,14 +529,14 @@ func _uses_grass_checker(terrain_id: StringName) -> bool:
 	return terrain_id == _get_catalog().default_id
 
 
-func _grass_checker_material(parity: int, base: Material) -> ShaderMaterial:
+func _grass_checker_material(parity: int, _base: Material) -> StandardMaterial3D:
 	if _grass_checker_mats.has(parity):
-		return _grass_checker_mats[parity] as ShaderMaterial
-	var dup := (base as ShaderMaterial).duplicate() as ShaderMaterial
-	var tint := GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
-	dup.set_shader_parameter(&"albedo_tint", tint)
-	_grass_checker_mats[parity] = dup
-	return dup
+		return _grass_checker_mats[parity] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
+	_grass_checker_mats[parity] = mat
+	return mat
 
 
 func _apply_tile_visual(cell: Vector2i) -> void:

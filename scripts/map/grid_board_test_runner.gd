@@ -221,21 +221,22 @@ func _test_grass_checker_materials() -> bool:
 	var b := Vector2i(1, 0)
 	var wall := Vector2i(0, 1)
 	view.set_terrain_cell(wall, &"wall_straight")
-	var mat_a: ShaderMaterial = view._tile_nodes[a].get_surface_override_material(0) as ShaderMaterial
-	var mat_b: ShaderMaterial = view._tile_nodes[b].get_surface_override_material(0) as ShaderMaterial
+	var mat_a: StandardMaterial3D = view._tile_nodes[a].get_surface_override_material(0) as StandardMaterial3D
+	var mat_b: StandardMaterial3D = view._tile_nodes[b].get_surface_override_material(0) as StandardMaterial3D
 	if mat_a == null or mat_b == null:
 		push_error("GridBoardView: grass checker materials missing")
 		return false
 	if mat_a == mat_b:
 		push_error("GridBoardView: adjacent parity grass should use different checker tints")
 		return false
-	var tint_a: Color = mat_a.get_shader_parameter(&"albedo_tint") as Color
-	var tint_b: Color = mat_b.get_shader_parameter(&"albedo_tint") as Color
-	if not tint_a.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
-		push_error("GridBoardView: (0,0) should use light checker, got %s" % tint_a)
+	if mat_a.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
+		push_error("GridBoardView: grass checker should be unshaded")
 		return false
-	if not tint_b.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
-		push_error("GridBoardView: (1,0) should use dark checker, got %s" % tint_b)
+	if not mat_a.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
+		push_error("GridBoardView: (0,0) should use light checker, got %s" % mat_a.albedo_color)
+		return false
+	if not mat_b.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: (1,0) should use dark checker, got %s" % mat_b.albedo_color)
 		return false
 	var wall_mat := (view._tile_nodes[wall] as MeshInstance3D).get_surface_override_material(0)
 	var catalog := TerrainCatalog.load_default()
