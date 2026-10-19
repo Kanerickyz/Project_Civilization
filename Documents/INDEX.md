@@ -13,7 +13,7 @@
 | [GAME_VISION.md](./GAME_VISION.md) | 这是什么游戏、边界、当前做到哪 |
 | [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) | **回合钟**（已实现） |
 | [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **3D ~45° 俯视** · 占位单位 |
-| [Features/MAP_EDITOR.md](./Features/MAP_EDITOR.md) | **地图编辑器 v1** · 8×8 · JSON 存读 |
+| [Features/MAP_EDITOR.md](./Features/MAP_EDITOR.md) | **地图编辑器 v1** · 8×8 · 草地/直城墙 · JSON v2 存读 |
 
 ## 仓库里有什么
 
