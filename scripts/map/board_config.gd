@@ -12,7 +12,7 @@ extends Resource
 @export_file("*.json") var terrain_map_path: String = ""
 @export var color_light: Color = Color("3d4a58")
 @export var color_dark: Color = Color("2a3440")
-## 相对水平面的仰角（度）。战术战棋式斜俯视约 45°。
+## 2D 斜视：pitch/yaw 参与地面→屏幕正交投影；Camera2D 可见高度基准为 camera_ortho_size（与滚轮 _zoom 相乘）。camera_distance 未使用。
 @export var camera_pitch_deg: float = 45.0
 @export var camera_yaw_deg: float = 45.0
 @export var camera_distance: float = 36.0
@@ -23,5 +23,5 @@ extends Resource
 @export var camera_pan_sensitivity: float = 0.02
 ## 灯光 / 投影 / 背景（resources/map/board_look.tres）；为空时用 BoardLook 默认值。
 @export var look: BoardLook
-## 剪纸 Billboard 在格内的目标世界高度（约一格内可辨认，不压满半盘）。
+## Sprite2D 在格内的目标世界高度（约一格内可辨认，不压满半盘）。
 @export var unit_world_height: float = 0.88
