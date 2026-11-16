@@ -34,7 +34,7 @@ func _test_basic_attack() -> bool:
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
 			player = u
-		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "knight":
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			foe = u
 	if player == null or foe == null:
 		push_error("GameLoop: missing units for attack test")
