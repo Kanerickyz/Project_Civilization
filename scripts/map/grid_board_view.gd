@@ -330,6 +330,10 @@ func sync_tactical_units(
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites[unit] as Sprite2D
+	# 逻辑格已变且正在播移动 Tween 时，勿再 sync（否则会 kill tween 并瞬移到终点）。
+	if _unit_move_tweens.has(unit):
+		_update_hp_bar(unit)
+		return
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
 	_apply_unit_draw_depth(unit)
