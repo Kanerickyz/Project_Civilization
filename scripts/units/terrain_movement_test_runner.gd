@@ -7,6 +7,7 @@ const TacticalUnitInstanceScript := preload("res://scripts/units/tactical_unit_i
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
+const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
 const MapDataScript := preload("res://scripts/map/map_data.gd")
 
 const WALL := &"wall_straight"
@@ -25,6 +26,7 @@ func _initialize() -> void:
 		_test_try_move_into_wall_and_bounds,
 		_test_no_corner_cutting,
 		_test_no_wall_matches_legacy,
+		_test_shortest_path_around_wall,
 		_test_sandbox_map_loads,
 		_test_sandbox_board_walls,
 		_test_map_size_mismatch_falls_back,
@@ -238,6 +240,47 @@ func _test_no_wall_matches_legacy() -> bool:
 	var dest := start + Vector2i(2, 2)
 	if not board.try_move(archer, dest) or archer.remaining_move_budget != archer.def.action_move_budget() - 2:
 		push_error("TerrainMove: no-wall try_move should cost chebyshev")
+		return false
+	return true
+
+
+func _test_shortest_path_around_wall() -> bool:
+	var walls := _column(3, 0, 5)
+	var board := _board_with("res://resources/units/archer.tres", Vector2i(2, 2), walls)
+	var start := Vector2i(2, 2)
+	var target := Vector2i(4, 2)
+	var cells := board.shortest_path(start, target)
+	if cells.is_empty():
+		push_error("TerrainMove: shortest_path around wall should exist")
+		return false
+	if cells[0] != start or cells[cells.size() - 1] != target:
+		push_error("TerrainMove: shortest_path endpoints mismatch")
+		return false
+	if cells.size() - 1 != board.path_distance(start, target):
+		push_error(
+			"TerrainMove: shortest_path length %d != path_distance %d"
+			% [cells.size() - 1, board.path_distance(start, target)]
+		)
+		return false
+	for c in cells:
+		if c.x == 3 and c.y <= 5:
+			push_error("TerrainMove: shortest_path entered wall cell %s" % c)
+			return false
+	# 相邻步须为合法 8 邻接（含斜走禁角）。
+	for i in range(cells.size() - 1):
+		var a: Vector2i = cells[i]
+		var b: Vector2i = cells[i + 1]
+		var d := b - a
+		if not GridPathfindingScript.can_step(a, d, board.is_passable):
+			push_error("TerrainMove: shortest_path illegal step %s -> %s" % [a, b])
+			return false
+	var same := board.shortest_path(start, start)
+	if same.size() != 1 or same[0] != start:
+		push_error("TerrainMove: shortest_path to self should be [start]")
+		return false
+	var sealed := _board_with("res://resources/units/archer.tres", Vector2i(2, 2), _column(3, 0, 7))
+	if not sealed.shortest_path(Vector2i(2, 2), Vector2i(4, 2)).is_empty():
+		push_error("TerrainMove: sealed wall shortest_path must be empty")
 		return false
 	return true
 

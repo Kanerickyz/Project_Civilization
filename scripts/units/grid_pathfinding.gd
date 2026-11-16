@@ -51,3 +51,35 @@ static func path_distance(a: Vector2i, b: Vector2i, passable: Callable, max_cost
 		return 0
 	var dist := distances_from(a, passable, max_cost)
 	return int(dist.get(b, UNREACHABLE))
+
+
+## 最短路径格序（含起终点）。不可达或超出 max_cost 时返回空数组。
+static func shortest_path(
+	a: Vector2i, b: Vector2i, passable: Callable, max_cost: int = -1
+) -> Array[Vector2i]:
+	if a == b:
+		return [a] as Array[Vector2i]
+	var dist := distances_from(a, passable, max_cost)
+	if not dist.has(b):
+		return [] as Array[Vector2i]
+	var rev: Array[Vector2i] = [b]
+	var cur := b
+	while cur != a:
+		var cur_d: int = int(dist[cur])
+		var stepped := false
+		for d in _DIRS:
+			var prev_cell := cur - d
+			if not dist.has(prev_cell):
+				continue
+			if int(dist[prev_cell]) != cur_d - 1:
+				continue
+			if not can_step(prev_cell, d, passable):
+				continue
+			rev.append(prev_cell)
+			cur = prev_cell
+			stepped = true
+			break
+		if not stepped:
+			return [] as Array[Vector2i]
+	rev.reverse()
+	return rev

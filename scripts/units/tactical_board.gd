@@ -67,6 +67,11 @@ func path_distances_from(origin: Vector2i, max_cost: int = -1) -> Dictionary:
 	return GridPathfindingScript.distances_from(origin, is_passable, max_cost)
 
 
+## 最短路径格序（含起终点）；不可达返回空。
+func shortest_path(from: Vector2i, to: Vector2i, max_cost: int = -1) -> Array[Vector2i]:
+	return GridPathfindingScript.shortest_path(from, to, is_passable, max_cost)
+
+
 func add_unit(instance: TacticalUnitInstance) -> void:
 	units.append(instance)
 	changed.emit()

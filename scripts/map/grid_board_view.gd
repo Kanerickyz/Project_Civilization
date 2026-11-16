@@ -31,12 +31,16 @@ var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
 const OVERLAY_Z := 4
 const WALL_Z := 2
 const GRASS_Z := 0
 ## 地块按屏幕纵深；单位用绝对 z，整层高于任何格子，彼此再按脚底屏幕 Y 排序。
 const DRAW_DEPTH_STRIDE := 16
 const UNIT_Z_BASE := 1000
+## 移动表现（对齐 autochess UnitBoardDisplay.play_move_to）：逐格 hop + 微抬升。
+const UNIT_MOVE_HOP_SEC := 0.18
+const UNIT_MOVE_HOP_HEIGHT_FRAC := 0.12
 const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
@@ -55,6 +59,8 @@ var _overlay_move: Dictionary = {}
 var _overlay_attack: Dictionary = {}
 
 var _last_unit_cells: Dictionary = {}
+var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label
 var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
@@ -220,6 +226,9 @@ func _try_center_on_board() -> void:
 func _rebuild_board() -> void:
 	if config == null or _tiles_root == null:
 		return
+	var moving_units: Array = _unit_move_tweens.keys()
+	for key in moving_units:
+		_kill_unit_move_tween(key as TacticalUnitInstance)
 	for key in _unit_sprites.keys():
 		(_unit_sprites[key] as Node).queue_free()
 	for child in _tiles_root.get_children():
@@ -232,6 +241,7 @@ func _rebuild_board() -> void:
 	_unit_blobs.clear()
 	_hp_bars.clear()
 	_last_unit_cells.clear()
+	_unit_move_tweens.clear()
 
 	var cell_size := config.cell_size
 	for gx in range(config.grid_width):
@@ -303,33 +313,80 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	_apply_unit_draw_depth(unit)
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
 		_float_unit_for_world_tween(spr)
-		_tween_unit_to(spr, _cell_to_world(unit.cell, config.cell_size), unit)
+		_tween_unit_along_path(spr, prev as Vector2i, unit.cell, unit)
 	else:
+		_kill_unit_move_tween(unit)
 		_mount_unit_on_tile(unit)
 		spr.position = Vector2.ZERO
 		_place_unit_blob(unit)
 	_update_hp_bar(unit)
 
 
-const UNIT_MOVE_TWEEN_SEC := 0.26
-
-
 func unit_move_duration_sec() -> float:
-	return UNIT_MOVE_TWEEN_SEC
+	return _last_move_tween_sec
 
 
-func _tween_unit_to(spr: Sprite2D, target_world: Vector2, unit: TacticalUnitInstance) -> void:
+func _tween_unit_along_path(
+	spr: Sprite2D, from_cell: Vector2i, to_cell: Vector2i, unit: TacticalUnitInstance
+) -> void:
+	_kill_unit_move_tween(unit)
+	var path := _resolve_move_path(from_cell, to_cell)
+	if path.size() < 2:
+		path = [from_cell, to_cell] as Array[Vector2i]
+	var hops := path.size() - 1
+	_last_move_tween_sec = UNIT_MOVE_HOP_SEC * float(hops)
 	var tw := create_tween()
-	tw.tween_property(spr, "position", target_world, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
-		Tween.EASE_OUT
-	)
+	_unit_move_tweens[unit] = tw
+	for i in hops:
+		var start_w := spr.position if i == 0 else _cell_to_world(path[i], config.cell_size)
+		var end_w := _cell_to_world(path[i + 1], config.cell_size)
+		tw.tween_method(
+			_apply_move_hop.bind(spr, start_w, end_w),
+			0.0,
+			1.0,
+			UNIT_MOVE_HOP_SEC
+		).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(func() -> void:
+		_unit_move_tweens.erase(unit)
+		if not is_instance_valid(spr) or not _unit_sprites.has(unit):
+			return
 		_mount_unit_on_tile(unit)
 		spr.position = Vector2.ZERO
 		_place_unit_blob(unit)
 		_apply_unit_draw_depth(unit)
 		_update_hp_bar(unit)
 	)
+
+
+func _apply_move_hop(spr: Sprite2D, start_w: Vector2, end_w: Vector2, t: float) -> void:
+	if spr == null or not is_instance_valid(spr) or config == null:
+		return
+	var flat := start_w.lerp(end_w, t)
+	var hop := sin(clampf(t, 0.0, 1.0) * PI) * config.cell_size * UNIT_MOVE_HOP_HEIGHT_FRAC
+	spr.position = flat - Vector2(0.0, hop)
+	spr.z_as_relative = false
+	spr.z_index = UNIT_Z_BASE + int(round(spr.position.y * 100.0))
+
+
+func _resolve_move_path(from_cell: Vector2i, to_cell: Vector2i) -> Array[Vector2i]:
+	return GridPathfindingScript.shortest_path(from_cell, to_cell, _view_cell_passable)
+
+
+func _view_cell_passable(cell: Vector2i) -> bool:
+	if config == null:
+		return false
+	if cell.x < 0 or cell.y < 0 or cell.x >= config.grid_width or cell.y >= config.grid_height:
+		return false
+	return _get_catalog().is_passable(terrain_id_at(cell))
+
+
+func _kill_unit_move_tween(unit: TacticalUnitInstance) -> void:
+	if not _unit_move_tweens.has(unit):
+		return
+	var tw: Tween = _unit_move_tweens[unit] as Tween
+	_unit_move_tweens.erase(unit)
+	if tw != null and tw.is_valid():
+		tw.kill()
 
 
 func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> Tween:
@@ -354,6 +411,7 @@ func attack_tween_duration_sec() -> float:
 
 
 func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
+	_kill_unit_move_tween(unit)
 	if _unit_sprites.has(unit):
 		var spr: Sprite2D = _unit_sprites[unit] as Sprite2D
 		spr.queue_free()
