@@ -158,9 +158,15 @@ func _make_card(text: String, kind: int, index: int) -> Panel:
 
 	var style := StyleBoxFlat.new()
 	if kind == 1:
+		# 攻击
 		style.bg_color = Color(0.42, 0.14, 0.16, 0.97)
 		style.border_color = Color(0.85, 0.45, 0.4, 1.0)
+	elif kind == 2 or kind == 3:
+		# 主动技（换手 / 加强攻）
+		style.bg_color = Color(0.28, 0.22, 0.12, 0.97)
+		style.border_color = Color(0.9, 0.72, 0.35, 1.0)
 	else:
+		# 移动
 		style.bg_color = Color(0.14, 0.36, 0.28, 0.97)
 		style.border_color = Color(0.45, 0.8, 0.6, 1.0)
 	style.set_border_width_all(2)

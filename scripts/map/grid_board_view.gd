@@ -699,11 +699,11 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 		return
 	var bar := _hp_bars[unit] as Label
 	var spr := _unit_sprites[unit] as Sprite2D
-	bar.text = "%d/%d" % [unit.hp, unit.def.max_hp]
+	bar.text = "%d/%d" % [unit.hp, unit.effective_max_hp()]
 	# 节点在脚点；HP 放在头顶（整段身高之上）。
 	var head_off := Vector2(0.0, -config.unit_world_height * 1.08)
 	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
-	if unit.hp <= unit.def.max_hp / 3:
+	if unit.hp <= unit.effective_max_hp() / 3:
 		bar.modulate = Color("ff6666")
 	else:
 		bar.modulate = Color("e8f0ff")

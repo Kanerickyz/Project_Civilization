@@ -6,6 +6,8 @@ var faction: TacticalFaction.Id = TacticalFaction.Id.PLAYER
 var cell: Vector2i = Vector2i.ZERO
 var hp: int = 1
 var atk_bonus: int = 0
+## 本场生命上限加成（如鼓手移动结束 buff）。
+var max_hp_bonus: int = 0
 var moved_this_side_turn: bool = false
 var remaining_move_budget: int = 0
 var attacked_this_side_turn: bool = false
@@ -22,6 +24,10 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 
 func effective_attack() -> int:
 	return def.attack + atk_bonus
+
+
+func effective_max_hp() -> int:
+	return def.max_hp + max_hp_bonus
 
 
 func is_alive() -> bool:

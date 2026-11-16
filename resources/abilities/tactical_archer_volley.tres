@@ -4,13 +4,15 @@
 
 [resource]
 script = ExtResource("1_ab")
-id = "volley_spirit"
-display_name = "援军齐射"
-autochess_ability_id = "deploy_self_atk_small"
-rules_hint = "入阵（开战在场）：自身攻击+1（本场）。"
-trigger_kind = 2
+id = "loot_arrow"
+display_name = "夺矢"
+autochess_ability_id = "kill_grant_attack_card"
+rules_hint = "击杀时：立刻往手牌加 1 张攻击卡（用完销毁、不进三库）。"
+trigger_kind = 3
 range_chebyshev = 3
-self_atk_on_trigger = 1
+self_atk_on_trigger = 0
 self_atk_on_kill = 0
 ally_atk_buff = 0
+ally_hp_buff = 0
 ally_buff_radius = 2
+grant_ephemeral_attack_on_kill = true

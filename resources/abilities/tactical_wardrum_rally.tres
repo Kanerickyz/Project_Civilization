@@ -5,12 +5,14 @@
 [resource]
 script = ExtResource("1_ab")
 id = "forward_drums"
-display_name = "前锋鸣鼓"
-autochess_ability_id = "turn_start_nearby_atk_small"
-rules_hint = "己方行动段开始时：以自身为中心 2 格内其他友方攻击+1（本场）。"
-trigger_kind = 0
+display_name = "鼓阵激励"
+autochess_ability_id = "move_end_nearby_atk_hp_small"
+rules_hint = "移动结束时：以自身为中心 2 格内其他角色攻击+1、生命+1（本场）。"
+trigger_kind = 4
 range_chebyshev = 0
 self_atk_on_trigger = 0
 self_atk_on_kill = 0
 ally_atk_buff = 1
+ally_hp_buff = 1
 ally_buff_radius = 2
+grant_ephemeral_attack_on_kill = false

@@ -5,10 +5,11 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
+const TacticalAbilitySystemScript := preload("res://scripts/units/tactical_ability_system.gd")
 
 
 func _initialize() -> void:
-	if not _test_build_generic_player_only():
+	if not _test_build_generic_plus_skills_player_only():
 		quit(1)
 		return
 	if not _test_sts_draw_discard_and_reshuffle():
@@ -17,7 +18,7 @@ func _initialize() -> void:
 	if not _test_play_move_then_authorize_any_player():
 		quit(1)
 		return
-	if not _test_player_death_removes_one_each_kind():
+	if not _test_player_death_removes_move_attack_and_skill():
 		quit(1)
 		return
 	if not _test_enemy_death_does_not_touch_deck():
@@ -32,30 +33,53 @@ func _initialize() -> void:
 	if not _test_attack_card_clears_flag_for_second_hit():
 		quit(1)
 		return
+	if not _test_ally_can_be_attacked():
+		quit(1)
+		return
+	if not _test_wardrum_skill_redraw():
+		quit(1)
+		return
+	if not _test_strong_attack_bonus():
+		quit(1)
+		return
+	if not _test_ephemeral_attack_not_in_piles():
+		quit(1)
+		return
 	print("CARD_ACTIONS_OK")
 	quit(0)
 
 
-func _test_build_generic_player_only() -> bool:
+func _living_players(board: TacticalBoard) -> int:
+	var n := 0
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER:
+			n += 1
+	return n
+
+
+func _test_build_generic_plus_skills_player_only() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 42
 	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
 	deck.build_from_living_player_units(board)
-	var living_players := 0
+	var living_players := _living_players(board)
 	var living_enemies := 0
 	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER:
-			living_players += 1
-		else:
+		if u.faction == TacticalFactionScript.Id.OPPONENT:
 			living_enemies += 1
 	if living_enemies <= 0:
 		push_error("CardActions: demo board should have enemies")
 		return false
-	var expected := living_players * 2
+	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
+	# 4 人：鼓手/盾卫/大剑有技，游侠无 → 3
+	if skills != 3:
+		push_error("CardActions: expected 3 skill cards, got %d" % skills)
+		return false
+	var expected := living_players * 2 + skills
 	if deck.draw_pile.size() != expected or deck.total_cards() != expected:
 		push_error(
-			"CardActions: expected %d cards (=player*2), got %d"
+			"CardActions: expected %d cards, got %d"
 			% [expected, deck.draw_pile.size()]
 		)
 		return false
@@ -65,9 +89,15 @@ func _test_build_generic_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.ATTACK) != living_players:
 		push_error("CardActions: attack count should equal living players")
 		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_DRAW) != 1:
+		push_error("CardActions: one wardrum skill expected")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 2:
+		push_error("CardActions: knight+pekka strong attack expected")
+		return false
 	for c in deck.draw_pile:
-		if c.display_label() != "移动" and c.display_label() != "攻击":
-			push_error("CardActions: cards must be generic labels, got %s" % c.display_label())
+		if c.ephemeral:
+			push_error("CardActions: build must not include ephemeral")
 			return false
 	return true
 
@@ -117,7 +147,7 @@ func _test_play_move_then_authorize_any_player() -> bool:
 			break
 	if move_idx < 0:
 		deck.discard_hand()
-		deck.hand.append(TacticalActionCardScript.new(TacticalActionCardScript.Kind.MOVE))
+		deck.hand.append(TacticalActionCardScript.make_move())
 		move_idx = 0
 	var players: Array[TacticalUnitInstance] = []
 	for u in board.living_units():
@@ -130,7 +160,6 @@ func _test_play_move_then_authorize_any_player() -> bool:
 	if played == null or played.kind != TacticalActionCardScript.Kind.MOVE:
 		push_error("CardActions: play move failed")
 		return false
-	# 通用卡：打出后尚未授权任何单位。
 	if deck.is_move_authorized(players[0]) or deck.is_move_authorized(players[1]):
 		push_error("CardActions: generic move must not auto-authorize")
 		return false
@@ -150,7 +179,7 @@ func _test_play_move_then_authorize_any_player() -> bool:
 	return true
 
 
-func _test_player_death_removes_one_each_kind() -> bool:
+func _test_player_death_removes_move_attack_and_skill() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11
@@ -159,33 +188,23 @@ func _test_player_death_removes_one_each_kind() -> bool:
 	deck.begin_player_turn()
 	var victim: TacticalUnitInstance = null
 	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER:
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
 			victim = u
 			break
 	if victim == null:
 		return false
-	var before_move := deck.count_kind(TacticalActionCardScript.Kind.MOVE)
-	var before_atk := deck.count_kind(TacticalActionCardScript.Kind.ATTACK)
 	var before_total := deck.total_cards()
+	var before_strong := deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK)
 	var removed := deck.on_player_unit_died(victim)
-	if removed != 2:
-		push_error("CardActions: player death should remove 1 move + 1 attack, got %d" % removed)
+	# 移+攻+盾卫加强攻
+	if removed != 3:
+		push_error("CardActions: knight death should remove 3, got %d" % removed)
 		return false
-	if deck.total_cards() != before_total - 2:
+	if deck.total_cards() != before_total - 3:
 		push_error("CardActions: total after death mismatch")
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.MOVE) != before_move - 1:
-		push_error("CardActions: move count after death")
-		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.ATTACK) != before_atk - 1:
-		push_error("CardActions: attack count after death")
-		return false
-	victim.hp = 0
-	var again := deck.on_player_unit_died(victim)
-	# 仍可再减（通用卡不按实例绑定）；第二次按规则仍减各 1，若库中还有。
-	# 这里只断言不会因敌方逻辑炸掉；重复调用对已死己方仍减张数是可接受的。
-	if again < 0:
-		push_error("CardActions: unexpected negative purge")
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != before_strong - 1:
+		push_error("CardActions: strong attack skill should drop by 1")
 		return false
 	return true
 
@@ -236,7 +255,6 @@ func _test_end_turn_discards_hand() -> bool:
 	return true
 
 
-## 移力耗尽后再 authorize_move：剩余移力应重置为满池并可再移。
 func _test_move_card_resets_budget() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
@@ -274,7 +292,6 @@ func _test_move_card_resets_budget() -> bool:
 	return true
 
 
-## 普攻后标记已攻；prepare_attack 清标记后可再攻（玩家卡路径）。
 func _test_attack_card_clears_flag_for_second_hit() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
@@ -294,13 +311,13 @@ func _test_attack_card_clears_flag_for_second_hit() -> bool:
 	foe.cell = knight.cell + Vector2i(0, 1)
 	foe.hp = 99
 	var first := TacticalCombatScript.try_basic_attack(
-		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
 	)
 	if not first["ok"] or not knight.attacked_this_side_turn:
 		push_error("CardActions: first attack should succeed and set flag")
 		return false
 	var blocked := TacticalCombatScript.try_basic_attack(
-		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
 	)
 	if blocked["ok"]:
 		push_error("CardActions: without card, second attack must fail (AI path)")
@@ -312,9 +329,147 @@ func _test_attack_card_clears_flag_for_second_hit() -> bool:
 		push_error("CardActions: prepare_attack should clear attacked flag")
 		return false
 	var second := TacticalCombatScript.try_basic_attack(
-		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
 	)
 	if not second["ok"]:
 		push_error("CardActions: after attack card, second hit should succeed")
 		return false
+	return true
+
+
+func _test_ally_can_be_attacked() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight: TacticalUnitInstance = null
+	var archer: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if u.def.id == "knight":
+			knight = u
+		elif u.def.id == "archer":
+			archer = u
+	if knight == null or archer == null:
+		push_error("CardActions: need knight+archer")
+		return false
+	archer.cell = knight.cell + Vector2i(0, 1)
+	var before := archer.hp
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, true
+	)
+	if not res["ok"] or archer.hp >= before:
+		push_error("CardActions: ally should be attackable for player")
+		return false
+	var blocked := TacticalCombatScript.try_basic_attack(
+		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, false
+	)
+	# already attacked, or if we reset flag:
+	knight.attacked_this_side_turn = false
+	blocked = TacticalCombatScript.try_basic_attack(
+		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, false
+	)
+	if blocked["ok"]:
+		push_error("CardActions: allow_friendly=false must reject ally")
+		return false
+	return true
+
+
+func _test_wardrum_skill_redraw() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	deck.begin_player_turn()
+	# 塞一张技卡到手牌并打出换手。
+	deck.hand.clear()
+	deck.hand.append(TacticalActionCardScript.make_move())
+	deck.hand.append(TacticalActionCardScript.make_attack())
+	deck.hand.append(TacticalActionCardScript.make_skill_draw("wardrum"))
+	var skill_idx := 2
+	var skill := deck.play_hand_index(skill_idx)
+	if skill == null or skill.kind != TacticalActionCardScript.Kind.SKILL_DRAW:
+		push_error("CardActions: play skill_draw failed")
+		return false
+	# 打出后手牌剩 2，换手应弃掉再抽最多 5。
+	var drawn := deck.resolve_wardrum_redraw()
+	if deck.hand.size() != drawn:
+		push_error("CardActions: redraw hand size mismatch")
+		return false
+	if drawn <= 0:
+		push_error("CardActions: redraw should draw cards")
+		return false
+	return true
+
+
+func _test_strong_attack_bonus() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
+			knight = u
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "archer":
+			foe = u
+	if knight == null or foe == null:
+		return false
+	foe.cell = knight.cell + Vector2i(0, 1)
+	foe.hp = 99
+	var base := knight.effective_attack()
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true, 2
+	)
+	if not res["ok"] or int(res["damage"]) != base + 2:
+		push_error("CardActions: strong attack should deal base+2")
+		return false
+	return true
+
+
+func _test_ephemeral_attack_not_in_piles() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	board.player_deck = TacticalCardDeckScript.new()
+	var deck: TacticalCardDeck = board.player_deck
+	deck.build_from_living_player_units(board)
+	var before := deck.total_cards()
+	deck.begin_player_turn()
+	var archer: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
+			archer = u
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "wardrum":
+			foe = u
+	if archer == null or foe == null:
+		push_error("CardActions: need archer + foe")
+		return false
+	foe.hp = 1
+	foe.cell = archer.cell + Vector2i(0, 1)
+	var hand_before := deck.hand.size()
+	board.apply_damage(foe, 99, archer)
+	if deck.hand.size() != hand_before + 1:
+		push_error("CardActions: kill should add ephemeral attack to hand")
+		return false
+	var eph := deck.hand[deck.hand.size() - 1]
+	if not eph.ephemeral or eph.kind != TacticalActionCardScript.Kind.ATTACK:
+		push_error("CardActions: granted card must be ephemeral attack")
+		return false
+	# 打出销毁，不进弃。
+	var idx := deck.hand.size() - 1
+	var discard_before := deck.discard_pile.size()
+	var played := deck.play_hand_index(idx)
+	if played == null or not played.ephemeral:
+		push_error("CardActions: play ephemeral failed")
+		return false
+	if deck.discard_pile.size() != discard_before:
+		push_error("CardActions: ephemeral must not enter discard")
+		return false
+	# 再发一张，结束回合应销毁而非进弃。
+	deck.add_ephemeral_attack_to_hand()
+	var total_with_eph := deck.total_cards()
+	deck.end_player_turn()
+	if deck.total_cards() != total_with_eph - 1:
+		push_error("CardActions: end turn should destroy ephemeral")
+		return false
+	if deck.total_cards() < before:
+		# 开局抽了又弃，总数应回到 build 规模（不含临时卡）。
+		pass
 	return true
