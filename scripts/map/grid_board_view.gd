@@ -994,6 +994,8 @@ func _apply_camera() -> void:
 	_camera.offset = Vector2.ZERO
 
 
+## _gui_input 收到的事件 position 已是本控件局部坐标；勿再 make_input_local，
+## 否则棋盘不在 (0,0)（竖屏 offset_top）时会二次减去偏移，点到别的格。
 func _gui_input(event: InputEvent) -> void:
 	if config == null or _camera == null:
 		return
@@ -1003,13 +1005,17 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 		return
 	if event is InputEventScreenTouch:
-		_handle_screen_touch(make_input_local(event) as InputEventScreenTouch)
+		_handle_screen_touch(event as InputEventScreenTouch)
 		return
 	if event is InputEventScreenDrag:
-		_handle_screen_drag(make_input_local(event) as InputEventScreenDrag)
+		_handle_screen_drag(event as InputEventScreenDrag)
+		return
+	# 触摸已由 ScreenTouch/Drag 处理；引擎模拟出的鼠标事件再处理会重复点格。
+	if event is InputEventMouse and event.device == InputEvent.DEVICE_ID_EMULATION:
+		accept_event()
 		return
 	if event is InputEventMouseButton:
-		var mb := make_input_local(event) as InputEventMouseButton
+		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			_set_zoom(_zoom * 1.1)
 			accept_event()
@@ -1030,7 +1036,7 @@ func _gui_input(event: InputEvent) -> void:
 					_handle_click(mb.position)
 				accept_event()
 	elif event is InputEventMouseMotion:
-		var mm := make_input_local(event) as InputEventMouseMotion
+		var mm := event as InputEventMouseMotion
 		if _dragging and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			var delta := mm.position - _drag_last
 			_drag_last = mm.position
