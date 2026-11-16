@@ -297,16 +297,17 @@ func sync_tactical_units(
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites[unit] as Sprite2D
-	var pose := _unit_pose_screen(unit.cell)
-	var target_pos: Vector2 = pose["torso"]
+	var local_pose := _unit_local_pose_on_tile(unit.cell)
+	var world_pose := _unit_pose_screen(unit.cell)
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
-	_apply_unit_draw_depth(unit)
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
-		_tween_unit_to(spr, target_pos, unit)
+		_float_unit_for_world_tween(spr)
+		_tween_unit_to(spr, world_pose["torso"], unit, local_pose)
 	else:
-		spr.position = target_pos
-		_sync_unit_blob_pose(unit, pose)
+		_mount_unit_on_tile(unit)
+		spr.position = local_pose["torso"]
+		_sync_unit_blob_pose(unit, local_pose)
 	_update_hp_bar(unit)
 
 
@@ -317,13 +318,20 @@ func unit_move_duration_sec() -> float:
 	return UNIT_MOVE_TWEEN_SEC
 
 
-func _tween_unit_to(spr: Sprite2D, target_pos: Vector2, unit: TacticalUnitInstance) -> void:
+func _tween_unit_to(
+	spr: Sprite2D,
+	target_world: Vector2,
+	unit: TacticalUnitInstance,
+	target_local: Dictionary
+) -> void:
 	var tw := create_tween()
-	tw.tween_property(spr, "position", target_pos, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
+	tw.tween_property(spr, "position", target_world, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
 		Tween.EASE_OUT
 	)
 	tw.finished.connect(func() -> void:
-		_sync_unit_blob_pose(unit, _unit_pose_screen(unit.cell))
+		_mount_unit_on_tile(unit)
+		spr.position = target_local["torso"]
+		_sync_unit_blob_pose(unit, target_local)
 		_update_hp_bar(unit)
 	)
 
@@ -334,7 +342,8 @@ func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> 
 	var spr := _unit_sprites[attacker] as Sprite2D
 	var home := spr.position
 	var world := _cell_to_world(target_cell, config.cell_size)
-	var flat := world - home
+	var delta := _cell_to_world(target_cell, config.cell_size) - _cell_to_world(attacker.cell, config.cell_size)
+	var flat := delta
 	var lunge := home
 	if flat.length_squared() > 0.0001:
 		lunge = home + flat.normalized() * minf(flat.length() * 0.42, config.cell_size * 0.55)
@@ -415,7 +424,6 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 		spr.name = "Unit_%s_%s" % [unit.def.id, unit.faction]
 		spr.centered = true
 		spr.offset = Vector2.ZERO
-		_units_root.add_child(spr)
 		_unit_sprites[unit] = spr
 		_attach_unit_blob(unit)
 	var tex := unit.def.texture_blue
@@ -501,9 +509,9 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	var bar := _hp_bars[unit] as Label
 	var spr := _unit_sprites[unit] as Sprite2D
 	bar.text = "%d/%d" % [unit.hp, unit.def.max_hp]
-	var pose := _unit_pose_screen(unit.cell)
-	var head_off: Vector2 = pose["head"] - pose["torso"]
-	_position_world_on_label(bar, spr.position + head_off)
+	var local_pose := _unit_local_pose_on_tile(unit.cell)
+	var head_off: Vector2 = local_pose["head"] - local_pose["torso"]
+	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
 	if unit.hp <= unit.def.max_hp / 3:
 		bar.modulate = Color("ff6666")
 	else:
@@ -597,11 +605,43 @@ func _unit_pose_screen(cell: Vector2i) -> Dictionary:
 	}
 
 
-func _apply_unit_draw_depth(unit: TacticalUnitInstance) -> void:
+func _unit_local_pose_on_tile(cell: Vector2i) -> Dictionary:
+	var center := _cell_to_world(cell, config.cell_size)
+	var pose := _unit_pose_screen(cell)
+	return {
+		"feet": (pose["feet"] as Vector2) - center,
+		"torso": (pose["torso"] as Vector2) - center,
+		"head": (pose["head"] as Vector2) - center,
+	}
+
+
+func _unit_world_position(spr: Sprite2D) -> Vector2:
+	var parent := spr.get_parent() as Node2D
+	if parent == null:
+		return spr.position
+	return parent.position + spr.position
+
+
+func _mount_unit_on_tile(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites.get(unit) as Sprite2D
 	if spr == null:
 		return
-	spr.z_index = _draw_depth_for_cell(unit.cell) + UNIT_DRAW_LAYER
+	var tile: Node2D = _tile_nodes.get(unit.cell) as Node2D
+	if tile == null:
+		return
+	if spr.get_parent() != tile:
+		if spr.get_parent() != null:
+			spr.reparent(tile, true)
+		else:
+			tile.add_child(spr)
+	spr.z_index = UNIT_DRAW_LAYER
+	spr.z_as_relative = true
+
+
+func _float_unit_for_world_tween(spr: Sprite2D) -> void:
+	if spr.get_parent() == _units_root:
+		return
+	spr.reparent(_units_root, true)
 
 
 func _sync_unit_blob_pose(unit: TacticalUnitInstance, pose: Dictionary) -> void:

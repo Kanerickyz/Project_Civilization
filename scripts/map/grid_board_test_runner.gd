@@ -121,11 +121,14 @@ func _test_board_look_and_unit_blob() -> bool:
 	if blob.get_parent() != spr:
 		push_error("GridBoardView: foot blob should be a child of the unit sprite (2D depth)")
 		return false
-	var pose := view._unit_pose_screen(Vector2i(1, 1))
-	view._sync_unit_blob_pose(unit, pose)
-	var expect_blob := (pose["feet"] as Vector2) - (pose["torso"] as Vector2)
+	var local_pose := view._unit_local_pose_on_tile(Vector2i(1, 1))
+	view._sync_unit_blob_pose(unit, local_pose)
+	var expect_blob := (local_pose["feet"] as Vector2) - (local_pose["torso"] as Vector2)
 	if blob.position.distance_to(expect_blob) > 0.05:
 		push_error("GridBoardView: foot blob should sit on projected cell feet")
+		return false
+	if local_pose["feet"].length() > 0.08:
+		push_error("GridBoardView: unit feet should sit on cell center (local ~0)")
 		return false
 	spr.scale = Vector2.ONE * 0.5
 	spr.modulate.a = 0.3
@@ -321,14 +324,17 @@ func _test_unit_draw_depth() -> bool:
 	var far: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.OPPONENT, Vector2i(6, 6))
 	view.sync_tactical_units([near, far], Vector2i(-1, -1), [], [])
 	var spr_near: Sprite2D = view._unit_sprites[near] as Sprite2D
-	var spr_far: Sprite2D = view._unit_sprites[far] as Sprite2D
-	if spr_far.z_index <= spr_near.z_index:
-		push_error("GridBoardView: farther cell should draw above nearer in oblique depth sort")
-		return false
-	var tile_far: Node2D = view._tile_nodes[Vector2i(6, 6)] as Node2D
 	var tile_near: Node2D = view._tile_nodes[Vector2i(1, 1)] as Node2D
-	if spr_near.z_index <= tile_near.z_index:
-		push_error("GridBoardView: unit should draw above its own tile layer")
+	var tile_far: Node2D = view._tile_nodes[Vector2i(6, 6)] as Node2D
+	var ov_near: Polygon2D = tile_near.get_node("Overlay") as Polygon2D
+	if spr_near.get_parent() != tile_near:
+		push_error("GridBoardView: unit should parent to its tile for depth sorting")
+		return false
+	if spr_near.z_index <= ov_near.z_index:
+		push_error("GridBoardView: unit should draw above overlay on same tile")
+		return false
+	if tile_far.z_index <= tile_near.z_index:
+		push_error("GridBoardView: farther tile should have higher tile-root z_index")
 		return false
 	return true
 

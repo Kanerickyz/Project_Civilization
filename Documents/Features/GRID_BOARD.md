@@ -26,7 +26,7 @@
 - **3D 网格资源**：`resources/terrain/meshes/*.tres` 仍供 headless 尺寸/生成脚本使用，**运行时沙盘与地图编辑器不再实例化 MeshInstance3D**。
 - **阴影**：**无 3D 方向光实时投影**。`BoardLook.shadow_*` 仍定义产品意图；2D 路径下单位使用 **脚下径向渐变软影**（`Sprite2D`），不随 Web 开关 3D 灯。若需强对比，可调 `unit_blob_opacity`。
 - **BoardLook**：`background_color` 铺满 SubViewport 背板；`unit_modulate` 乘在角色 Sprite 上。已移除全屏后处理。
-- **单位**：`Sprite2D` 锚在格心 **脚点→躯干** 斜投影；`z_index = (x+y)*16+8`，与地块同深度 stride、高于 overlay(4)；脚下软影为子节点贴在投影脚点。
+- **单位**：挂在对应 **Tile 节点** 下（与格块同深度）；局部坐标以格心投影为原点，脚点≈`(0,0)`、躯干在上；`z_index=8` 高于 overlay(4)。跨格移动时暂挂 `Units` 层做世界插值，落地后收回 Tile。
 - **选中高亮**：格上半透明 `Polygon2D`——选中（蓝）、移动（绿）、攻击距离（红）。
 - **不做**：WFC、迷雾、六边格。
 
