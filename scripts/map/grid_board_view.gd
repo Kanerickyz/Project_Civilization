@@ -9,6 +9,7 @@ var config: BoardConfig
 
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
+var _chrome: ColorRect ## Control 层底色，避免 SubViewport 未铺满时透出沙盘灰底。
 var _backdrop: ColorRect
 var _world_root: Node2D
 var _tiles_root: Node2D
@@ -85,7 +86,6 @@ func setup(p_config: BoardConfig) -> void:
 	_zoom = clampf(config.camera_zoom_default, config.camera_zoom_min, config.camera_zoom_max)
 	_needs_center = true
 	_rebuild_board()
-	_sync_viewport_size()
 	_try_center_on_board()
 	_apply_camera()
 
@@ -148,11 +148,17 @@ func _ready() -> void:
 func _ensure_viewport_tree() -> void:
 	if _viewport_container != null:
 		return
+	# Control 层先铺 BoardLook 底色：Web/竖屏下 stretch 同步前也不透出沙盘灰，避免「1/4 绿」。
+	_chrome = ColorRect.new()
+	_chrome.name = "BoardChrome"
+	_chrome.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_chrome.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_chrome)
+
 	_viewport_container = SubViewportContainer.new()
 	_viewport_container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# stretch=false：由我们把 SubViewport 尺寸同步成容器像素，点选坐标 1:1，避免 stretch 下
-	# 无法手改 size、容器与视口比例短暂不一致导致的射线偏移。
-	_viewport_container.stretch = false
+	# stretch=true：容器负责把 SubViewport 拉满；勿手改 size（引擎会忽略并留下未铺满绿块）。
+	_viewport_container.stretch = true
 	_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_viewport_container)
 
@@ -205,30 +211,20 @@ func _look() -> BoardLook:
 
 
 func _apply_look() -> void:
+	var bg := _look().background_color
+	if _chrome != null:
+		_chrome.color = bg
 	if _backdrop != null:
-		_backdrop.color = _look().background_color
+		_backdrop.color = bg
 	_blob_texture = null
 
 
 func _on_resized() -> void:
-	_sync_viewport_size()
 	if config == null:
 		return
 	if _needs_center:
 		_try_center_on_board()
 	_apply_camera()
-
-
-func _sync_viewport_size() -> void:
-	if _viewport == null:
-		return
-	# 用本控件 size（而非尚可能为 0 的 container.size），保证 stretch=false 时像素 1:1。
-	var sz := size
-	if sz.x <= 1.0 or sz.y <= 1.0:
-		return
-	var want := Vector2i(maxi(1, int(round(sz.x))), maxi(1, int(round(sz.y))))
-	if _viewport.size != want:
-		_viewport.size = want
 
 
 func recenter_camera() -> void:
@@ -1146,15 +1142,50 @@ func pick_cell_at_global(global_pos: Vector2) -> Variant:
 
 
 func _pick_cell(local_pos: Vector2) -> Variant:
-	if _camera == null or size.y <= 0.0 or size.x <= 0.0 or not _camera.is_inside_tree():
+	## 2D「射线」：相机逆变换到棋盘世界坐标，再对可见格菱形做点在多边形内测试。
+	if _camera == null or config == null or size.y <= 0.0 or size.x <= 0.0 or not _camera.is_inside_tree():
 		return null
 	if local_pos.x < 0.0 or local_pos.y < 0.0 or local_pos.x > size.x or local_pos.y > size.y:
 		return null
 	var vp_pos := _to_viewport_pos(local_pos)
-	var inv := _camera.get_canvas_transform().affine_inverse()
-	var hit: Vector2 = inv * vp_pos
-	var ground := _oblique_unproject_ground(hit)
-	return _world_to_cell(ground)
+	var hit: Vector2 = _camera.get_canvas_transform().affine_inverse() * vp_pos
+	return _pick_cell_at_world(hit)
+
+
+func _pick_cell_at_world(world: Vector2) -> Variant:
+	if _tile_nodes.is_empty():
+		var ground := _oblique_unproject_ground(world)
+		return _world_to_cell(ground)
+	# 先用反投影猜一格，命中可视多边形则直接用（快路径）。
+	var guess: Variant = _world_to_cell(_oblique_unproject_ground(world))
+	if guess is Vector2i and _world_hits_cell_poly(world, guess as Vector2i):
+		return guess
+	# 否则扫全部可见格：取屏幕纵深最大者（更靠前、与绘制一致）。
+	var best: Variant = null
+	var best_z := -2147483648
+	for cell in _tile_nodes.keys():
+		var c: Vector2i = cell as Vector2i
+		if not _world_hits_cell_poly(world, c):
+			continue
+		var z := _draw_depth_for_cell(c)
+		if z >= best_z:
+			best_z = z
+			best = c
+	return best
+
+
+func _world_hits_cell_poly(world: Vector2, cell: Vector2i) -> bool:
+	if not _tile_nodes.has(cell):
+		return false
+	var root: Node2D = _tile_nodes[cell] as Node2D
+	var grass: Polygon2D = root.get_node_or_null("Grass") as Polygon2D
+	if grass == null or grass.polygon.size() < 3:
+		return false
+	var poly := PackedVector2Array()
+	poly.resize(grass.polygon.size())
+	for i in grass.polygon.size():
+		poly[i] = root.position + grass.polygon[i]
+	return Geometry2D.is_point_in_polygon(world, poly)
 
 
 func _world_to_cell(world: Vector3) -> Variant:
@@ -1169,7 +1200,7 @@ func _world_to_cell(world: Vector3) -> Variant:
 
 
 func _to_viewport_pos(local_pos: Vector2) -> Vector2:
-	## Control 本地像素 → SubViewport 像素。stretch=false 且尺寸已同步时应为恒等；仍按比例换算以防首帧。
+	## Control 本地像素 → SubViewport 像素（stretch 时按容器与视口比例换算）。
 	if _viewport == null or _viewport_container == null:
 		return local_pos
 	var container_size := _viewport_container.size

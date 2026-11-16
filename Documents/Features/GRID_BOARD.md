@@ -19,14 +19,14 @@
 
 ## 表现
 
-- **坐标**：逻辑格 `(x, y)` 先映射到地面 **XZ**（原点在盘心，顶面高度 `tile_height`），再经 **`camera_pitch_deg` + `camera_yaw_deg`（默认各 45°）** 正交投影到 SubViewport 2D。点选反投影落在同一顶面，避免格边偏到邻格。
-- **视角**：仍用 **Camera2D** 平移/缩放视口；投影公式与旧 3D 斜视正交一致，棋盘呈斜 45° 俯视（非顶视）。默认缩放按视口**短边**适配 `camera_ortho_size`（竖屏不再按高度过度放大）。`SubViewportContainer.stretch=false`，视口像素与控件本地 1:1。
+- **坐标**：逻辑格 `(x, y)` 先映射到地面 **XZ**（原点在盘心，顶面高度 `tile_height`），再经 **`camera_pitch_deg` + `camera_yaw_deg`（默认各 45°）** 正交投影到 SubViewport 2D。点选：相机逆变换后对格块 **Grass 菱形做点在多边形内**（2D 命中，等价射线落到可见格面）。
+- **视角**：仍用 **Camera2D** 平移/缩放视口；投影公式与旧 3D 斜视正交一致，棋盘呈斜 45° 俯视（非顶视）。默认缩放按视口**短边**适配 `camera_ortho_size`。`SubViewportContainer.stretch=true` 铺满棋盘区；Control 层另有同色 chrome，避免未同步时透出沙盘底色。
 - **地块绘制**（`Polygon2D`，投影四边形）：
   - 草地：方 footprint `cell_size × tile_inset`（默认 **0.98U**）；顶面色按 `(x+y)%2` **`#B4A158` / `#8F884C`**。
   - 直城墙：草地底同上；格内居中条形墙身（厚 **0.16U**、长 **inset**），石砖 **`#9C958C` / `#716C65`**；按相邻同类 **0° / 90°** 转向（与旧 3D 规则一致）。
 - **3D 网格资源**：`resources/terrain/meshes/*.tres` 仍供 headless 尺寸/生成脚本使用，**运行时沙盘与地图编辑器不再实例化 MeshInstance3D**。
 - **阴影**：**无 3D 方向光实时投影**。`BoardLook.shadow_*` 仍定义产品意图；2D 路径下单位使用 **脚下径向渐变软影**（`Sprite2D`），不随 Web 开关 3D 灯。若需强对比，可调 `unit_blob_opacity`。
-- **BoardLook**：`background_color` 铺满 SubViewport 背板；`unit_modulate` 乘在角色 Sprite 上。已移除全屏后处理。
+- **BoardLook**：`background_color`（橄榄绿桌面）铺满棋盘区背板；`unit_modulate` 乘在角色 Sprite 上。已移除全屏后处理。
 - **单位**：节点原点在**地面格心投影**（菱形几何中心，不是下顶点）。`Sprite2D.offset` 把贴图上移半高，**脚点留在格心**，躯干与头在脚点上方；HP 在头顶。脚下软影贴在脚点。`z_as_relative = false`，`z_index` 从 `1000` 起（高于全部格子），单位之间再按屏幕 Y 排序。
 - **选中高亮**：格上半透明 `Polygon2D`——选中（蓝）、移动（绿）、攻击距离（红）。
 - **不做**：WFC、迷雾、六边格。
