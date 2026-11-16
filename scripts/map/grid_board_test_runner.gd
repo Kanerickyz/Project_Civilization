@@ -34,6 +34,9 @@ func _initialize() -> void:
 	if not _test_board_look_and_unit_blob():
 		quit(1)
 		return
+	if not _test_unit_draw_depth():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -115,12 +118,14 @@ func _test_board_look_and_unit_blob() -> bool:
 		return false
 	var blob := view._unit_blobs[unit] as Sprite2D
 	var spr := view._unit_sprites[unit] as Sprite2D
-	if blob.get_parent() == spr:
-		push_error("GridBoardView: foot blob must not be a child of the unit sprite")
+	if blob.get_parent() != spr:
+		push_error("GridBoardView: foot blob should be a child of the unit sprite (2D depth)")
 		return false
-	view._process(0.0)
-	if blob.position.distance_to(spr.position) > cfg.cell_size:
-		push_error("GridBoardView: foot blob should follow the sprite near its feet")
+	var pose := view._unit_pose_screen(Vector2i(1, 1))
+	view._sync_unit_blob_pose(unit, pose)
+	var expect_blob := (pose["feet"] as Vector2) - (pose["torso"] as Vector2)
+	if blob.position.distance_to(expect_blob) > 0.05:
+		push_error("GridBoardView: foot blob should sit on projected cell feet")
 		return false
 	spr.scale = Vector2.ONE * 0.5
 	spr.modulate.a = 0.3
@@ -293,6 +298,37 @@ func _test_terrain_footprint_dimensions() -> bool:
 	var step := view._cell_to_world(Vector2i(1, 0), cs)
 	if absf(flat.y - step.y) < 0.01:
 		push_error("GridBoardView: oblique projection should skew screen Y across grid X")
+		return false
+	return true
+
+
+func _test_unit_draw_depth() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 8
+	cfg.grid_height = 8
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		return true
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var near: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
+	var far: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.OPPONENT, Vector2i(6, 6))
+	view.sync_tactical_units([near, far], Vector2i(-1, -1), [], [])
+	var spr_near: Sprite2D = view._unit_sprites[near] as Sprite2D
+	var spr_far: Sprite2D = view._unit_sprites[far] as Sprite2D
+	if spr_far.z_index <= spr_near.z_index:
+		push_error("GridBoardView: farther cell should draw above nearer in oblique depth sort")
+		return false
+	var tile_far: Node2D = view._tile_nodes[Vector2i(6, 6)] as Node2D
+	var tile_near: Node2D = view._tile_nodes[Vector2i(1, 1)] as Node2D
+	if spr_near.z_index <= tile_near.z_index:
+		push_error("GridBoardView: unit should draw above its own tile layer")
 		return false
 	return true
 

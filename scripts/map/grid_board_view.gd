@@ -34,6 +34,10 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 const OVERLAY_Z := 4
 const WALL_Z := 2
 const GRASS_Z := 0
+## 按格深度排序：同 stride 下 overlay(4) < 单位(8)。
+const DRAW_DEPTH_STRIDE := 16
+const UNIT_DRAW_LAYER := 8
+const UNIT_FEET_LIFT := 0.02
 const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
@@ -168,7 +172,6 @@ func _ensure_viewport_tree() -> void:
 
 	_units_root = Node2D.new()
 	_units_root.name = "Units"
-	_units_root.z_index = 10
 	_world_root.add_child(_units_root)
 
 	_labels_layer = CanvasLayer.new()
@@ -294,16 +297,16 @@ func sync_tactical_units(
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites[unit] as Sprite2D
-	var unit_h: float = config.unit_world_height if config != null else 0.88
-	var ground := _cell_ground_center(unit.cell, config.cell_size)
-	ground.y = config.tile_height + unit_h * 0.5
-	var target_pos := _oblique_project(ground)
+	var pose := _unit_pose_screen(unit.cell)
+	var target_pos: Vector2 = pose["torso"]
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
+	_apply_unit_draw_depth(unit)
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
-		_tween_unit_to(spr, target_pos)
+		_tween_unit_to(spr, target_pos, unit)
 	else:
 		spr.position = target_pos
+		_sync_unit_blob_pose(unit, pose)
 	_update_hp_bar(unit)
 
 
@@ -314,10 +317,14 @@ func unit_move_duration_sec() -> float:
 	return UNIT_MOVE_TWEEN_SEC
 
 
-func _tween_unit_to(spr: Sprite2D, target_pos: Vector2) -> void:
+func _tween_unit_to(spr: Sprite2D, target_pos: Vector2, unit: TacticalUnitInstance) -> void:
 	var tw := create_tween()
 	tw.tween_property(spr, "position", target_pos, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
 		Tween.EASE_OUT
+	)
+	tw.finished.connect(func() -> void:
+		_sync_unit_blob_pose(unit, _unit_pose_screen(unit.cell))
+		_update_hp_bar(unit)
 	)
 
 
@@ -426,6 +433,9 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 
 
 func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
+	var spr := _unit_sprites.get(unit) as Sprite2D
+	if spr == null:
+		return
 	var look := _look()
 	if look.unit_blob_opacity <= 0.0:
 		return
@@ -449,7 +459,7 @@ func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
 	blob.z_index = -1
 	var r := look.unit_blob_radius * config.cell_size * 2.0
 	blob.scale = Vector2(r / 64.0, r / 64.0 * 0.7)
-	_units_root.add_child(blob)
+	spr.add_child(blob)
 	_unit_blobs[unit] = blob
 
 
@@ -465,9 +475,9 @@ func _process(_delta: float) -> void:
 		if spr == null:
 			continue
 		var blob := _unit_blobs[unit] as Sprite2D
-		blob.position = spr.position + Vector2(0.0, spr.texture.get_height() * spr.scale.y * 0.22 if spr.texture else 6.0)
-		blob.scale.x = absf(spr.scale.x) * ( _look().unit_blob_radius * config.cell_size * 2.0 / 64.0)
-		blob.scale.y = absf(spr.scale.y) * ( _look().unit_blob_radius * config.cell_size * 2.0 / 64.0) * 0.7
+		var s := absf(spr.scale.x)
+		var r := _look().unit_blob_radius * config.cell_size * 2.0
+		blob.scale = Vector2(s * r / 64.0, s * r / 64.0 * 0.7)
 		blob.visible = spr.modulate.a > BLOB_HIDE_ALPHA
 
 
@@ -491,8 +501,9 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	var bar := _hp_bars[unit] as Label
 	var spr := _unit_sprites[unit] as Sprite2D
 	bar.text = "%d/%d" % [unit.hp, unit.def.max_hp]
-	var lift: float = config.unit_world_height * 0.48
-	_position_world_on_label(bar, spr.position + Vector2(0.0, -lift))
+	var pose := _unit_pose_screen(unit.cell)
+	var head_off: Vector2 = pose["head"] - pose["torso"]
+	_position_world_on_label(bar, spr.position + head_off)
 	if unit.hp <= unit.def.max_hp / 3:
 		bar.modulate = Color("ff6666")
 	else:
@@ -536,7 +547,7 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		if is_wall:
 			_update_wall_geometry(cell, _tile_yaw(cell, terrain_id, def))
 	root.rotation = 0.0
-	root.z_index = cell.x + cell.y
+	root.z_index = _draw_depth_for_cell(cell)
 	_apply_overlay(cell)
 
 
@@ -567,6 +578,37 @@ func _apply_overlay(cell: Vector2i) -> void:
 	ov.visible = tag != ""
 	if tag != "":
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
+
+
+func _draw_depth_for_cell(cell: Vector2i) -> int:
+	return (cell.x + cell.y) * DRAW_DEPTH_STRIDE
+
+
+func _unit_pose_screen(cell: Vector2i) -> Dictionary:
+	var unit_h: float = config.unit_world_height if config != null else 0.88
+	var feet := _cell_ground_center(cell, config.cell_size)
+	feet.y = config.tile_height + UNIT_FEET_LIFT
+	var torso := feet + Vector3(0.0, unit_h * 0.5, 0.0)
+	var head := feet + Vector3(0.0, unit_h * 0.92, 0.0)
+	return {
+		"feet": _oblique_project(feet),
+		"torso": _oblique_project(torso),
+		"head": _oblique_project(head),
+	}
+
+
+func _apply_unit_draw_depth(unit: TacticalUnitInstance) -> void:
+	var spr := _unit_sprites.get(unit) as Sprite2D
+	if spr == null:
+		return
+	spr.z_index = _draw_depth_for_cell(unit.cell) + UNIT_DRAW_LAYER
+
+
+func _sync_unit_blob_pose(unit: TacticalUnitInstance, pose: Dictionary) -> void:
+	if not _unit_blobs.has(unit):
+		return
+	var blob := _unit_blobs[unit] as Sprite2D
+	blob.position = (pose["feet"] as Vector2) - (pose["torso"] as Vector2)
 
 
 func _oblique_project(p: Vector3) -> Vector2:
@@ -641,7 +683,7 @@ func _update_tile_geometry(cell: Vector2i) -> void:
 	grass.polygon = poly
 	var ov: Polygon2D = root.get_node("Overlay") as Polygon2D
 	ov.polygon = poly
-	root.z_index = cell.x + cell.y
+	root.z_index = _draw_depth_for_cell(cell)
 	_update_wall_geometry(cell, 0.0)
 
 
