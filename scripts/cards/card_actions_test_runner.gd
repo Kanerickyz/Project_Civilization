@@ -4,6 +4,7 @@ const TacticalSandboxRosterScript := preload("res://scripts/units/tactical_sandb
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
+const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 
 
 func _initialize() -> void:
@@ -23,6 +24,12 @@ func _initialize() -> void:
 		quit(1)
 		return
 	if not _test_end_turn_discards_hand():
+		quit(1)
+		return
+	if not _test_move_card_resets_budget():
+		quit(1)
+		return
+	if not _test_attack_card_clears_flag_for_second_hit():
 		quit(1)
 		return
 	print("CARD_ACTIONS_OK")
@@ -225,5 +232,89 @@ func _test_end_turn_discards_hand() -> bool:
 	deck.begin_player_turn()
 	if deck.hand.is_empty():
 		push_error("CardActions: second turn should draw")
+		return false
+	return true
+
+
+## 移力耗尽后再 authorize_move：剩余移力应重置为满池并可再移。
+func _test_move_card_resets_budget() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 23
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	var unit: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
+			unit = u
+			break
+	if unit == null:
+		push_error("CardActions: need archer for budget reset test")
+		return false
+	if not deck.authorize_move(unit):
+		push_error("CardActions: first authorize_move failed")
+		return false
+	unit.remaining_move_budget = 0
+	if not board.reachable_move_cells(unit).is_empty():
+		push_error("CardActions: exhausted budget should block reachability")
+		return false
+	if not deck.authorize_move(unit):
+		push_error("CardActions: second authorize_move failed")
+		return false
+	var full := unit.def.action_move_budget()
+	if unit.remaining_move_budget != full:
+		push_error(
+			"CardActions: second move card should reset budget to %d, got %d"
+			% [full, unit.remaining_move_budget]
+		)
+		return false
+	if board.reachable_move_cells(unit).is_empty():
+		push_error("CardActions: after reset should have reachable cells")
+		return false
+	return true
+
+
+## 普攻后标记已攻；prepare_attack 清标记后可再攻（玩家卡路径）。
+func _test_attack_card_clears_flag_for_second_hit() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 29
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	var knight: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
+			knight = u
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "archer":
+			foe = u
+	if knight == null or foe == null:
+		push_error("CardActions: need knight + foe archer")
+		return false
+	foe.cell = knight.cell + Vector2i(0, 1)
+	foe.hp = 99
+	var first := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not first["ok"] or not knight.attacked_this_side_turn:
+		push_error("CardActions: first attack should succeed and set flag")
+		return false
+	var blocked := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if blocked["ok"]:
+		push_error("CardActions: without card, second attack must fail (AI path)")
+		return false
+	if not deck.prepare_attack(knight):
+		push_error("CardActions: prepare_attack failed")
+		return false
+	if knight.attacked_this_side_turn:
+		push_error("CardActions: prepare_attack should clear attacked flag")
+		return false
+	var second := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not second["ok"]:
+		push_error("CardActions: after attack card, second hit should succeed")
 		return false
 	return true
