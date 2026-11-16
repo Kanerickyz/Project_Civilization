@@ -8,6 +8,7 @@ enum TriggerKind {
 	ON_SELF_HURT,
 	ON_SELF_DEPLOY,
 	ON_SELF_KILL,
+	ON_SELF_MOVE_END,
 }
 
 
@@ -21,4 +22,7 @@ enum TriggerKind {
 @export var self_atk_on_trigger: int = 0
 @export var self_atk_on_kill: int = 0
 @export var ally_atk_buff: int = 0
+@export var ally_hp_buff: int = 0
 @export var ally_buff_radius: int = 2
+## 击杀时往玩家手牌加 1 张临时攻击卡（仅玩家击杀生效）。
+@export var grant_ephemeral_attack_on_kill: bool = false

@@ -5,6 +5,8 @@ const TacticalAbilitySystemScript := preload("res://scripts/units/tactical_abili
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
+const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
+const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 
 
 func _initialize() -> void:
@@ -14,16 +16,16 @@ func _initialize() -> void:
 	if not _test_move_and_attack_ranges():
 		quit(1)
 		return
-	if not _test_archer_deploy():
+	if not _test_archer_kill_grants_card():
 		quit(1)
 		return
 	if not _test_knight_hurt():
 		quit(1)
 		return
-	if not _test_wardrum_side_turn():
+	if not _test_wardrum_move_end_buff():
 		quit(1)
 		return
-	if not _test_pekka_kill_stack():
+	if not _test_pekka_no_passive():
 		quit(1)
 		return
 	if not _test_basic_attack_flag():
@@ -89,19 +91,26 @@ func _test_move_and_attack_ranges() -> bool:
 	return true
 
 
-func _test_archer_deploy() -> bool:
+func _test_archer_kill_grants_card() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
+	board.player_deck = deck
 	var archer := _player_unit(board, "archer")
-	if archer == null:
+	var foe := _opponent_unit(board, "wardrum")
+	if archer == null or foe == null:
 		return false
-	var before := archer.effective_attack()
-	TacticalAbilitySystemScript.process_battle_start(board)
-	if archer.effective_attack() != before + 1:
-		push_error("TacticalUnits: archer deploy should +1 atk")
+	foe.hp = 1
+	var hand_before := deck.hand.size()
+	board.apply_damage(foe, 1, archer)
+	if foe.is_alive():
+		push_error("TacticalUnits: archer should kill weak foe")
 		return false
-	TacticalAbilitySystemScript.process_battle_start(board)
-	if archer.effective_attack() != before + 1:
-		push_error("TacticalUnits: deploy trigger should fire once")
+	if deck.hand.size() != hand_before + 1:
+		push_error("TacticalUnits: archer kill should grant ephemeral attack")
+		return false
+	var c: TacticalActionCard = deck.hand[deck.hand.size() - 1]
+	if not c.ephemeral or c.kind != TacticalActionCardScript.Kind.ATTACK:
+		push_error("TacticalUnits: granted card must be ephemeral attack")
 		return false
 	return true
 
@@ -119,33 +128,51 @@ func _test_knight_hurt() -> bool:
 	return true
 
 
-func _test_wardrum_side_turn() -> bool:
+func _test_wardrum_move_end_buff() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var drum := _player_unit(board, "wardrum")
 	var archer := _player_unit(board, "archer")
 	if drum == null or archer == null:
 		return false
+	# 放到鼓手旁一格，确保移动后仍在 2 格内。
+	archer.cell = drum.cell + Vector2i(1, 0)
+	if board.unit_at(archer.cell) != null and board.unit_at(archer.cell) != archer:
+		archer.cell = drum.cell + Vector2i(0, 1)
+	var before_atk := archer.effective_attack()
+	var before_max := archer.effective_max_hp()
+	var before_hp := archer.hp
+	var dest := drum.cell + Vector2i(-1, 0)
+	if board.unit_at(dest) != null:
+		dest = drum.cell + Vector2i(0, -1)
+	if not board.try_move(drum, dest):
+		push_error("TacticalUnits: wardrum move for buff test failed")
+		return false
 	if GridMathScript.chebyshev(drum.cell, archer.cell) > 2:
-		push_error("TacticalUnits: archer should be in drum radius for demo layout")
+		push_error("TacticalUnits: archer should remain in drum radius")
 		return false
-	var before := archer.effective_attack()
-	var logs := TacticalAbilitySystemScript.process_side_turn_start(
-		board, TacticalFactionScript.Id.PLAYER
-	)
-	if logs.is_empty():
-		push_error("TacticalUnits: wardrum side turn should buff")
+	if archer.effective_attack() != before_atk + 1:
+		push_error("TacticalUnits: wardrum move end should +1 atk nearby")
 		return false
-	if archer.effective_attack() != before + 1:
-		push_error("TacticalUnits: wardrum should buff nearby ally")
+	if archer.effective_max_hp() != before_max + 1 or archer.hp != before_hp + 1:
+		push_error("TacticalUnits: wardrum move end should +1 hp nearby")
+		return false
+	# 行动段开始不再鸣鼓。
+	var atk_mid := archer.effective_attack()
+	TacticalAbilitySystemScript.process_side_turn_start(board, TacticalFactionScript.Id.PLAYER)
+	if archer.effective_attack() != atk_mid:
+		push_error("TacticalUnits: side turn must not buff via wardrum anymore")
 		return false
 	return true
 
 
-func _test_pekka_kill_stack() -> bool:
+func _test_pekka_no_passive() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var pekka := _player_unit(board, "mini_pekka")
 	var foe := _opponent_unit(board, "archer")
 	if pekka == null or foe == null:
+		return false
+	if pekka.def.triggered_ability != null:
+		push_error("TacticalUnits: mini_pekka should have no passive")
 		return false
 	foe.hp = 1
 	var before := pekka.effective_attack()
@@ -153,8 +180,8 @@ func _test_pekka_kill_stack() -> bool:
 	if foe.is_alive():
 		push_error("TacticalUnits: pekka should kill weak archer")
 		return false
-	if pekka.effective_attack() != before + 2:
-		push_error("TacticalUnits: pekka kill should +2 atk")
+	if pekka.effective_attack() != before:
+		push_error("TacticalUnits: pekka kill must not grant atk")
 		return false
 	return true
 

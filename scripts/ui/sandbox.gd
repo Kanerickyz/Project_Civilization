@@ -14,6 +14,7 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 const ActionHandFanScript := preload("res://scripts/ui/action_hand_fan.gd")
+const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
 enum PendingKind { NONE, MOVE, ATTACK }
 
@@ -51,6 +52,7 @@ func _ready() -> void:
 	_board.changed.connect(_on_board_changed)
 	_deck = TacticalCardDeckScript.new()
 	_deck.build_from_living_player_units(_board)
+	_board.player_deck = _deck
 	_build()
 	# HUD 建好后再听牌库变化，避免 _ready 早期 changed 打到空 Label。
 	_deck.changed.connect(_on_deck_changed)
@@ -313,6 +315,7 @@ func _on_deck_changed() -> void:
 
 func _clear_pending_target(keep_move_focus: bool = true) -> void:
 	_pending_kind = PendingKind.NONE
+	_deck.pending_attack_bonus = 0
 	if not keep_move_focus:
 		_focus_unit = null
 	elif _focus_unit != null and _deck.is_move_authorized(_focus_unit):
@@ -384,7 +387,7 @@ func _refresh_unit_panel() -> void:
 			u.def.display_name,
 			TacticalFactionScript.label(u.faction),
 			u.hp,
-			u.def.max_hp,
+			u.effective_max_hp(),
 			u.effective_attack(),
 			u.remaining_move_budget,
 			u.def.action_move_budget(),
@@ -405,10 +408,7 @@ func _refresh_hand_ui() -> void:
 	for card in _deck.hand:
 		labels.append(card.display_label())
 		kinds.append(int(card.kind))
-		if card.kind == TacticalActionCardScript.Kind.MOVE:
-			details.append("拖到己方单位：重置其本段移力为满池并授权移动，再点绿格。可打多张再移。")
-		else:
-			details.append("拖到己方单位：选定攻击者并发动一次普攻许可，再点红圈内敌人。可打多张再攻。")
+		details.append(card.rules_detail())
 	_hand_fan.set_hand(labels, kinds, details)
 	var player_turn := _clock.player_active and not _game_over and not _input_locked
 	_hand_fan.set_interactive(player_turn)
@@ -447,6 +447,12 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_hand_fan.notify_drop_resolved(false)
 		_refresh_all()
 		return
+	var peek: TacticalActionCard = _deck.hand[index]
+	if peek != null and not peek.can_drop_on(target):
+		_last_log = "该卡须拖到对应角色 · 卡已回手"
+		_hand_fan.notify_drop_resolved(false)
+		_refresh_all()
+		return
 	# 先结束拖态，再从手牌结算进弃，避免重建打断回弹。
 	_hand_fan.notify_drop_resolved(true)
 	var card := _deck.play_hand_index(index)
@@ -460,10 +466,24 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
 		_last_log = "移动：%s · 移力已重置 · 点绿格" % target.def.display_name
-	else:
-		_deck.prepare_attack(target)
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+		_pending_kind = PendingKind.NONE
+		_focus_unit = null
+		var drawn := _deck.resolve_wardrum_redraw()
+		_last_log = "鸣鼓换手：弃手后抽 %d 张" % drawn
+	elif card.is_attack_aim():
+		_deck.prepare_attack(target, card.attack_bonus_damage)
 		_pending_kind = PendingKind.ATTACK
-		_last_log = "攻击者：%s · 点敌人" % target.def.display_name
+		if card.kind == TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK:
+			_last_log = "加强攻击：%s · 额外+%d · 点红圈内单位（含友方）" % [
+				target.def.display_name,
+				card.attack_bonus_damage,
+			]
+		else:
+			_last_log = "攻击者：%s · 点红圈内单位（含友方）" % target.def.display_name
+	else:
+		_last_log = "未知卡类型"
+		_pending_kind = PendingKind.NONE
 	_refresh_all()
 
 
@@ -527,12 +547,17 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_refresh_all()
 		return
 
-	# 攻击瞄准：攻击者已由拖卡选定。
+	# 攻击瞄准：攻击者已由拖卡选定；可点红圈内任意其他单位（含友方）。
 	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
-		if clicked != null and clicked.faction != TacticalFactionScript.Id.PLAYER:
-			_run_player_attack_async(cell, clicked)
-			return
-		_last_log = "请点敌方单位，或取消目标"
+		if clicked != null and clicked != _focus_unit:
+			var in_range := (
+				GridMathScript.chebyshev(_focus_unit.cell, clicked.cell)
+				<= _focus_unit.def.attack_range
+			)
+			if in_range:
+				_run_player_attack_async(cell, clicked)
+				return
+		_last_log = "请点红圈内单位（可友方），或取消目标"
 		_refresh_all()
 		return
 
@@ -551,11 +576,19 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	if _input_locked or _focus_unit == null:
 		return
 	var attacker := _focus_unit
+	var bonus := _deck.consume_pending_attack_bonus()
 	var atk := TacticalCombatScript.try_basic_attack(
-		_board, attacker, target_cell, TacticalFactionScript.Id.PLAYER
+		_board,
+		attacker,
+		target_cell,
+		TacticalFactionScript.Id.PLAYER,
+		true,
+		bonus
 	)
 	_last_log = atk["log"]
 	if not atk["ok"]:
+		# 失败时退回 bonus，避免白丢加强攻。
+		_deck.pending_attack_bonus = bonus
 		_refresh_all()
 		return
 	_input_locked = true
@@ -565,7 +598,7 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		await tw.finished
 	_feedback_from_attack(target, atk)
 	_pending_kind = PendingKind.NONE
-	if _deck.is_move_authorized(attacker):
+	if attacker.is_alive() and _deck.is_move_authorized(attacker):
 		_pending_kind = PendingKind.MOVE
 		_focus_unit = attacker
 	_check_victory()
@@ -595,7 +628,7 @@ func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
 		return
 	var n := _deck.on_player_unit_died(unit)
 	if n > 0:
-		_last_log = "%s 阵亡，库中减去移动/攻击各最多 1 张（共 %d）" % [
+		_last_log = "%s 阵亡，库中减去移/攻/主动技（共 %d）" % [
 			unit.def.display_name if unit.def != null else "单位",
 			n,
 		]
@@ -711,13 +744,22 @@ func capture_select_player_unit(unit_id: String) -> void:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
+## kind_name: move | attack | skill_draw | skill_strong_attack
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
-	var want_move := kind_name == "move"
+	var want := TacticalActionCardScript.Kind.MOVE
+	match kind_name:
+		"attack":
+			want = TacticalActionCardScript.Kind.ATTACK
+		"skill_draw":
+			want = TacticalActionCardScript.Kind.SKILL_DRAW
+		"skill_strong_attack":
+			want = TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK
+		_:
+			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
 	for i in _deck.hand.size():
 		var c: TacticalActionCard = _deck.hand[i]
-		var is_move := c.kind == TacticalActionCardScript.Kind.MOVE
-		if want_move == is_move:
+		if c.kind == want:
 			idx = i
 			break
 	if idx < 0:
@@ -729,7 +771,9 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			break
 	if unit == null:
 		return false
-	# 直接走结算路径（跳过指针），并通知手牌结束拖态。
+	var peek: TacticalActionCard = _deck.hand[idx]
+	if not peek.can_drop_on(unit):
+		return false
 	var card := _deck.play_hand_index(idx)
 	if card == null:
 		return false
@@ -738,8 +782,14 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
 		_deck.authorize_move(unit)
 		_pending_kind = PendingKind.MOVE
-	else:
-		_deck.prepare_attack(unit)
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+		_pending_kind = PendingKind.NONE
+		_focus_unit = null
+		_deck.resolve_wardrum_redraw()
+	elif card.is_attack_aim():
+		_deck.prepare_attack(unit, card.attack_bonus_damage)
 		_pending_kind = PendingKind.ATTACK
+	else:
+		return false
 	_refresh_all()
 	return true

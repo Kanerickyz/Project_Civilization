@@ -1,7 +1,7 @@
 class_name TacticalCardDeck
 extends RefCounted
 ## 玩家三库（牌库 / 手牌 / 弃牌）与 STS 式抽弃。
-## 卡为通用「移动」「攻击」；数量 = 己方存活单位数各贡献 1 张。
+## 通用移/攻 + 存活角色主动技；游侠击杀临时攻卡仅进手、用完销毁。
 
 
 signal changed
@@ -9,12 +9,16 @@ signal changed
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
+const SKILL_STRONG_BONUS := 2
+
 var draw_count: int = 5
 var draw_pile: Array[TacticalActionCard] = []
 var hand: Array[TacticalActionCard] = []
 var discard_pile: Array[TacticalActionCard] = []
 ## 本段已获移动授权的己方单位（对象作键）。
 var move_authorized: Dictionary = {}
+## 下一次普攻额外伤害（加强攻击卡瞄准中）。
+var pending_attack_bonus: int = 0
 
 var _rng: RandomNumberGenerator
 var _draw_pile_shuffled: bool = false
@@ -43,45 +47,59 @@ func clear() -> void:
 	hand.clear()
 	discard_pile.clear()
 	move_authorized.clear()
+	pending_attack_bonus = 0
 	_draw_pile_shuffled = false
 	changed.emit()
 
 
-## 按场上己方存活单位生成：每人贡献通用攻击卡 1 + 移动卡 1。绝不收录敌方。
+## 按场上己方存活：每人通用攻+移各 1；另按角色贡献主动技（游侠无）。绝不收录敌方。
 func build_from_living_player_units(board: TacticalBoard) -> void:
 	clear()
 	if board == null:
 		return
 	var player_count := 0
+	var skill_count := 0
 	for u in board.living_units():
 		if u.faction != TacticalFactionScript.Id.PLAYER:
 			continue
 		player_count += 1
-		draw_pile.append(TacticalActionCardScript.new(TacticalActionCard.Kind.ATTACK))
-		draw_pile.append(TacticalActionCardScript.new(TacticalActionCard.Kind.MOVE))
-	# 不变量：总牌数 = 己方存活 × 2，且不含单位绑定。
-	if draw_pile.size() != player_count * 2:
+		draw_pile.append(TacticalActionCardScript.make_move())
+		draw_pile.append(TacticalActionCardScript.make_attack())
+		var skill := _skill_card_for_unit_id(u.def.id)
+		if skill != null:
+			draw_pile.append(skill)
+			skill_count += 1
+	var expected := player_count * 2 + skill_count
+	if draw_pile.size() != expected:
 		push_error(
-			"TacticalCardDeck: build size %d != player_count*2 (%d)"
-			% [draw_pile.size(), player_count * 2]
+			"TacticalCardDeck: build size %d != expected %d"
+			% [draw_pile.size(), expected]
 		)
 	changed.emit()
 
 
 func begin_player_turn() -> void:
 	move_authorized.clear()
+	pending_attack_bonus = 0
 	draw_up_to(draw_count)
 
 
 func end_player_turn() -> void:
 	discard_hand()
 	move_authorized.clear()
+	pending_attack_bonus = 0
 
 
 func discard_hand() -> void:
 	if hand.is_empty():
 		return
+	var kept: Array[TacticalActionCard] = []
 	for card in hand:
+		if card.ephemeral:
+			# 临时卡不进三库，直接销毁。
+			continue
+		kept.append(card)
+	for card in kept:
 		discard_pile.append(card)
 	hand.clear()
 	changed.emit()
@@ -105,18 +123,33 @@ func draw_up_to(count: int) -> int:
 	return drawn
 
 
+## 打出：非临时卡进弃；临时卡销毁。
 func play_hand_index(index: int) -> TacticalActionCard:
 	if index < 0 or index >= hand.size():
 		return null
 	var card: TacticalActionCard = hand[index]
 	hand.remove_at(index)
-	discard_pile.append(card)
+	if not card.ephemeral:
+		discard_pile.append(card)
 	changed.emit()
 	return card
 
 
+## 游侠击杀：立刻往手牌加 1 张临时攻击卡（用完销毁、不进三库）。
+func add_ephemeral_attack_to_hand() -> TacticalActionCard:
+	var card := TacticalActionCardScript.make_attack(true)
+	hand.append(card)
+	changed.emit()
+	return card
+
+
+## 鼓手主动技：当前手牌（已打出的技卡已离手）全部进弃，再抽 draw_count。
+func resolve_wardrum_redraw() -> int:
+	discard_hand()
+	return draw_up_to(draw_count)
+
+
 ## 打出移动卡并选定己方单位：授权本段移动，并将剩余移力重置为满池。
-## 再打一张移动卡到同一单位可再次获得满池（玩家无次数上限；对手 AI 不走此路径）。
 func authorize_move(unit: TacticalUnitInstance) -> bool:
 	if unit == null or not unit.is_alive():
 		return false
@@ -129,16 +162,22 @@ func authorize_move(unit: TacticalUnitInstance) -> bool:
 	return true
 
 
-## 打出攻击卡并选定己方单位：清除本段已攻标记，允许再发动一次普攻。
-## 一张卡仍只结算一次攻；再打卡可再攻。对手 AI 不调用。
-func prepare_attack(unit: TacticalUnitInstance) -> bool:
+## 打出攻击/加强攻击卡：清除已攻标记；加强攻写入 pending_attack_bonus。
+func prepare_attack(unit: TacticalUnitInstance, bonus_damage: int = 0) -> bool:
 	if unit == null or not unit.is_alive():
 		return false
 	if unit.faction != TacticalFactionScript.Id.PLAYER:
 		return false
 	unit.attacked_this_side_turn = false
+	pending_attack_bonus = maxi(0, bonus_damage)
 	changed.emit()
 	return true
+
+
+func consume_pending_attack_bonus() -> int:
+	var n := pending_attack_bonus
+	pending_attack_bonus = 0
+	return n
 
 
 func is_move_authorized(unit: TacticalUnitInstance) -> bool:
@@ -147,8 +186,7 @@ func is_move_authorized(unit: TacticalUnitInstance) -> bool:
 	return bool(move_authorized.get(unit, false))
 
 
-## 己方单位阵亡：从三库各减 1 张移动 + 1 张攻击（优先手牌→牌库→弃牌）；并清除其移动授权。
-## 敌方阵亡不应调用；若误调且非玩家阵营则不改库。
+## 己方阵亡：减通用移/攻各 1，并减该角色主动技 1（有则）；清移动授权。
 func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	if unit == null:
 		return 0
@@ -157,6 +195,9 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	var removed := 0
 	removed += _remove_one_kind(TacticalActionCard.Kind.MOVE)
 	removed += _remove_one_kind(TacticalActionCard.Kind.ATTACK)
+	var skill_kind := _skill_kind_for_unit_id(unit.def.id if unit.def != null else "")
+	if skill_kind >= 0:
+		removed += _remove_one_bound_skill(skill_kind, unit.def.id)
 	if move_authorized.has(unit):
 		move_authorized.erase(unit)
 	if removed > 0:
@@ -164,9 +205,44 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	return removed
 
 
-## 兼容旧名：仅对己方单位生效，等价 on_player_unit_died。
 func remove_unit_cards(unit: TacticalUnitInstance) -> int:
 	return on_player_unit_died(unit)
+
+
+static func expected_skill_count_for_board(board: TacticalBoard) -> int:
+	if board == null:
+		return 0
+	var n := 0
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if _skill_kind_for_unit_id(u.def.id) >= 0:
+			n += 1
+	return n
+
+
+static func _skill_card_for_unit_id(unit_id: String) -> TacticalActionCard:
+	match unit_id:
+		"wardrum":
+			return TacticalActionCardScript.make_skill_draw("wardrum")
+		"knight":
+			return TacticalActionCardScript.make_skill_strong_attack("knight", SKILL_STRONG_BONUS)
+		"mini_pekka":
+			return TacticalActionCardScript.make_skill_strong_attack(
+				"mini_pekka", SKILL_STRONG_BONUS
+			)
+		_:
+			return null
+
+
+static func _skill_kind_for_unit_id(unit_id: String) -> int:
+	match unit_id:
+		"wardrum":
+			return int(TacticalActionCard.Kind.SKILL_DRAW)
+		"knight", "mini_pekka":
+			return int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK)
+		_:
+			return -1
 
 
 func _remove_one_kind(kind: TacticalActionCard.Kind) -> int:
@@ -179,9 +255,38 @@ func _remove_one_kind(kind: TacticalActionCard.Kind) -> int:
 	return 0
 
 
+func _remove_one_bound_skill(kind_i: int, bound_id: String) -> int:
+	var kind := kind_i as TacticalActionCard.Kind
+	if _remove_bound_from(hand, kind, bound_id):
+		return 1
+	if _remove_bound_from(draw_pile, kind, bound_id):
+		return 1
+	if _remove_bound_from(discard_pile, kind, bound_id):
+		return 1
+	return 0
+
+
 func _remove_one_kind_from(pile: Array[TacticalActionCard], kind: TacticalActionCard.Kind) -> bool:
+	# 只减永久通用卡；临时攻卡与主动技不在此列。
 	for i in range(pile.size() - 1, -1, -1):
-		if pile[i].kind == kind:
+		var c: TacticalActionCard = pile[i]
+		if (
+			c.kind == kind
+			and not c.ephemeral
+			and not c.is_active_skill()
+			and c.bound_unit_id == ""
+		):
+			pile.remove_at(i)
+			return true
+	return false
+
+
+func _remove_bound_from(
+	pile: Array[TacticalActionCard], kind: TacticalActionCard.Kind, bound_id: String
+) -> bool:
+	for i in range(pile.size() - 1, -1, -1):
+		var c: TacticalActionCard = pile[i]
+		if c.kind == kind and c.bound_unit_id == bound_id:
 			pile.remove_at(i)
 			return true
 	return false

@@ -10,6 +10,8 @@ signal changed
 var grid_width: int = 10
 var grid_height: int = 8
 var units: Array[TacticalUnitInstance] = []
+## 玩家牌库弱引用（游侠击杀加临时攻卡）；对手 AI 无。
+var player_deck: TacticalCardDeck = null
 ## Vector2i -> StringName（TerrainCatalog id）；缺省格为默认地块。
 var _terrain: Dictionary = {}
 var _catalog: TerrainCatalog = TerrainCatalog.load_default()
@@ -183,6 +185,7 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	unit.remaining_move_budget -= step
 	if unit.remaining_move_budget <= 0:
 		unit.moved_this_side_turn = true
+	TacticalAbilitySystem.process_unit_move_end(self, unit)
 	changed.emit()
 	return true
 
