@@ -207,6 +207,11 @@ func _on_resized() -> void:
 	_apply_camera()
 
 
+func recenter_camera() -> void:
+	_needs_center = true
+	_try_center_on_board()
+
+
 func _try_center_on_board() -> void:
 	if size.x <= 1.0 or size.y <= 1.0 or config == null:
 		return
@@ -796,7 +801,7 @@ func _apply_camera() -> void:
 	if _camera == null or _pivot == null or config == null:
 		return
 	_pivot.position = _oblique_project(Vector3(_target.x, 0.0, _target.z))
-	var vs := _viewport.size if _viewport != null else Vector2i(852, 393)
+	var vs := _viewport.size if _viewport != null else Vector2i(393, 852)
 	var vh := maxf(float(vs.y), 1.0)
 	var ortho := maxf(config.camera_ortho_size, 0.1)
 	var cam_zoom := vh * maxf(_zoom, 0.05) / ortho

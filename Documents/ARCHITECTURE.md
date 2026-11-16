@@ -1,6 +1,6 @@
 # 架构概览
 
-Godot 4.6 · GL Compatibility · 横屏 UI（852×393 逻辑点）。
+Godot 4.6 · GL Compatibility · 竖屏 UI（393×852 逻辑点；expand 下横屏仍可拉伸）。
 
 ## 当前系统
 

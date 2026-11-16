@@ -35,12 +35,9 @@ static func create_filled(map_width: int, map_height: int, fill: StringName = &"
 	return data
 
 
-## 对战沙盘与编辑器新建时的示例 8×8：第 4 行（y=3）为 `01101101`（草墙墙草墙墙草墙）。
+## 对战沙盘与编辑器新建时的默认 8×8：全草地可走；城墙仅由地图编辑器点格绘制。
 static func create_example_layout() -> MapData:
-	var data := create_filled(DEFAULT_WIDTH, DEFAULT_HEIGHT)
-	for x in [1, 2, 4, 5, 7]:
-		data.set_cell(x, 3, &"wall_straight")
-	return data
+	return create_filled(DEFAULT_WIDTH, DEFAULT_HEIGHT)
 
 
 ## fill 为空时用默认地块。

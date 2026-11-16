@@ -27,7 +27,8 @@ func _initialize() -> void:
 	var scene: Node = packed.instantiate()
 	scene.set_meta("capture_zoom", _zoom)
 	root.add_child(scene)
-	var timer := create_timer(0.65, true, false, true)
+	# 等回合条淡出后再截，避免横幅挡棋盘。
+	var timer := create_timer(1.6, true, false, true)
 	timer.timeout.connect(_save_and_quit.bind(scene))
 
 
