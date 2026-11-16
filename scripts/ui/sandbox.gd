@@ -159,7 +159,7 @@ func _build() -> void:
 	_hand_fan = ActionHandFanScript.new()
 	_hand_fan.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hand_fan.custom_minimum_size = Vector2(0, 118)
-	_hand_fan.card_pressed.connect(_on_hand_card_pressed)
+	_hand_fan.card_dropped.connect(_on_hand_card_dropped)
 	bottom_col.add_child(_hand_fan)
 
 	var actions := HBoxContainer.new()
@@ -290,17 +290,13 @@ func _refresh_all() -> void:
 
 
 func _compose_hint() -> String:
-	if _pending_kind == PendingKind.MOVE:
-		if _focus_unit == null:
-			return "已打出移动 · 点己方单位作为行动者"
+	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
 		return "移动中：%s · 点绿格（可多步）" % _focus_unit.def.display_name
-	if _pending_kind == PendingKind.ATTACK:
-		if _focus_unit == null:
-			return "已打出攻击 · 点己方单位作为攻击者"
+	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
 		return "攻击中：%s · 点红圈内敌人" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
-	return "打出通用「移动/攻击」卡 · 库 %d · 弃 %d" % [
+	return "长按看详情 · 拖到己方单位使用 · 库 %d · 弃 %d" % [
 		_deck.draw_pile.size(),
 		_deck.discard_pile.size(),
 	]
@@ -317,7 +313,7 @@ func _refresh_action_buttons() -> void:
 func _refresh_unit_panel() -> void:
 	var u := _focus_unit if _focus_unit != null else _selected_unit
 	if u == null or not u.is_alive():
-		_unit_panel.text = "未选中单位\n（打出手牌或点单位查看）"
+		_unit_panel.text = "未选中单位\n（拖卡到单位 / 点单位查看）"
 		return
 	var ab := u.def.triggered_ability
 	var skill_line := ab.display_name if ab != null else "—"
@@ -346,10 +342,15 @@ func _refresh_hand_ui() -> void:
 		return
 	var labels: Array[String] = []
 	var kinds: Array[int] = []
+	var details: Array[String] = []
 	for card in _deck.hand:
 		labels.append(card.display_label())
 		kinds.append(int(card.kind))
-	_hand_fan.set_hand(labels, kinds)
+		if card.kind == TacticalActionCardScript.Kind.MOVE:
+			details.append("拖到己方单位：获得其本段移力池授权，再点绿格移动。")
+		else:
+			details.append("拖到己方单位：选定攻击者，再点红圈内敌人普攻。")
+	_hand_fan.set_hand(labels, kinds, details)
 	var player_turn := _clock.player_active and not _game_over and not _input_locked
 	_hand_fan.set_interactive(player_turn)
 
@@ -366,30 +367,50 @@ func _show_turn_banner() -> void:
 	tw.chain().tween_property(_turn_banner_panel, "modulate:a", 0.0, 0.55).set_delay(0.75)
 
 
-func _on_hand_card_pressed(index: int) -> void:
+## 拖到己方单位才使用；无效目标回手（不进弃牌）。
+func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if _input_locked or _game_over or not _clock.player_active:
+		_hand_fan.notify_drop_resolved(false)
 		return
 	if index < 0 or index >= _deck.hand.size():
+		_hand_fan.notify_drop_resolved(false)
 		return
-	var card := _deck.play_hand_index(index)
-	if card == null or not card.is_valid():
-		_last_log = "无法打出该卡"
+	var cell_v: Variant = _board_view.pick_cell_at_global(global_pos)
+	if cell_v == null:
+		_last_log = "未落到单位上 · 卡已回手"
+		_hand_fan.notify_drop_resolved(false)
 		_refresh_all()
 		return
-	_focus_unit = null
+	var cell: Vector2i = cell_v
+	var target := _board.unit_at(cell)
+	if target == null or target.faction != TacticalFactionScript.Id.PLAYER:
+		_last_log = "需拖到己方单位 · 卡已回手"
+		_hand_fan.notify_drop_resolved(false)
+		_refresh_all()
+		return
+	# 先结束拖态，再从手牌结算进弃，避免重建打断回弹。
+	_hand_fan.notify_drop_resolved(true)
+	var card := _deck.play_hand_index(index)
+	if card == null or not card.is_valid():
+		_last_log = "无法使用该卡"
+		_refresh_all()
+		return
+	_focus_unit = target
+	_selected_unit = target
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
+		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
-		_last_log = "打出通用移动 · 选择己方单位"
+		_last_log = "移动：%s · 点绿格" % target.def.display_name
 	else:
 		_pending_kind = PendingKind.ATTACK
-		_last_log = "打出通用攻击 · 选择己方攻击者"
+		_last_log = "攻击者：%s · 点敌人" % target.def.display_name
 	_refresh_all()
 
 
 func _on_cancel_target_pressed() -> void:
 	if _input_locked or _game_over or not _clock.player_active:
 		return
-	_last_log = "已取消选目标（卡不回手）"
+	_last_log = "已取消瞄准（已用卡不回手）"
 	_clear_pending_target(true)
 	_refresh_all()
 
@@ -397,22 +418,13 @@ func _on_cancel_target_pressed() -> void:
 func _on_cell_clicked(cell: Vector2i) -> void:
 	if _input_locked or _game_over or not _clock.player_active:
 		return
+	if _hand_fan != null and _hand_fan.is_busy():
+		return
 
 	var clicked := _board.unit_at(cell)
 
-	# 通用移动：先选行动者，再点空格。
-	if _pending_kind == PendingKind.MOVE:
-		if _focus_unit == null:
-			if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
-				_deck.authorize_move(clicked)
-				_focus_unit = clicked
-				_selected_unit = clicked
-				_last_log = "移动行动者：%s" % clicked.def.display_name
-				_refresh_all()
-				return
-			_last_log = "请先点己方单位"
-			_refresh_all()
-			return
+	# 移动瞄准：行动者已由拖卡选定。
+	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
 		if clicked != null:
 			if clicked.faction == TacticalFactionScript.Id.PLAYER:
 				_selected_unit = clicked
@@ -420,7 +432,7 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 					_focus_unit = clicked
 					_last_log = "切换至 %s 移动" % clicked.def.display_name
 				else:
-					_last_log = "%s 尚未获得本次移动授权" % clicked.def.display_name
+					_last_log = "%s 未获移动授权 · 请再拖一张移动卡" % clicked.def.display_name
 				_refresh_all()
 				return
 			_last_log = "移动请点空格"
@@ -449,35 +461,19 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		_refresh_all()
 		return
 
-	# 通用攻击：先选攻击者，再点敌人。
-	if _pending_kind == PendingKind.ATTACK:
-		if _focus_unit == null:
-			if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
-				_focus_unit = clicked
-				_selected_unit = clicked
-				_last_log = "攻击者：%s · 再点敌人" % clicked.def.display_name
-				_refresh_all()
-				return
-			_last_log = "请先点己方攻击者"
-			_refresh_all()
-			return
+	# 攻击瞄准：攻击者已由拖卡选定。
+	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
 		if clicked != null and clicked.faction != TacticalFactionScript.Id.PLAYER:
 			_run_player_attack_async(cell, clicked)
-			return
-		if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
-			_focus_unit = clicked
-			_selected_unit = clicked
-			_last_log = "攻击者改为：%s" % clicked.def.display_name
-			_refresh_all()
 			return
 		_last_log = "请点敌方单位，或取消目标"
 		_refresh_all()
 		return
 
-	# 无待结算卡：仅查看单位，不提供移/攻。
+	# 无待结算卡：仅查看单位。
 	if clicked != null:
 		_selected_unit = clicked
-		_last_log = "查看 %s · 移/攻请打出通用手牌" % clicked.def.display_name
+		_last_log = "查看 %s · 移/攻请拖卡到单位" % clicked.def.display_name
 		_refresh_all()
 		return
 	if not _board.is_passable(cell):
@@ -648,13 +644,35 @@ func capture_select_player_unit(unit_id: String) -> void:
 			return
 
 
-## GUI 验收：打出一手中第一张指定种类卡（move/attack）。
-func capture_play_first_card_kind(kind_name: String) -> bool:
+## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
+func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want_move := kind_name == "move"
+	var idx := -1
 	for i in _deck.hand.size():
 		var c: TacticalActionCard = _deck.hand[i]
 		var is_move := c.kind == TacticalActionCardScript.Kind.MOVE
 		if want_move == is_move:
-			_on_hand_card_pressed(i)
-			return true
-	return false
+			idx = i
+			break
+	if idx < 0:
+		return false
+	var unit: TacticalUnitInstance = null
+	for u in _board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == unit_id:
+			unit = u
+			break
+	if unit == null:
+		return false
+	# 直接走结算路径（跳过指针），并通知手牌结束拖态。
+	var card := _deck.play_hand_index(idx)
+	if card == null:
+		return false
+	_focus_unit = unit
+	_selected_unit = unit
+	if card.kind == TacticalActionCardScript.Kind.MOVE:
+		_deck.authorize_move(unit)
+		_pending_kind = PendingKind.MOVE
+	else:
+		_pending_kind = PendingKind.ATTACK
+	_refresh_all()
+	return true

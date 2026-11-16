@@ -946,6 +946,11 @@ func _handle_click(local_pos: Vector2) -> void:
 	cell_clicked.emit(cell as Vector2i)
 
 
+## 供手牌拖放：把全局屏幕坐标映射到格子（越界返回 null）。
+func pick_cell_at_global(global_pos: Vector2) -> Variant:
+	return _pick_cell(get_global_transform_with_canvas().affine_inverse() * global_pos)
+
+
 func _pick_cell(local_pos: Vector2) -> Variant:
 	if _camera == null or size.y <= 0.0 or not _camera.is_inside_tree():
 		return null

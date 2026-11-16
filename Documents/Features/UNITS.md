@@ -13,7 +13,7 @@
 
 - **单步最远** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。
 - **本段移力池** = `move_budget`（为 0 时等同 `move_range`）：同一行动段内多次移动，每段消耗等于该步路径步数，耗尽后本段不可再移动。
-- 玩家移/攻须先打出**通用**移动/攻击卡，再点己方行动者（见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)）。选定后：**绿** overlay = 剩余移力可达空格；**红** overlay = 攻击距离 footprint。每单位每段普攻仍最多 1 次。
+- 玩家移/攻须把**通用**移动/攻击卡**拖到**己方单位（见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)）。选定后：**绿** overlay = 剩余移力可达空格；**红** overlay = 攻击距离 footprint。每单位每段普攻仍最多 1 次。
 
 ## 触发式战术能力（autochess 意图 → 战棋）
 
