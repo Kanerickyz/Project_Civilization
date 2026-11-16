@@ -1,6 +1,6 @@
 class_name GridBoardView
 extends Control
-## 斜 45° 正交俯视方格盘：3D 格块 + Sprite3D 占位单位；拖拽/滚轮镜头。
+## 顶视 2D 方格盘：格块 + Sprite2D 单位；Camera2D 拖拽/滚轮缩放。
 
 
 signal cell_clicked(cell: Vector2i)
@@ -9,26 +9,19 @@ var config: BoardConfig
 
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
-var _world_root: Node3D
-var _tiles_root: Node3D
-var _units_root: Node3D
-var _camera: Camera3D
-var _pivot: Node3D
-var _tile_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
-var _overlay_nodes: Dictionary = {} # Vector2i -> MeshInstance3D
-var _fallback_mesh_cache: Dictionary = {} # String -> BoxMesh
-var _fallback_mat_cache: Dictionary = {} # StringName -> StandardMaterial3D
-var _grass_checker_mats: Dictionary = {} # int parity -> Material（棋盘格 + 收影）
-var _wall_stone_unshaded: StandardMaterial3D
-var _overlay_mat_cache: Dictionary = {} # String tag -> StandardMaterial3D
-var _overlay_mesh: PlaneMesh
+var _backdrop: ColorRect
+var _world_root: Node2D
+var _tiles_root: Node2D
+var _units_root: Node2D
+var _labels_layer: CanvasLayer
+var _labels_root: Control
+var _camera: Camera2D
+var _pivot: Node2D
+var _tile_nodes: Dictionary = {} # Vector2i -> Node2D (Tile root)
+var _overlay_nodes: Dictionary = {} # Vector2i -> Polygon2D
 var _catalog: TerrainCatalog
-var _key_light: DirectionalLight3D
-var _environment: Environment
-var _blob_mesh: PlaneMesh
-var _blob_material: StandardMaterial3D
 
-var _target: Vector3 = Vector3.ZERO
+var _target: Vector2 = Vector2.ZERO
 var _zoom: float = 1.0
 var _dragging: bool = false
 var _drag_moved: bool = false
@@ -38,34 +31,33 @@ var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
-const OVERLAY_LIFT := 0.005
-const BLOB_LIFT := 0.02
-const BLOB_HIDE_ALPHA := 0.6
+const OVERLAY_Z := 4
+const WALL_Z := 2
+const GRASS_Z := 0
 const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
 	"a": Color(0.82, 0.28, 0.31, 0.5),
 }
-## 草地棋盘格：浅 / 深（按格 (x+y)%2）；城墙等地块用 catalog 原材质。
 const GRASS_CHECKER_LIGHT := Color("B4A158")
 const GRASS_CHECKER_DARK := Color("8F884C")
-## 墙身石砖顶点色（与 generate_terrain_meshes 一致；材质 UNSHADED + 顶点色作 albedo）
 const WALL_STONE_LIGHT := Color("9c958c")
 const WALL_STONE_DARK := Color("716c65")
 
-var _terrain_cells: Dictionary = {} # Vector2i -> StringName（TerrainTypeDef.id）
+var _terrain_cells: Dictionary = {} # Vector2i -> StringName
 
-var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite3D
+var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _overlay_selected: Vector2i = Vector2i(-1, -1)
 var _overlay_move: Dictionary = {}
 var _overlay_attack: Dictionary = {}
 
-var _last_unit_cells: Dictionary = {} # TacticalUnitInstance -> Vector2i
-var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label3D
-var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> MeshInstance3D
+var _last_unit_cells: Dictionary = {}
+var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label
+var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
+var _blob_texture: Texture2D
 
 var _touch_drag_index: int = -1
-var _active_touches: Dictionary = {} # int index -> Vector2 position
+var _active_touches: Dictionary = {}
 var _pinch_last_distance: float = 0.0
 
 
@@ -94,7 +86,6 @@ func clear_terrain_paint() -> void:
 		_apply_tile_visual(cell)
 
 
-## cells: Vector2i -> StringName 地块 id；未列出的格为 catalog.default_id。
 func set_terrain_cells(cells: Dictionary) -> void:
 	_terrain_cells.clear()
 	for key in cells.keys():
@@ -148,46 +139,46 @@ func _ensure_viewport_tree() -> void:
 	add_child(_viewport_container)
 
 	_viewport = SubViewport.new()
-	_viewport.own_world_3d = true
+	_viewport.transparent_bg = false
 	_viewport.handle_input_locally = false
 	_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-	_viewport.msaa_3d = Viewport.MSAA_DISABLED
 	_viewport_container.add_child(_viewport)
 
-	_world_root = Node3D.new()
+	_backdrop = ColorRect.new()
+	_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_viewport.add_child(_backdrop)
+
+	_world_root = Node2D.new()
 	_world_root.name = "BoardWorld"
 	_viewport.add_child(_world_root)
 
-	_key_light = DirectionalLight3D.new()
-	_key_light.name = "KeyLight"
-	_world_root.add_child(_key_light)
-
-	var world_env := WorldEnvironment.new()
-	_environment = Environment.new()
-	_environment.background_mode = Environment.BG_COLOR
-	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	world_env.environment = _environment
-	_world_root.add_child(world_env)
-
-	_pivot = Node3D.new()
+	_pivot = Node2D.new()
 	_pivot.name = "CameraPivot"
 	_world_root.add_child(_pivot)
 
-	_camera = Camera3D.new()
-	_camera.current = true
-	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_camera.size = 10.5
-	_camera.near = 0.05
-	_camera.far = 200.0
+	_camera = Camera2D.new()
+	_camera.name = "BoardCamera"
+	_camera.enabled = true
 	_pivot.add_child(_camera)
 
-	_tiles_root = Node3D.new()
+	_tiles_root = Node2D.new()
 	_tiles_root.name = "Tiles"
 	_world_root.add_child(_tiles_root)
 
-	_units_root = Node3D.new()
+	_units_root = Node2D.new()
 	_units_root.name = "Units"
+	_units_root.z_index = 10
 	_world_root.add_child(_units_root)
+
+	_labels_layer = CanvasLayer.new()
+	_labels_layer.name = "BoardLabels"
+	_viewport.add_child(_labels_layer)
+
+	_labels_root = Control.new()
+	_labels_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_labels_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_labels_layer.add_child(_labels_root)
 
 
 func _look() -> BoardLook:
@@ -196,27 +187,10 @@ func _look() -> BoardLook:
 	return BoardLook.new()
 
 
-## 暖色主光 + 冷色天光（环境光）+ 柔和投影。Compatibility 与 Web 均支持；
-## Web 回退见 BoardLook.shadow_active()。
 func _apply_look() -> void:
-	if _key_light == null or _environment == null:
-		return
-	var look := _look()
-	_key_light.rotation_degrees = Vector3(look.key_pitch_deg, look.key_yaw_deg, 0.0)
-	_key_light.light_color = look.key_color
-	_key_light.light_energy = look.key_energy
-	_key_light.shadow_enabled = look.shadow_active()
-	_key_light.shadow_opacity = look.shadow_opacity
-	_key_light.shadow_blur = look.shadow_blur
-	_key_light.shadow_bias = look.shadow_bias
-	_key_light.shadow_normal_bias = look.shadow_normal_bias
-	_key_light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	_key_light.directional_shadow_max_distance = look.shadow_max_distance
-	_environment.background_color = look.background_color
-	_environment.ambient_light_color = look.ambient_color
-	_environment.ambient_light_energy = look.ambient_energy
-	_blob_mesh = null
-	_blob_material = null
+	if _backdrop != null:
+		_backdrop.color = _look().background_color
+	_blob_texture = null
 
 
 func _on_resized() -> void:
@@ -234,10 +208,7 @@ func _on_resized() -> void:
 func _try_center_on_board() -> void:
 	if size.x <= 1.0 or size.y <= 1.0 or config == null:
 		return
-	var center := _cell_to_world(
-		Vector2i(config.grid_width / 2, config.grid_height / 2), config.cell_size
-	)
-	_target = Vector3(center.x, 0.0, center.z)
+	_target = _cell_to_world(Vector2i(config.grid_width / 2, config.grid_height / 2), config.cell_size)
 	_needs_center = false
 	_clamp_target()
 	_apply_camera()
@@ -258,26 +229,62 @@ func _rebuild_board() -> void:
 	_last_unit_cells.clear()
 
 	var cell_size := config.cell_size
-	_overlay_mesh = PlaneMesh.new()
-	_overlay_mesh.size = Vector2.ONE * cell_size * config.tile_inset
+	var half := cell_size * config.tile_inset * 0.5
+	var grass_poly := _square_points(half)
+	var overlay_poly := grass_poly
 	for gx in range(config.grid_width):
 		for gy in range(config.grid_height):
 			var cell := Vector2i(gx, gy)
-			var mi := MeshInstance3D.new()
-			mi.name = "Tile_%d_%d" % [gx, gy]
-			mi.position = _cell_to_world(cell, cell_size)
-			_tiles_root.add_child(mi)
-			_tile_nodes[cell] = mi
-			var ov := MeshInstance3D.new()
-			ov.name = "Overlay_%d_%d" % [gx, gy]
-			ov.mesh = _overlay_mesh
-			ov.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			ov.position = Vector3(mi.position.x, config.tile_height + OVERLAY_LIFT, mi.position.z)
+			var root := Node2D.new()
+			root.name = "Tile_%d_%d" % [gx, gy]
+			root.position = _cell_to_world(cell, cell_size)
+			_tiles_root.add_child(root)
+			_tile_nodes[cell] = root
+
+			var grass := Polygon2D.new()
+			grass.name = "Grass"
+			grass.z_index = GRASS_Z
+			grass.polygon = grass_poly
+			root.add_child(grass)
+
+			var wall := Node2D.new()
+			wall.name = "Wall"
+			wall.z_index = WALL_Z
+			wall.visible = false
+			root.add_child(wall)
+			_build_wall_visual(wall, half, cell_size)
+
+			var ov := Polygon2D.new()
+			ov.name = "Overlay"
+			ov.z_index = OVERLAY_Z
+			ov.polygon = overlay_poly
 			ov.visible = false
-			_tiles_root.add_child(ov)
+			root.add_child(ov)
 			_overlay_nodes[cell] = ov
+
 	for cell in _tile_nodes.keys():
 		_apply_tile_visual(cell)
+
+
+func _build_wall_visual(wall_root: Node2D, half: float, cell_size: float) -> void:
+	var thick := cell_size * 0.16
+	var len := half * 2.0
+	var body := Polygon2D.new()
+	body.name = "StoneBody"
+	body.color = WALL_STONE_LIGHT
+	var ht := thick
+	var hw := len * 0.5
+	body.polygon = PackedVector2Array([
+		Vector2(-hw, -ht * 0.5), Vector2(hw, -ht * 0.5), Vector2(hw, ht * 0.5), Vector2(-hw, ht * 0.5),
+	])
+	wall_root.add_child(body)
+	var stripe := Polygon2D.new()
+	stripe.name = "StoneStripe"
+	stripe.color = WALL_STONE_DARK
+	stripe.polygon = PackedVector2Array([
+		Vector2(-hw * 0.35, -ht * 0.5), Vector2(hw * 0.35, -ht * 0.5), Vector2(hw * 0.35, ht * 0.5), Vector2(-hw * 0.35, ht * 0.5),
+	])
+	wall_root.add_child(stripe)
 
 
 func sync_tactical_units(
@@ -311,10 +318,10 @@ func sync_tactical_units(
 
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
-	var spr := _unit_sprites[unit] as Sprite3D
+	var spr := _unit_sprites[unit] as Sprite2D
 	var world := _cell_to_world(unit.cell, config.cell_size)
 	var unit_h: float = config.unit_world_height if config != null else 0.88
-	var target_pos := Vector3(world.x, config.tile_height + unit_h * 0.5, world.z)
+	var target_pos := world + Vector2(0.0, -unit_h * 0.35)
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
@@ -331,7 +338,7 @@ func unit_move_duration_sec() -> float:
 	return UNIT_MOVE_TWEEN_SEC
 
 
-func _tween_unit_to(spr: Sprite3D, target_pos: Vector3) -> void:
+func _tween_unit_to(spr: Sprite2D, target_pos: Vector2) -> void:
 	var tw := create_tween()
 	tw.tween_property(spr, "position", target_pos, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
 		Tween.EASE_OUT
@@ -341,10 +348,10 @@ func _tween_unit_to(spr: Sprite3D, target_pos: Vector3) -> void:
 func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> Tween:
 	if config == null or not _unit_sprites.has(attacker):
 		return null
-	var spr := _unit_sprites[attacker] as Sprite3D
+	var spr := _unit_sprites[attacker] as Sprite2D
 	var home := spr.position
 	var world := _cell_to_world(target_cell, config.cell_size)
-	var flat := Vector3(world.x - home.x, 0.0, world.z - home.z)
+	var flat := world - home
 	var lunge := home
 	if flat.length_squared() > 0.0001:
 		lunge = home + flat.normalized() * minf(flat.length() * 0.42, config.cell_size * 0.55)
@@ -360,35 +367,33 @@ func attack_tween_duration_sec() -> float:
 
 func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 	if _unit_sprites.has(unit):
-		var spr: Sprite3D = _unit_sprites[unit] as Sprite3D
+		var spr: Sprite2D = _unit_sprites[unit] as Sprite2D
 		spr.queue_free()
 		_unit_sprites.erase(unit)
 	if _unit_blobs.has(unit):
 		(_unit_blobs[unit] as Node).queue_free()
 		_unit_blobs.erase(unit)
 	if _hp_bars.has(unit):
-		var bar: Label3D = _hp_bars[unit] as Label3D
+		var bar: Label = _hp_bars[unit] as Label
 		bar.queue_free()
 		_hp_bars.erase(unit)
 	_last_unit_cells.erase(unit)
 
 
 func play_damage_popup(cell: Vector2i, amount: int) -> void:
-	if config == null or _units_root == null:
+	if config == null:
 		return
 	var world := _cell_to_world(cell, config.cell_size)
-	var lbl := Label3D.new()
+	var lift: float = config.unit_world_height * 0.55
+	var lbl := Label.new()
 	lbl.text = "-%d!" % amount
-	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	lbl.font_size = 24
+	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.modulate = Color("ff6644")
-	lbl.outline_modulate = Color("1a0808")
-	var lift: float = config.tile_height + config.unit_world_height * 0.85
-	lbl.position = Vector3(world.x, lift, world.z)
-	_units_root.add_child(lbl)
+	_labels_root.add_child(lbl)
+	_position_world_on_label(lbl, world + Vector2(0.0, -lift))
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(lbl, "position:y", lbl.position.y + 0.75, 0.5).set_trans(Tween.TRANS_SINE)
+	tw.tween_method(func(pos: Vector2): _position_world_on_label(lbl, pos), lbl.position, lbl.position + Vector2(0, -36), 0.5).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(lbl, "modulate:a", 0.0, 0.45).set_delay(0.12)
 	tw.finished.connect(lbl.queue_free)
 
@@ -396,37 +401,35 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 func play_unit_hit(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
 		return
-	var spr := _unit_sprites[unit] as Sprite3D
+	var spr := _unit_sprites[unit] as Sprite2D
 	var base := spr.position
 	spr.modulate = Color("ff8888")
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(spr, "modulate", _look().unit_modulate, 0.32)
-	tw.tween_property(spr, "position:x", base.x + 0.06, 0.06).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(spr, "position:x", base.x + 4.0, 0.06).set_trans(Tween.TRANS_SINE)
 	tw.chain().tween_property(spr, "position", base, 0.12).set_trans(Tween.TRANS_SINE)
 
 
 func play_unit_death(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
 		return
-	var spr := _unit_sprites[unit] as Sprite3D
+	var spr := _unit_sprites[unit] as Sprite2D
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(spr, "scale", Vector3(0.05, 0.05, 0.05), 0.32)
+	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), 0.32)
 	tw.tween_property(spr, "modulate:a", 0.0, 0.32)
 
 
 func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
-	var spr: Sprite3D
+	var spr: Sprite2D
 	if _unit_sprites.has(unit):
-		spr = _unit_sprites[unit] as Sprite3D
+		spr = _unit_sprites[unit] as Sprite2D
 	else:
-		spr = Sprite3D.new()
-		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		spr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# 透明像素不写深度，脚下软影才不会被整张卡片挡住。
-		spr.alpha_cut = SpriteBase3D.ALPHA_CUT_OPAQUE_PREPASS
+		spr = Sprite2D.new()
 		spr.name = "Unit_%s_%s" % [unit.def.id, unit.faction]
+		spr.centered = true
+		spr.offset = Vector2.ZERO
 		_units_root.add_child(spr)
 		_unit_sprites[unit] = spr
 		_attach_unit_blob(unit)
@@ -436,22 +439,19 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	var unit_h: float = config.unit_world_height
 	var tex_h := float(tex.get_height())
 	if tex_h > 0.0:
-		spr.pixel_size = unit_h / tex_h
+		var s := unit_h / tex_h
+		spr.scale = Vector2(s, s)
 	spr.texture = tex
 	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
-	spr.scale = Vector3.ONE
+	spr.scale = Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
 	_ensure_hp_bar(unit)
 
 
-## 脚下软影：与 Sprite 同级（挂在 Sprite 下时会被 billboard 卡片吞掉），每帧跟随其水平位置 / 缩放；
-## Compatibility 不支持 GeometryInstance3D.transparency，Sprite 半透（阵亡灰化 / 死亡淡出）时直接隐藏。
 func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
 	var look := _look()
 	if look.unit_blob_opacity <= 0.0:
 		return
-	if _blob_mesh == null:
-		_blob_mesh = PlaneMesh.new()
-		_blob_mesh.size = Vector2.ONE * look.unit_blob_radius * 2.0 * config.cell_size
+	if _blob_texture == null:
 		var grad := Gradient.new()
 		grad.set_color(0, Color(0.08, 0.07, 0.04, look.unit_blob_opacity))
 		grad.set_color(1, Color(0.08, 0.07, 0.04, 0.0))
@@ -463,44 +463,46 @@ func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
 		tex.fill_to = Vector2(0.5, 0.0)
 		tex.width = 64
 		tex.height = 64
-		_blob_material = StandardMaterial3D.new()
-		_blob_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_blob_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_blob_material.albedo_texture = tex
-		# 透明物按 render_priority 先排：高亮(-2) → 软影(-1) → 角色(0)，避免被 Sprite 深度挡住。
-		_blob_material.render_priority = -1
-	var blob := MeshInstance3D.new()
+		_blob_texture = tex
+	var blob := Sprite2D.new()
 	blob.name = "Blob"
-	blob.mesh = _blob_mesh
-	blob.material_override = _blob_material
-	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	blob.texture = _blob_texture
+	blob.centered = true
+	blob.z_index = -1
+	var r := look.unit_blob_radius * config.cell_size * 2.0
+	blob.scale = Vector2(r / 64.0, r / 64.0 * 0.7)
 	_units_root.add_child(blob)
 	_unit_blobs[unit] = blob
 
 
+const BLOB_HIDE_ALPHA := 0.6
+
+
 func _process(_delta: float) -> void:
+	for unit in _hp_bars:
+		if _unit_sprites.has(unit):
+			_update_hp_bar(unit as TacticalUnitInstance)
 	for unit in _unit_blobs:
-		var spr := _unit_sprites.get(unit) as Sprite3D
+		var spr := _unit_sprites.get(unit) as Sprite2D
 		if spr == null:
 			continue
-		var blob := _unit_blobs[unit] as MeshInstance3D
-		var s := spr.scale.x
-		blob.position = Vector3(spr.position.x, config.tile_height + BLOB_LIFT, spr.position.z)
-		blob.scale = Vector3(s, 1.0, s * 0.7)
+		var blob := _unit_blobs[unit] as Sprite2D
+		blob.position = spr.position + Vector2(0.0, spr.texture.get_height() * spr.scale.y * 0.22 if spr.texture else 6.0)
+		blob.scale.x = absf(spr.scale.x) * ( _look().unit_blob_radius * config.cell_size * 2.0 / 64.0)
+		blob.scale.y = absf(spr.scale.y) * ( _look().unit_blob_radius * config.cell_size * 2.0 / 64.0) * 0.7
 		blob.visible = spr.modulate.a > BLOB_HIDE_ALPHA
 
 
 func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
-	var bar: Label3D
+	var bar: Label
 	if _hp_bars.has(unit):
-		bar = _hp_bars[unit] as Label3D
+		bar = _hp_bars[unit] as Label
 	else:
-		bar = Label3D.new()
-		bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		bar.font_size = 14
-		bar.outline_size = 4
-		bar.outline_modulate = Color("0a1018")
-		_units_root.add_child(bar)
+		bar = Label.new()
+		bar.add_theme_font_size_override("font_size", 12)
+		bar.add_theme_color_override("font_outline_color", Color("0a1018"))
+		bar.add_theme_constant_override("outline_size", 3)
+		_labels_root.add_child(bar)
 		_hp_bars[unit] = bar
 	_update_hp_bar(unit)
 
@@ -508,74 +510,57 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	if not _hp_bars.has(unit) or not _unit_sprites.has(unit):
 		return
-	var bar := _hp_bars[unit] as Label3D
-	var spr := _unit_sprites[unit] as Sprite3D
+	var bar := _hp_bars[unit] as Label
+	var spr := _unit_sprites[unit] as Sprite2D
 	bar.text = "%d/%d" % [unit.hp, unit.def.max_hp]
-	var bar_lift: float = config.unit_world_height * 0.48
-	bar.position = spr.position + Vector3(0.0, bar_lift, 0.0)
+	var lift: float = config.unit_world_height * 0.48
+	_position_world_on_label(bar, spr.position + Vector2(0.0, -lift))
 	if unit.hp <= unit.def.max_hp / 3:
 		bar.modulate = Color("ff6666")
 	else:
 		bar.modulate = Color("e8f0ff")
 
 
-func _terrain_surface_material(cell: Vector2i, terrain_id: StringName, def: TerrainTypeDef, surface: int) -> Material:
-	if def.surface_materials.size() <= surface:
-		return null
-	var base: Material = def.surface_materials[surface]
-	if surface == 0 and _uses_grass_checker_surface(terrain_id):
-		var parity: int = (cell.x + cell.y) & 1
-		return _grass_checker_material(parity)
-	if surface == 1 and terrain_id == &"wall_straight":
-		return _wall_stone_unshaded_material(def)
-	return base
+func _position_world_on_label(lbl: Control, world: Vector2) -> void:
+	if _camera == null or not _camera.is_inside_tree():
+		lbl.position = world
+		return
+	var canvas := _camera.get_canvas_transform()
+	var screen := canvas * world
+	lbl.position = screen - lbl.size * 0.5
+
+
+func _grass_color_for_cell(cell: Vector2i, terrain_id: StringName) -> Color:
+	if not _uses_grass_checker_surface(terrain_id):
+		var def := _get_catalog().get_def(terrain_id)
+		return def.editor_color if def != null else Color("6f9a3c")
+	var parity: int = (cell.x + cell.y) & 1
+	return GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
 
 
 func _uses_grass_checker_surface(terrain_id: StringName) -> bool:
 	return terrain_id == _get_catalog().default_id or terrain_id == &"wall_straight"
 
 
-func _grass_checker_material(parity: int) -> Material:
-	if _grass_checker_mats.has(parity):
-		return _grass_checker_mats[parity] as Material
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = GRASS_CHECKER_DARK if parity == 1 else GRASS_CHECKER_LIGHT
-	_grass_checker_mats[parity] = mat
-	return mat
-
-
-func _wall_stone_unshaded_material(def: TerrainTypeDef) -> StandardMaterial3D:
-	if _wall_stone_unshaded != null:
-		return _wall_stone_unshaded
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color.WHITE
-	mat.vertex_color_use_as_albedo = true
-	_wall_stone_unshaded = mat
-	return mat
-
-
 func _apply_tile_visual(cell: Vector2i) -> void:
 	if config == null or not _tile_nodes.has(cell):
 		return
-	var mi: MeshInstance3D = _tile_nodes[cell] as MeshInstance3D
+	var root: Node2D = _tile_nodes[cell] as Node2D
 	var terrain_id := terrain_id_at(cell)
 	var def := _get_catalog().get_def(terrain_id)
-	if def != null and def.mesh != null:
-		if mi.mesh != def.mesh:
-			mi.mesh = def.mesh
-		for i in def.mesh.get_surface_count():
-			var mat: Material = _terrain_surface_material(cell, terrain_id, def, i)
-			mi.set_surface_override_material(i, mat)
-	else:
-		mi.mesh = _fallback_mesh()
-		mi.set_surface_override_material(0, _fallback_material(terrain_id, def))
-	mi.rotation = Vector3(0.0, _tile_yaw(cell, terrain_id, def), 0.0)
+	var grass: Polygon2D = root.get_node_or_null("Grass") as Polygon2D
+	if grass != null:
+		grass.color = _grass_color_for_cell(cell, terrain_id)
+	var wall: Node2D = root.get_node_or_null("Wall") as Node2D
+	var is_wall := terrain_id == &"wall_straight"
+	if wall != null:
+		wall.visible = is_wall
+		if is_wall:
+			wall.rotation = _tile_yaw(cell, terrain_id, def)
+	root.rotation = 0.0
 	_apply_overlay(cell)
 
 
-## 直线型地块：仅南北有同类且东西都无同类时转 90°；其余地块按格哈希旋转 90° 倍数以打散重复纹样。
 func _tile_yaw(cell: Vector2i, terrain_id: StringName, def: TerrainTypeDef) -> float:
 	if def != null and def.orient_to_neighbors:
 		var ns := _same_terrain(cell + Vector2i.UP, terrain_id) or _same_terrain(cell + Vector2i.DOWN, terrain_id)
@@ -592,7 +577,7 @@ func _same_terrain(cell: Vector2i, terrain_id: StringName) -> bool:
 func _apply_overlay(cell: Vector2i) -> void:
 	if not _overlay_nodes.has(cell):
 		return
-	var ov: MeshInstance3D = _overlay_nodes[cell] as MeshInstance3D
+	var ov: Polygon2D = _overlay_nodes[cell] as Polygon2D
 	var tag := ""
 	if cell == _overlay_selected:
 		tag = "s"
@@ -602,66 +587,57 @@ func _apply_overlay(cell: Vector2i) -> void:
 		tag = "m"
 	ov.visible = tag != ""
 	if tag != "":
-		ov.material_override = _overlay_material(tag)
+		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
 
 
-func _overlay_material(tag: String) -> StandardMaterial3D:
-	if _overlay_mat_cache.has(tag):
-		return _overlay_mat_cache[tag] as StandardMaterial3D
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.render_priority = -2
-	_overlay_mat_cache[tag] = mat
-	return mat
+func _square_points(half: float) -> PackedVector2Array:
+	return PackedVector2Array([
+		Vector2(-half, -half), Vector2(half, -half), Vector2(half, half), Vector2(-half, half),
+	])
 
 
-func _fallback_mesh() -> BoxMesh:
-	var inset := config.cell_size * config.tile_inset
-	var key := "%.3f_%.3f" % [inset, config.tile_height]
-	if not _fallback_mesh_cache.has(key):
-		var box := BoxMesh.new()
-		box.size = Vector3(inset, config.tile_height, inset)
-		_fallback_mesh_cache[key] = box
-	return _fallback_mesh_cache[key] as BoxMesh
+func grass_color_at(cell: Vector2i) -> Color:
+	if not _tile_nodes.has(cell):
+		return Color.BLACK
+	var root: Node2D = _tile_nodes[cell] as Node2D
+	var grass: Polygon2D = root.get_node_or_null("Grass") as Polygon2D
+	return grass.color if grass != null else Color.BLACK
 
 
-func _fallback_material(terrain_id: StringName, def: TerrainTypeDef) -> StandardMaterial3D:
-	if _fallback_mat_cache.has(terrain_id):
-		return _fallback_mat_cache[terrain_id] as StandardMaterial3D
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = def.editor_color if def != null else Color("6f9a3c")
-	mat.roughness = 0.9
-	_fallback_mat_cache[terrain_id] = mat
-	return mat
+func wall_rotation_at(cell: Vector2i) -> float:
+	if not _tile_nodes.has(cell):
+		return 0.0
+	var root: Node2D = _tile_nodes[cell] as Node2D
+	var wall: Node2D = root.get_node_or_null("Wall") as Node2D
+	return wall.rotation if wall != null and wall.visible else 0.0
 
 
-func _cell_to_world(cell: Vector2i, cell_size: float) -> Vector3:
+func wall_footprint_size(cell: Vector2i) -> Vector2:
+	if config == null or not _tile_nodes.has(cell):
+		return Vector2.ZERO
+	var cell_size := config.cell_size
+	var inset := cell_size * config.tile_inset
+	return Vector2(inset, cell_size * 0.16)
+
+
+func _cell_to_world(cell: Vector2i, cell_size: float) -> Vector2:
 	var ox := (float(config.grid_width) - 1.0) * 0.5
 	var oy := (float(config.grid_height) - 1.0) * 0.5
 	var x := (float(cell.x) - ox) * cell_size
-	var z := (float(cell.y) - oy) * cell_size
-	return Vector3(x, config.tile_height * 0.5, z)
+	var y := (float(cell.y) - oy) * cell_size
+	return Vector2(x, y)
 
 
 func _apply_camera() -> void:
 	if _camera == null or _pivot == null or config == null:
 		return
 	_pivot.position = _target
-	_pivot.rotation = Vector3.ZERO
-	var elev := deg_to_rad(config.camera_pitch_deg)
-	var yaw := deg_to_rad(config.camera_yaw_deg)
-	var dist := config.camera_distance
-	var offset := Vector3(
-		dist * cos(elev) * sin(yaw),
-		dist * sin(elev),
-		dist * cos(elev) * cos(yaw)
-	)
-	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_camera.size = config.camera_ortho_size / maxf(_zoom, 0.05)
-	_camera.transform = Transform3D(Basis.looking_at(-offset, Vector3.UP), offset)
+	var vs := _viewport.size if _viewport != null else Vector2i(852, 393)
+	var vh := maxf(float(vs.y), 1.0)
+	var ortho := maxf(config.camera_ortho_size, 0.1)
+	var cam_zoom := vh * maxf(_zoom, 0.05) / ortho
+	_camera.zoom = Vector2(cam_zoom, cam_zoom)
+	_camera.offset = Vector2.ZERO
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -723,13 +699,10 @@ func _pan_by_screen_delta(delta: Vector2) -> void:
 	_apply_camera()
 
 
-## 供 headless 烟测：屏幕位移对应的地面平移（指拖地图，非相机反移）。
-func compute_pan_world_delta(delta: Vector2) -> Vector3:
+func compute_pan_world_delta(delta: Vector2) -> Vector2:
 	var sens := config.camera_pan_sensitivity / maxf(_zoom, 0.05)
-	var yaw := deg_to_rad(config.camera_yaw_deg)
-	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
-	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
-	return -right * delta.x * sens - forward * delta.y * sens
+	var cam_z := _camera.zoom.y if _camera != null and _camera.zoom.y > 0.0 else 1.0
+	return -delta * sens / cam_z
 
 
 func _handle_screen_touch(st: InputEventScreenTouch) -> void:
@@ -809,23 +782,17 @@ func _pick_cell(local_pos: Vector2) -> Variant:
 	if _camera == null or size.y <= 0.0 or not _camera.is_inside_tree():
 		return null
 	var vp_pos := _to_viewport_pos(local_pos)
-	var from := _camera.project_ray_origin(vp_pos)
-	var dir := _camera.project_ray_normal(vp_pos)
-	if absf(dir.y) < 0.0001:
-		return null
-	var t := -from.y / dir.y
-	if t < 0.0:
-		return null
-	var hit := from + dir * t
-	return _world_to_cell(Vector3(hit.x, 0.0, hit.z))
+	var inv := _camera.get_canvas_transform().affine_inverse()
+	var hit: Vector2 = inv * vp_pos
+	return _world_to_cell(hit)
 
 
-func _world_to_cell(world: Vector3) -> Variant:
+func _world_to_cell(world: Vector2) -> Variant:
 	var cell_size := config.cell_size
 	var ox := (float(config.grid_width) - 1.0) * 0.5
 	var oy := (float(config.grid_height) - 1.0) * 0.5
 	var gx := int(round(world.x / cell_size + ox))
-	var gy := int(round(world.z / cell_size + oy))
+	var gy := int(round(world.y / cell_size + oy))
 	if gx < 0 or gy < 0 or gx >= config.grid_width or gy >= config.grid_height:
 		return null
 	return Vector2i(gx, gy)
@@ -849,5 +816,4 @@ func _clamp_target() -> void:
 	var half_h := float(config.grid_height) * cell_size * 0.5
 	var pad := cell_size * 1.5
 	_target.x = clampf(_target.x, -half_w - pad, half_w + pad)
-	_target.z = clampf(_target.z, -half_h - pad, half_h + pad)
-	_target.y = 0.0
+	_target.y = clampf(_target.y, -half_h - pad, half_h + pad)

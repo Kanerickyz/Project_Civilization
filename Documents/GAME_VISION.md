@@ -17,7 +17,7 @@
 | 玩家能看到的 | 实际规则 |
 |--------------|----------|
 | 主菜单进入对战沙盘 | 场景切换 |
-| 3D 斜 45° 正交方格盘 + 2D 占位单位 | 见 [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) |
+| 2D 顶视方格盘 + Sprite2D 单位 | 见 [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) |
 | 「结束行动」 | 回合钟，见 [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) |
 
 没有单位移动、战斗结算、城市或科技。

@@ -1,6 +1,6 @@
 # 战术战棋 — 文档索引
 
-> 小地图战术战棋 · Godot 4.6 · 3D 盘 + 2D 单位占位
+> 小地图战术战棋 · Godot 4.6 · 2D 顶视棋盘 + Sprite2D 单位
 
 玩法方向以 [GAME_VISION.md](./GAME_VISION.md) 为准。已经写进代码的规则以 Features 为准，并与代码对照。
 
@@ -12,7 +12,7 @@
 | [DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md) | Agent 职责、纵切片、L0–L5、轻量/完全验收 |
 | [GAME_VISION.md](./GAME_VISION.md) | 这是什么游戏、边界、当前做到哪 |
 | [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) | **回合钟**（已实现） |
-| [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **3D ~45° 俯视** · 占位单位 |
+| [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **2D 顶视** · Sprite2D 单位 |
 | [Features/MAP_EDITOR.md](./Features/MAP_EDITOR.md) | **地图编辑器 v1** · 8×8 · 草地/直城墙 · JSON v2 存读 |
 
 ## 仓库里有什么
@@ -42,7 +42,7 @@
 | `scripts/autoload/game_settings.gd` | 音量与全屏设置存档 | **已有** |
 | `scripts/ui/main_menu.gd` | 主菜单 | **已有** |
 | `scripts/ui/sandbox.gd` | 沙盘界面（接入棋盘） | **已有** |
-| `scripts/map/` | 方格盘 3D 视图、`BoardConfig` | **已有**（无单位移动） |
+| `scripts/map/` | 方格盘 2D 视图、`BoardConfig` | **已有** |
 | `resources/map/board_config.tres` | 盘尺寸、格距、镜头 | **已有** |
 | `assets/fonts/` | 中文 UI 字体 | **已有** |
 | `scripts/settlement/` | 定居点与产出 | 未做 |
@@ -65,6 +65,6 @@
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | 回合钟 | 当前 | 玩家/对手交替 |
-| 方格盘 | 当前 | 3D 斜俯视、拖拽缩放、占位 Sprite3D |
+| 方格盘 | 当前 | 2D 顶视 Camera2D、拖拽缩放、Sprite2D 单位 |
 | 单位移动 | 未做 | — |
 | 战斗 | 未做 | — |

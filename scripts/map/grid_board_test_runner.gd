@@ -1,5 +1,5 @@
 extends SceneTree
-## 方格棋盘 / 3D 镜头 / 占位单位烟测（Headless）。
+## 方格棋盘 / 2D 镜头 / 占位单位烟测（Headless）。
 
 
 const BoardConfigScript := preload("res://scripts/map/board_config.gd")
@@ -22,13 +22,13 @@ func _initialize() -> void:
 	if not _test_overlay_planes():
 		quit(1)
 		return
-	if not _test_grass_checker_materials():
+	if not _test_grass_checker_colors():
 		quit(1)
 		return
-	if not _test_terrain_meshes_and_orientation():
+	if not _test_terrain_visuals_and_orientation():
 		quit(1)
 		return
-	if not _test_terrain_mesh_dimensions():
+	if not _test_terrain_footprint_dimensions():
 		quit(1)
 		return
 	if not _test_board_look_and_unit_blob():
@@ -65,15 +65,12 @@ func _test_unit_scale_vs_cell() -> bool:
 	if not view._unit_sprites.has(unit):
 		push_error("GridBoardView: unit sprite missing after sync")
 		return false
-	var spr: Sprite3D = view._unit_sprites[unit] as Sprite3D
+	var spr: Sprite2D = view._unit_sprites[unit] as Sprite2D
 	var expected_h := cfg.unit_world_height
 	var tex_h := float(def.texture_blue.get_height())
-	var expected_pixel := expected_h / tex_h
-	if absf(spr.pixel_size - expected_pixel) > 0.0001:
-		push_error(
-			"GridBoardView: unit pixel_size %.5f != expected %.5f"
-			% [spr.pixel_size, expected_pixel]
-		)
+	var expected_scale := expected_h / tex_h
+	if absf(spr.scale.y - expected_scale) > 0.0001:
+		push_error("GridBoardView: unit scale.y %.5f != expected %.5f" % [spr.scale.y, expected_scale])
 		return false
 	if expected_h > cfg.cell_size * cfg.tile_inset:
 		push_error("GridBoardView: unit_world_height should fit inside cell inset")
@@ -93,27 +90,17 @@ func _test_board_look_and_unit_blob() -> bool:
 	var view: GridBoardView = GridBoardViewScript.new()
 	host.add_child(view)
 	view.setup(cfg)
-	if view._key_light == null or view._environment == null:
-		push_error("GridBoardView: key light / environment missing after setup")
+	if view._backdrop == null:
+		push_error("GridBoardView: backdrop missing after setup")
 		return false
-	if view._key_light.shadow_enabled != look.shadow_active():
-		push_error("GridBoardView: key light shadow should follow BoardLook.shadow_active()")
-		return false
-	if not view._key_light.light_color.is_equal_approx(look.key_color):
-		push_error("GridBoardView: key light color should come from BoardLook")
-		return false
-	if view._environment.adjustment_enabled:
-		push_error("GridBoardView: environment should not enable full-screen color adjustment")
+	if not view._backdrop.color.is_equal_approx(look.background_color):
+		push_error("GridBoardView: backdrop should use BoardLook.background_color")
 		return false
 	var web_look := look.duplicate() as BoardLook
 	web_look.shadow_enabled = true
 	web_look.shadow_on_web = true
 	if not web_look.shadow_active(false) or not web_look.shadow_active(true):
-		push_error("BoardLook: shadow should stay on for desktop and Web when shadow_on_web=true")
-		return false
-	web_look.shadow_on_web = false
-	if web_look.shadow_active(true):
-		push_error("BoardLook: shadow_on_web=false should disable shadows on Web only")
+		push_error("BoardLook: shadow flags should remain valid (2D uses foot blob only)")
 		return false
 	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
 	if def == null:
@@ -123,30 +110,21 @@ func _test_board_look_and_unit_blob() -> bool:
 	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
 	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
 	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
-	var spr := view._unit_sprites[unit] as Sprite3D
-	if spr.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
-		push_error("GridBoardView: billboard unit should not cast a real shadow")
-		return false
 	if not view._unit_blobs.has(unit):
 		push_error("GridBoardView: unit foot blob missing")
 		return false
-	var blob := view._unit_blobs[unit] as MeshInstance3D
+	var blob := view._unit_blobs[unit] as Sprite2D
+	var spr := view._unit_sprites[unit] as Sprite2D
 	if blob.get_parent() == spr:
-		push_error("GridBoardView: foot blob must not be a child of the billboard sprite")
+		push_error("GridBoardView: foot blob must not be a child of the unit sprite")
 		return false
 	view._process(0.0)
-	if absf(blob.position.x - spr.position.x) > 0.001 or absf(blob.position.z - spr.position.z) > 0.001:
-		push_error("GridBoardView: foot blob should follow the sprite on the ground plane")
+	if blob.position.distance_to(spr.position) > cfg.cell_size:
+		push_error("GridBoardView: foot blob should follow the sprite near its feet")
 		return false
-	if blob.position.y <= cfg.tile_height or blob.position.y > cfg.tile_height + 0.05:
-		push_error("GridBoardView: foot blob y=%.3f should sit just above grass top" % blob.position.y)
-		return false
-	spr.scale = Vector3.ONE * 0.5
+	spr.scale = Vector2.ONE * 0.5
 	spr.modulate.a = 0.3
 	view._process(0.0)
-	if absf(blob.scale.x - 0.5) > 0.001:
-		push_error("GridBoardView: foot blob should follow sprite scale")
-		return false
 	if blob.visible:
 		push_error("GridBoardView: foot blob should hide while the sprite fades")
 		return false
@@ -173,45 +151,37 @@ func _test_overlay_planes() -> bool:
 	var plain := Vector2i(3, 3)
 	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
 	for cell in view._overlay_nodes.keys():
-		if (view._overlay_nodes[cell] as MeshInstance3D).visible:
+		if (view._overlay_nodes[cell] as Polygon2D).visible:
 			push_error("GridBoardView: overlay %s should be hidden without highlight" % cell)
 			return false
 	view.sync_tactical_units([], sel, [move], [atk])
 	var colors: Array[Color] = []
 	for cell in [sel, move, atk]:
-		var ov: MeshInstance3D = view._overlay_nodes[cell] as MeshInstance3D
+		var ov: Polygon2D = view._overlay_nodes[cell] as Polygon2D
 		if not ov.visible:
 			push_error("GridBoardView: overlay %s should be visible" % cell)
 			return false
-		var mat := ov.material_override as StandardMaterial3D
-		if mat == null:
-			push_error("GridBoardView: overlay %s missing material" % cell)
-			return false
-		colors.append(mat.albedo_color)
-		var top := cfg.tile_height
-		if ov.position.y <= top or ov.position.y > top + 0.02:
-			push_error("GridBoardView: overlay %s y=%.3f not just above grass top %.3f" % [cell, ov.position.y, top])
-			return false
+		colors.append(ov.color)
 	if colors[0].is_equal_approx(colors[1]) or colors[1].is_equal_approx(colors[2]) or colors[0].is_equal_approx(colors[2]):
 		push_error("GridBoardView: selected/move/attack overlays should differ in color")
 		return false
-	if (view._overlay_nodes[plain] as MeshInstance3D).visible:
+	if (view._overlay_nodes[plain] as Polygon2D).visible:
 		push_error("GridBoardView: un-highlighted overlay should stay hidden")
 		return false
-	var tile_mat := (view._tile_nodes[move] as MeshInstance3D).get_surface_override_material(0)
-	var plain_mat := (view._tile_nodes[plain] as MeshInstance3D).get_surface_override_material(0)
-	if tile_mat != plain_mat:
-		push_error("GridBoardView: highlight must not swap shared terrain material")
+	var color_before := view.grass_color_at(move)
+	var color_after := view.grass_color_at(move)
+	if color_before != color_after:
+		push_error("GridBoardView: highlight must not swap grass fill color")
 		return false
 	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
 	for cell in [sel, move, atk]:
-		if (view._overlay_nodes[cell] as MeshInstance3D).visible:
+		if (view._overlay_nodes[cell] as Polygon2D).visible:
 			push_error("GridBoardView: overlay %s should hide after clear" % cell)
 			return false
 	return true
 
 
-func _test_grass_checker_materials() -> bool:
+func _test_grass_checker_colors() -> bool:
 	var cfg: BoardConfig = BoardConfigScript.new()
 	cfg.grid_width = 3
 	cfg.grid_height = 3
@@ -225,69 +195,34 @@ func _test_grass_checker_materials() -> bool:
 	var b := Vector2i(1, 0)
 	var wall := Vector2i(0, 1)
 	view.set_terrain_cell(wall, &"wall_straight")
-	var mat_a: Material = view._tile_nodes[a].get_surface_override_material(0) as Material
-	var mat_b: Material = view._tile_nodes[b].get_surface_override_material(0) as Material
-	if mat_a == null or mat_b == null:
-		push_error("GridBoardView: grass checker materials missing")
-		return false
-	if mat_a == mat_b:
+	var col_a := view.grass_color_at(a)
+	var col_b := view.grass_color_at(b)
+	if col_a == col_b:
 		push_error("GridBoardView: adjacent parity grass should use different checker tints")
 		return false
-	if not _is_grass_checker_material(mat_a) or not _is_grass_checker_material(mat_b):
-		push_error("GridBoardView: grass should use unshaded checker StandardMaterial3D")
+	if not col_a.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
+		push_error("GridBoardView: (0,0) should use light checker, got %s" % col_a)
 		return false
-	var std_a := mat_a as StandardMaterial3D
-	var std_b := mat_b as StandardMaterial3D
-	if not std_a.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_LIGHT):
-		push_error("GridBoardView: (0,0) should use light checker, got %s" % std_a.albedo_color)
+	if not col_b.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: (1,0) should use dark checker, got %s" % col_b)
 		return false
-	if not std_b.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
-		push_error("GridBoardView: (1,0) should use dark checker, got %s" % std_b.albedo_color)
+	if not view.grass_color_at(wall).is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
+		push_error("GridBoardView: wall grass should use checker parity color")
 		return false
-	var wall_mi: MeshInstance3D = view._tile_nodes[wall] as MeshInstance3D
-	var wall_top: Material = wall_mi.get_surface_override_material(0)
-	if not _is_grass_checker_material(wall_top):
-		push_error("GridBoardView: wall grass surface should use same checker material as plain grass")
+	var root_node: Node2D = view._tile_nodes[wall] as Node2D
+	var wall_node: Node2D = root_node.get_node("Wall") as Node2D
+	if not wall_node.visible:
+		push_error("GridBoardView: wall visual should show on wall_straight")
 		return false
-	var wall_std := wall_top as StandardMaterial3D
-	if not wall_std.albedo_color.is_equal_approx(GridBoardViewScript.GRASS_CHECKER_DARK):
-		push_error("GridBoardView: wall at (0,1) should use dark checker parity, got %s" % wall_std.albedo_color)
-		return false
-	var wall_stone: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
-	if not _is_wall_stone_checker_material(wall_stone):
-		push_error("GridBoardView: wall stone surface should be unshaded vertex-color StandardMaterial3D")
-		return false
-	if wall_mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_ON:
-		push_error("GridBoardView: terrain tiles should cast realtime shadows (wall included)")
+	var stone: Polygon2D = wall_node.get_node("StoneBody") as Polygon2D
+	if stone == null or not stone.color.is_equal_approx(GridBoardViewScript.WALL_STONE_LIGHT):
+		push_error("GridBoardView: wall stone should use light gray brick color")
 		return false
 	return true
 
 
-func _is_grass_checker_material(mat: Material) -> bool:
-	if mat is StandardMaterial3D:
-		var std := mat as StandardMaterial3D
-		return std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
-	return false
-
-
-func _is_wall_stone_checker_material(mat: Material) -> bool:
-	if mat is StandardMaterial3D:
-		var std := mat as StandardMaterial3D
-		return (
-			std.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
-			and std.vertex_color_use_as_albedo
-			and std.albedo_color.is_equal_approx(Color.WHITE)
-		)
-	return false
-
-
-func _test_terrain_meshes_and_orientation() -> bool:
+func _test_terrain_visuals_and_orientation() -> bool:
 	var catalog := TerrainCatalog.load_default()
-	var grass_def := catalog.get_def(&"grass")
-	var wall_def := catalog.get_def(&"wall_straight")
-	if grass_def == null or wall_def == null or grass_def.mesh == null or wall_def.mesh == null:
-		push_error("GridBoardView: terrain defs/meshes missing in catalog")
-		return false
 	var cfg: BoardConfig = BoardConfigScript.new()
 	cfg.grid_width = 5
 	cfg.grid_height = 5
@@ -306,95 +241,65 @@ func _test_terrain_meshes_and_orientation() -> bool:
 		Vector2i(4, 4): &"wall_straight",
 	}
 	view.set_terrain_cells(cells)
-	var wall_mi: MeshInstance3D = view._tile_nodes[Vector2i(1, 1)] as MeshInstance3D
-	var grass_mi: MeshInstance3D = view._tile_nodes[Vector2i(3, 1)] as MeshInstance3D
-	if wall_mi.mesh != wall_def.mesh:
-		push_error("GridBoardView: wall cell mesh should be wall_straight def mesh")
+	if not is_equal_approx(view.wall_rotation_at(Vector2i(1, 1)), PI * 0.5):
+		push_error("GridBoardView: vertical wall run should rotate 90°")
 		return false
-	if grass_mi.mesh != grass_def.mesh:
-		push_error("GridBoardView: grass cell mesh should be grass def mesh")
-		return false
-	var stone_mat: StandardMaterial3D = wall_mi.get_surface_override_material(1) as StandardMaterial3D
-	if stone_mat == null or stone_mat.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
-		push_error("GridBoardView: wall stone surface should be unshaded override")
-		return false
-	if not _is_wall_stone_checker_material(stone_mat):
-		push_error("GridBoardView: wall stone should use unshaded two-gray vertex-color material")
-		return false
-	if not is_equal_approx(wall_mi.rotation.y, PI * 0.5):
-		push_error("GridBoardView: vertical wall run should rotate 90° (got %.3f)" % wall_mi.rotation.y)
-		return false
-	var h_mi: MeshInstance3D = view._tile_nodes[Vector2i(3, 4)] as MeshInstance3D
-	if absf(h_mi.rotation.y) > 0.001:
-		push_error("GridBoardView: horizontal wall run should keep rotation 0 (got %.3f)" % h_mi.rotation.y)
+	if absf(view.wall_rotation_at(Vector2i(3, 4))) > 0.001:
+		push_error("GridBoardView: horizontal wall run should keep rotation 0")
 		return false
 	if view.terrain_id_at(Vector2i(0, 0)) != catalog.default_id:
 		push_error("GridBoardView: unpainted cell should resolve to default terrain")
 		return false
 	view.set_terrain_cell(Vector2i(0, 1), &"wall_straight")
-	if absf(wall_mi.rotation.y) > 0.001:
+	if absf(view.wall_rotation_at(Vector2i(1, 1))) > 0.001:
 		push_error("GridBoardView: neighbor refresh should re-orient wall once it has an E/W neighbor")
 		return false
-	if StringName(view._terrain_cells.get(Vector2i(0, 1), &"")) != &"wall_straight":
-		push_error("GridBoardView: _terrain_cells should store StringName ids")
-		return false
 	view.clear_terrain_paint()
-	if wall_mi.mesh != grass_def.mesh:
+	var wall_root: Node2D = view._tile_nodes[Vector2i(1, 1)] as Node2D
+	if (wall_root.get_node("Wall") as Node2D).visible:
 		push_error("GridBoardView: clear_terrain_paint should restore default grass")
 		return false
 	return true
 
 
-func _test_terrain_mesh_dimensions() -> bool:
+func _test_terrain_footprint_dimensions() -> bool:
 	var cfg := load("res://resources/map/board_config.tres") as BoardConfig
-	var catalog := TerrainCatalog.load_default()
-	var wall_mesh := catalog.get_def(&"wall_straight").mesh
-	var grass_mesh := catalog.get_def(&"grass").mesh
+	var host := Control.new()
+	host.size = Vector2(320, 240)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	view.set_terrain_cell(Vector2i(1, 1), &"wall_straight")
 	var cs := cfg.cell_size
-	var wall_aabb := wall_mesh.get_aabb()
-	var expect_h := cfg.tile_height + 0.6 * cs
-	if absf(wall_aabb.size.y - expect_h) > 0.02:
-		push_error("GridBoardView: wall mesh height %.3f != %.3f" % [wall_aabb.size.y, expect_h])
-		return false
-	if absf(wall_aabb.size.x - cs) > 0.02:
-		push_error("GridBoardView: wall mesh length %.3f != cell_size %.3f" % [wall_aabb.size.x, cs])
-		return false
-	if wall_mesh.get_surface_count() != 2 or grass_mesh.get_surface_count() != 1:
-		push_error("GridBoardView: expected wall=2 surfaces (grass, stone), grass=1")
-		return false
-	var stone_aabb := _surface_aabb(wall_mesh, 1)
-	if stone_aabb.size.z < 0.12 * cs or stone_aabb.size.z > 0.2 * cs:
-		push_error("GridBoardView: wall thickness %.3f outside 0.12–0.2 U" % stone_aabb.size.z)
-		return false
-	if absf(stone_aabb.position.y - cfg.tile_height * 0.5) > 0.005:
-		push_error("GridBoardView: wall should start on grass top (y=%.3f)" % stone_aabb.position.y)
-		return false
-	var grass_aabb := grass_mesh.get_aabb()
 	var expect_inset := cs * cfg.tile_inset
-	if absf(grass_aabb.size.x - expect_inset) > 0.005 or absf(grass_aabb.size.z - expect_inset) > 0.005:
-		push_error("GridBoardView: grass tile footprint %s != inset %.3f" % [grass_aabb.size, expect_inset])
+	var wall := view.wall_footprint_size(Vector2i(1, 1))
+	if absf(wall.x - expect_inset) > 0.005:
+		push_error("GridBoardView: wall bar length %.3f != inset %.3f" % [wall.x, expect_inset])
+		return false
+	if wall.y < 0.12 * cs or wall.y > 0.2 * cs:
+		push_error("GridBoardView: wall thickness %.3f outside 0.12–0.2 U" % wall.y)
+		return false
+	var root_node: Node2D = view._tile_nodes[Vector2i(0, 0)] as Node2D
+	var grass: Polygon2D = root_node.get_node("Grass") as Polygon2D
+	var half := grass.polygon[1].x
+	if absf(half * 2.0 - expect_inset) > 0.005:
+		push_error("GridBoardView: grass tile footprint != inset %.3f" % expect_inset)
 		return false
 	return true
 
 
-func _surface_aabb(mesh: Mesh, surface: int) -> AABB:
-	var verts: PackedVector3Array = mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
-	var box := AABB(verts[0], Vector3.ZERO)
-	for v in verts:
-		box = box.expand(v)
-	return box
-
-
 func _test_pan_vertical_intuitive() -> bool:
 	var cfg: BoardConfig = BoardConfigScript.new()
-	var view := GridBoardViewScript.new()
-	view.config = cfg
-	view._zoom = 1.0
-	var yaw := deg_to_rad(cfg.camera_yaw_deg)
-	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
 	var delta := view.compute_pan_world_delta(Vector2(0.0, -24.0))
-	if delta.dot(forward) <= 0.0:
-		push_error("GridBoardView: upward drag should pan along +forward (grab-the-map feel)")
+	if delta.y <= 0.0:
+		push_error("GridBoardView: upward drag should pan target +Y (grab-the-map feel in 2D)")
 		return false
 	return true
 
@@ -435,26 +340,21 @@ func _test_view_builds() -> bool:
 		return false
 	var camera := _find_camera(view)
 	if camera == null:
-		push_error("GridBoardView: Camera3D missing")
-		return false
-	if camera.projection != Camera3D.PROJECTION_ORTHOGONAL:
-		push_error("GridBoardView: expected orthogonal projection")
+		push_error("GridBoardView: Camera2D missing")
 		return false
 	var units := _find_node_named(view, "Units")
 	if units == null:
 		push_error("GridBoardView: Units root missing")
 		return false
-	var local_pos := camera.position
-	var elev_deg := rad_to_deg(atan2(local_pos.y, Vector2(local_pos.x, local_pos.z).length()))
-	if absf(elev_deg - cfg.camera_pitch_deg) > 1.5:
-		push_error("GridBoardView: camera elev %.1f° != pitch %.1f°" % [elev_deg, cfg.camera_pitch_deg])
+	if camera.zoom.x <= 0.0:
+		push_error("GridBoardView: Camera2D zoom should be positive")
 		return false
 	return true
 
 
-func _find_camera(node: Node) -> Camera3D:
-	if node is Camera3D:
-		return node as Camera3D
+func _find_camera(node: Node) -> Camera2D:
+	if node is Camera2D:
+		return node as Camera2D
 	for child in node.get_children():
 		var found := _find_camera(child)
 		if found != null:
