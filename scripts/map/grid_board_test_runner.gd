@@ -40,6 +40,9 @@ func _initialize() -> void:
 	if not await _test_combat_tweens_stay_in_cell():
 		quit(1)
 		return
+	if not _test_unit_idle_tween():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -128,8 +131,10 @@ func _test_board_look_and_unit_blob() -> bool:
 		push_error("GridBoardView: feet node should sit on the cell center, got %s" % spr.position)
 		return false
 	var tex_h := float(spr.texture.get_height())
-	if absf(spr.offset.y + tex_h * 0.5) > 0.5:
-		push_error("GridBoardView: sprite offset should lift the body so feet stay at the cell center")
+	var base_y := -tex_h * 0.5
+	# 待机浮动只改 offset.y，允许在基线上下各 UNIT_IDLE_BOB_PX。
+	if absf(spr.offset.y - base_y) > GridBoardViewScript.UNIT_IDLE_BOB_PX + 0.5:
+		push_error("GridBoardView: sprite offset should stay near foot baseline (idle bob)")
 		return false
 	if blob.position.length() > 0.02:
 		push_error("GridBoardView: foot blob should stay on the feet at the cell center")
@@ -143,6 +148,59 @@ func _test_board_look_and_unit_blob() -> bool:
 	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
 	if view._unit_blobs.has(unit) or not blob.is_queued_for_deletion():
 		push_error("GridBoardView: foot blob should be freed with its unit")
+		return false
+	return true
+
+
+func _test_unit_idle_tween() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		push_error("GridBoardView: knight.tres missing for idle tween test")
+		return false
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(2, 2))
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	if not view._unit_idle_tweens.has(unit):
+		push_error("GridBoardView: idle tween should start after sync")
+		return false
+	var idle: Tween = view._unit_idle_tweens[unit] as Tween
+	if idle == null or not is_instance_valid(idle) or not idle.is_running():
+		push_error("GridBoardView: idle tween should be running")
+		return false
+	var spr := view._unit_sprites[unit] as Sprite2D
+	if spr.position.length() > 0.02:
+		push_error("GridBoardView: idle must not move feet off cell center, got %s" % spr.position)
+		return false
+	var base: Vector2 = view._unit_base_offsets[unit] as Vector2
+	if absf(spr.offset.y - base.y) > GridBoardViewScript.UNIT_IDLE_BOB_PX + 0.01:
+		push_error("GridBoardView: idle bob exceeded amplitude")
+		return false
+	# 点选走 Control 格子拾取，单位是 Sprite2D；待机只改 offset，不挡输入。
+	if not (spr is Sprite2D):
+		push_error("GridBoardView: unit visual must remain Sprite2D under idle")
+		return false
+	view._pause_unit_idle(unit)
+	if view._unit_idle_tweens.has(unit):
+		push_error("GridBoardView: pause_unit_idle should clear idle tween")
+		return false
+	if not spr.offset.is_equal_approx(base):
+		push_error("GridBoardView: pause_unit_idle should restore base offset")
+		return false
+	view.play_unit_hit(unit)
+	if view._unit_idle_tweens.has(unit):
+		push_error("GridBoardView: hit tween should pause idle")
+		return false
+	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
+	if view._unit_idle_tweens.has(unit):
+		push_error("GridBoardView: removing unit should clear idle tween")
 		return false
 	return true
 
