@@ -19,12 +19,14 @@
 | 主菜单进入对战沙盘 | 场景切换 |
 | 2D 斜 45° 方格盘 + Sprite2D 单位 | 见 [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) |
 | 「结束行动」 | 回合钟，见 [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) |
+| 方格上移动、普攻与胜负 | 见 [Features/UNITS.md](./Features/UNITS.md)、[Features/COMBAT.md](./Features/COMBAT.md) |
+| 底栏手牌表达移/攻 | 见 [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) |
 
-没有单位移动、战斗结算、城市或科技。
+没有城市或科技。行动可用卡表达（仅玩家移/攻卡首版）。
 
 ## 下一刀的玩家体验（未实现）
 
-下一刀让玩家在方格上**移动单位**并完成一次短交锋。动笔写 Feature 前先用 `design-brainstorm`，不要把未立项系统写进规格。
+下一刀在已有短交锋上收束体验缺口。动笔写 Feature 前先用 `design-brainstorm`，不要把未立项系统写进规格。
 
 ## 术语
 
