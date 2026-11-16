@@ -282,9 +282,17 @@ func _test_terrain_footprint_dimensions() -> bool:
 		return false
 	var root_node: Node2D = view._tile_nodes[Vector2i(0, 0)] as Node2D
 	var grass: Polygon2D = root_node.get_node("Grass") as Polygon2D
-	var half := grass.polygon[1].x
-	if absf(half * 2.0 - expect_inset) > 0.005:
-		push_error("GridBoardView: grass tile footprint != inset %.3f" % expect_inset)
+	if grass.polygon.size() < 4:
+		push_error("GridBoardView: grass tile should be a quad")
+		return false
+	var edge := (grass.polygon[1] - grass.polygon[0]).length()
+	if edge < expect_inset * 0.85 or edge > expect_inset * 1.15:
+		push_error("GridBoardView: grass tile edge %.3f not near inset %.3f" % [edge, expect_inset])
+		return false
+	var flat := view._cell_to_world(Vector2i(0, 0), cs)
+	var step := view._cell_to_world(Vector2i(1, 0), cs)
+	if absf(flat.y - step.y) < 0.01:
+		push_error("GridBoardView: oblique projection should skew screen Y across grid X")
 		return false
 	return true
 
@@ -297,9 +305,11 @@ func _test_pan_vertical_intuitive() -> bool:
 	var view: GridBoardView = GridBoardViewScript.new()
 	host.add_child(view)
 	view.setup(cfg)
+	var yaw := deg_to_rad(cfg.camera_yaw_deg)
+	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
 	var delta := view.compute_pan_world_delta(Vector2(0.0, -24.0))
-	if delta.y <= 0.0:
-		push_error("GridBoardView: upward drag should pan target +Y (grab-the-map feel in 2D)")
+	if delta.dot(forward) <= 0.0:
+		push_error("GridBoardView: upward drag should pan along +forward (grab-the-map feel)")
 		return false
 	return true
 
@@ -314,7 +324,7 @@ func _test_cell_mapping() -> bool:
 	for gx in range(cfg.grid_width):
 		for gy in range(cfg.grid_height):
 			var cell := Vector2i(gx, gy)
-			var w := view._cell_to_world(cell, cfg.cell_size)
+			var w := view._cell_ground_center(cell, cfg.cell_size)
 			var back: Variant = view._world_to_cell(w)
 			if back != cell:
 				push_error("GridBoardView: cell roundtrip failed %s -> %s" % [cell, back])

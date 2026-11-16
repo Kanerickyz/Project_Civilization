@@ -1,6 +1,6 @@
 class_name GridBoardView
 extends Control
-## 顶视 2D 方格盘：格块 + Sprite2D 单位；Camera2D 拖拽/滚轮缩放。
+## 2D 方格盘（斜 45° 正交投影）：Polygon2D 格块 + Sprite2D 单位；Camera2D 拖拽/滚轮。
 
 
 signal cell_clicked(cell: Vector2i)
@@ -21,7 +21,7 @@ var _tile_nodes: Dictionary = {} # Vector2i -> Node2D (Tile root)
 var _overlay_nodes: Dictionary = {} # Vector2i -> Polygon2D
 var _catalog: TerrainCatalog
 
-var _target: Vector2 = Vector2.ZERO
+var _target: Vector3 = Vector3.ZERO
 var _zoom: float = 1.0
 var _dragging: bool = false
 var _drag_moved: bool = false
@@ -208,7 +208,8 @@ func _on_resized() -> void:
 func _try_center_on_board() -> void:
 	if size.x <= 1.0 or size.y <= 1.0 or config == null:
 		return
-	_target = _cell_to_world(Vector2i(config.grid_width / 2, config.grid_height / 2), config.cell_size)
+	_target = _cell_ground_center(Vector2i(config.grid_width / 2, config.grid_height / 2), config.cell_size)
+	_target.y = 0.0
 	_needs_center = false
 	_clamp_target()
 	_apply_camera()
@@ -229,9 +230,6 @@ func _rebuild_board() -> void:
 	_last_unit_cells.clear()
 
 	var cell_size := config.cell_size
-	var half := cell_size * config.tile_inset * 0.5
-	var grass_poly := _square_points(half)
-	var overlay_poly := grass_poly
 	for gx in range(config.grid_width):
 		for gy in range(config.grid_height):
 			var cell := Vector2i(gx, gy)
@@ -244,7 +242,6 @@ func _rebuild_board() -> void:
 			var grass := Polygon2D.new()
 			grass.name = "Grass"
 			grass.z_index = GRASS_Z
-			grass.polygon = grass_poly
 			root.add_child(grass)
 
 			var wall := Node2D.new()
@@ -252,39 +249,17 @@ func _rebuild_board() -> void:
 			wall.z_index = WALL_Z
 			wall.visible = false
 			root.add_child(wall)
-			_build_wall_visual(wall, half, cell_size)
 
 			var ov := Polygon2D.new()
 			ov.name = "Overlay"
 			ov.z_index = OVERLAY_Z
-			ov.polygon = overlay_poly
 			ov.visible = false
 			root.add_child(ov)
 			_overlay_nodes[cell] = ov
 
 	for cell in _tile_nodes.keys():
+		_update_tile_geometry(cell)
 		_apply_tile_visual(cell)
-
-
-func _build_wall_visual(wall_root: Node2D, half: float, cell_size: float) -> void:
-	var thick := cell_size * 0.16
-	var len := half * 2.0
-	var body := Polygon2D.new()
-	body.name = "StoneBody"
-	body.color = WALL_STONE_LIGHT
-	var ht := thick
-	var hw := len * 0.5
-	body.polygon = PackedVector2Array([
-		Vector2(-hw, -ht * 0.5), Vector2(hw, -ht * 0.5), Vector2(hw, ht * 0.5), Vector2(-hw, ht * 0.5),
-	])
-	wall_root.add_child(body)
-	var stripe := Polygon2D.new()
-	stripe.name = "StoneStripe"
-	stripe.color = WALL_STONE_DARK
-	stripe.polygon = PackedVector2Array([
-		Vector2(-hw * 0.35, -ht * 0.5), Vector2(hw * 0.35, -ht * 0.5), Vector2(hw * 0.35, ht * 0.5), Vector2(-hw * 0.35, ht * 0.5),
-	])
-	wall_root.add_child(stripe)
 
 
 func sync_tactical_units(
@@ -319,9 +294,10 @@ func sync_tactical_units(
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites[unit] as Sprite2D
-	var world := _cell_to_world(unit.cell, config.cell_size)
 	var unit_h: float = config.unit_world_height if config != null else 0.88
-	var target_pos := world + Vector2(0.0, -unit_h * 0.35)
+	var ground := _cell_ground_center(unit.cell, config.cell_size)
+	ground.y = config.tile_height + unit_h * 0.5
+	var target_pos := _oblique_project(ground)
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
@@ -383,14 +359,16 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	if config == null:
 		return
-	var world := _cell_to_world(cell, config.cell_size)
-	var lift: float = config.unit_world_height * 0.55
+	var ground := _cell_ground_center(cell, config.cell_size)
+	ground.y = config.tile_height + config.unit_world_height * 0.55
+	var world := _oblique_project(ground)
+	var lift := 0.0
 	var lbl := Label.new()
 	lbl.text = "-%d!" % amount
 	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.modulate = Color("ff6644")
 	_labels_root.add_child(lbl)
-	_position_world_on_label(lbl, world + Vector2(0.0, -lift))
+	_position_world_on_label(lbl, world + Vector2(0.0, lift - 36.0))
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_method(func(pos: Vector2): _position_world_on_label(lbl, pos), lbl.position, lbl.position + Vector2(0, -36), 0.5).set_trans(Tween.TRANS_SINE)
@@ -556,8 +534,9 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	if wall != null:
 		wall.visible = is_wall
 		if is_wall:
-			wall.rotation = _tile_yaw(cell, terrain_id, def)
+			_update_wall_geometry(cell, _tile_yaw(cell, terrain_id, def))
 	root.rotation = 0.0
+	root.z_index = cell.x + cell.y
 	_apply_overlay(cell)
 
 
@@ -590,10 +569,118 @@ func _apply_overlay(cell: Vector2i) -> void:
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
 
 
-func _square_points(half: float) -> PackedVector2Array:
-	return PackedVector2Array([
-		Vector2(-half, -half), Vector2(half, -half), Vector2(half, half), Vector2(-half, half),
-	])
+func _oblique_project(p: Vector3) -> Vector2:
+	var pitch := deg_to_rad(config.camera_pitch_deg)
+	var yaw := deg_to_rad(config.camera_yaw_deg)
+	var cp := cos(pitch)
+	var sp := sin(pitch)
+	var rx := cos(yaw)
+	var rz := -sin(yaw)
+	var fx := sin(yaw)
+	var fz := cos(yaw)
+	var sx := p.x * rx + p.z * rz
+	var sy := -(p.x * fx + p.z * fz) * cp + p.y * sp
+	return Vector2(sx, sy)
+
+
+func _oblique_unproject_ground(screen: Vector2) -> Vector3:
+	var pitch := deg_to_rad(config.camera_pitch_deg)
+	var yaw := deg_to_rad(config.camera_yaw_deg)
+	var cp := cos(pitch)
+	var rx := cos(yaw)
+	var rz := -sin(yaw)
+	var fx := sin(yaw)
+	var fz := cos(yaw)
+	var det := rx * (-fz * cp) - rz * (-fx * cp)
+	if absf(det) < 1e-8:
+		return Vector3.ZERO
+	var gx := (screen.x * (-fz * cp) - screen.y * rz) / det
+	var gz := (rx * screen.y - screen.x * (-fx * cp)) / det
+	return Vector3(gx, 0.0, gz)
+
+
+func _cell_ground_center(cell: Vector2i, cell_size: float) -> Vector3:
+	var ox := (float(config.grid_width) - 1.0) * 0.5
+	var oy := (float(config.grid_height) - 1.0) * 0.5
+	var x := (float(cell.x) - ox) * cell_size
+	var z := (float(cell.y) - oy) * cell_size
+	return Vector3(x, config.tile_height, z)
+
+
+func _cell_ground_corner(cell: Vector2i, lx: float, lz: float) -> Vector3:
+	var ox := (float(config.grid_width) - 1.0) * 0.5
+	var oy := (float(config.grid_height) - 1.0) * 0.5
+	var x := (float(cell.x) - ox) * config.cell_size + lx
+	var z := (float(cell.y) - oy) * config.cell_size + lz
+	return Vector3(x, config.tile_height, z)
+
+
+func _project_poly_local(cell: Vector2i, corners_3d: Array) -> PackedVector2Array:
+	var center := _cell_to_world(cell, config.cell_size)
+	var out := PackedVector2Array()
+	for c in corners_3d:
+		out.append(_oblique_project(c as Vector3) - center)
+	return out
+
+
+func _update_tile_geometry(cell: Vector2i) -> void:
+	if not _tile_nodes.has(cell):
+		return
+	var root: Node2D = _tile_nodes[cell] as Node2D
+	var half := config.cell_size * config.tile_inset * 0.5
+	var center_proj := _cell_to_world(cell, config.cell_size)
+	root.position = center_proj
+	var top_corners := [
+		_cell_ground_corner(cell, -half, -half),
+		_cell_ground_corner(cell, half, -half),
+		_cell_ground_corner(cell, half, half),
+		_cell_ground_corner(cell, -half, half),
+	]
+	var poly := _project_poly_local(cell, top_corners)
+	var grass: Polygon2D = root.get_node("Grass") as Polygon2D
+	grass.polygon = poly
+	var ov: Polygon2D = root.get_node("Overlay") as Polygon2D
+	ov.polygon = poly
+	root.z_index = cell.x + cell.y
+	_update_wall_geometry(cell, 0.0)
+
+
+func _update_wall_geometry(cell: Vector2i, yaw_rad: float) -> void:
+	var root: Node2D = _tile_nodes[cell] as Node2D
+	var wall: Node2D = root.get_node_or_null("Wall") as Node2D
+	if wall == null:
+		return
+	for ch in wall.get_children():
+		ch.queue_free()
+	var half := config.cell_size * config.tile_inset * 0.5
+	var thick := config.cell_size * 0.16 * 0.5
+	var cos_y := cos(yaw_rad)
+	var sin_y := sin(yaw_rad)
+	var corners_stone: Array = []
+	for lc in [Vector2(-thick, -half), Vector2(thick, -half), Vector2(thick, half), Vector2(-thick, half)]:
+		var lx2: float = lc.x * cos_y - lc.y * sin_y
+		var lz2: float = lc.x * sin_y + lc.y * cos_y
+		corners_stone.append(_cell_ground_corner(cell, lx2, lz2))
+	var body := Polygon2D.new()
+	body.name = "StoneBody"
+	body.color = WALL_STONE_LIGHT
+	body.polygon = _project_poly_local(cell, _quad_from_first4(corners_stone))
+	wall.add_child(body)
+	var stripe_corners := [
+		corners_stone[0].lerp(corners_stone[1], 0.35),
+		corners_stone[0].lerp(corners_stone[1], 0.65),
+		corners_stone[3].lerp(corners_stone[2], 0.65),
+		corners_stone[3].lerp(corners_stone[2], 0.35),
+	]
+	var stripe := Polygon2D.new()
+	stripe.name = "StoneStripe"
+	stripe.color = WALL_STONE_DARK
+	stripe.polygon = _project_poly_local(cell, stripe_corners)
+	wall.add_child(stripe)
+
+
+func _quad_from_first4(points: Array) -> Array:
+	return [points[0], points[1], points[3], points[2]]
 
 
 func grass_color_at(cell: Vector2i) -> Color:
@@ -609,7 +696,11 @@ func wall_rotation_at(cell: Vector2i) -> float:
 		return 0.0
 	var root: Node2D = _tile_nodes[cell] as Node2D
 	var wall: Node2D = root.get_node_or_null("Wall") as Node2D
-	return wall.rotation if wall != null and wall.visible else 0.0
+	if wall == null or not wall.visible:
+		return 0.0
+	var terrain_id := terrain_id_at(cell)
+	var def := _get_catalog().get_def(terrain_id)
+	return _tile_yaw(cell, terrain_id, def)
 
 
 func wall_footprint_size(cell: Vector2i) -> Vector2:
@@ -621,17 +712,13 @@ func wall_footprint_size(cell: Vector2i) -> Vector2:
 
 
 func _cell_to_world(cell: Vector2i, cell_size: float) -> Vector2:
-	var ox := (float(config.grid_width) - 1.0) * 0.5
-	var oy := (float(config.grid_height) - 1.0) * 0.5
-	var x := (float(cell.x) - ox) * cell_size
-	var y := (float(cell.y) - oy) * cell_size
-	return Vector2(x, y)
+	return _oblique_project(_cell_ground_center(cell, cell_size))
 
 
 func _apply_camera() -> void:
 	if _camera == null or _pivot == null or config == null:
 		return
-	_pivot.position = _target
+	_pivot.position = _oblique_project(Vector3(_target.x, 0.0, _target.z))
 	var vs := _viewport.size if _viewport != null else Vector2i(852, 393)
 	var vh := maxf(float(vs.y), 1.0)
 	var ortho := maxf(config.camera_ortho_size, 0.1)
@@ -699,10 +786,14 @@ func _pan_by_screen_delta(delta: Vector2) -> void:
 	_apply_camera()
 
 
-func compute_pan_world_delta(delta: Vector2) -> Vector2:
+func compute_pan_world_delta(delta: Vector2) -> Vector3:
 	var sens := config.camera_pan_sensitivity / maxf(_zoom, 0.05)
 	var cam_z := _camera.zoom.y if _camera != null and _camera.zoom.y > 0.0 else 1.0
-	return -delta * sens / cam_z
+	var scaled := delta / cam_z
+	var yaw := deg_to_rad(config.camera_yaw_deg)
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
+	return -right * scaled.x * sens - forward * scaled.y * sens
 
 
 func _handle_screen_touch(st: InputEventScreenTouch) -> void:
@@ -784,15 +875,16 @@ func _pick_cell(local_pos: Vector2) -> Variant:
 	var vp_pos := _to_viewport_pos(local_pos)
 	var inv := _camera.get_canvas_transform().affine_inverse()
 	var hit: Vector2 = inv * vp_pos
-	return _world_to_cell(hit)
+	var ground := _oblique_unproject_ground(hit)
+	return _world_to_cell(ground)
 
 
-func _world_to_cell(world: Vector2) -> Variant:
+func _world_to_cell(world: Vector3) -> Variant:
 	var cell_size := config.cell_size
 	var ox := (float(config.grid_width) - 1.0) * 0.5
 	var oy := (float(config.grid_height) - 1.0) * 0.5
 	var gx := int(round(world.x / cell_size + ox))
-	var gy := int(round(world.y / cell_size + oy))
+	var gy := int(round(world.z / cell_size + oy))
 	if gx < 0 or gy < 0 or gx >= config.grid_width or gy >= config.grid_height:
 		return null
 	return Vector2i(gx, gy)
@@ -816,4 +908,5 @@ func _clamp_target() -> void:
 	var half_h := float(config.grid_height) * cell_size * 0.5
 	var pad := cell_size * 1.5
 	_target.x = clampf(_target.x, -half_w - pad, half_w + pad)
-	_target.y = clampf(_target.y, -half_h - pad, half_h + pad)
+	_target.z = clampf(_target.z, -half_h - pad, half_h + pad)
+	_target.y = 0.0

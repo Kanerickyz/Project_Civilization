@@ -1,4 +1,4 @@
-# 方格棋盘 · 2D 顶视 · Sprite2D 单位
+# 方格棋盘 · 2D 斜 45° 正交 · Sprite2D 单位
 
 > **已实现**（占位骨架 + 地块类型）。数值见 `resources/map/board_config.tres`。
 
@@ -18,9 +18,9 @@
 
 ## 表现
 
-- **坐标**：整数方格 `(x, y)`，原点在盘心；`GridBoardView` 内 SubViewport 2D 世界坐标。
-- **视角**：**Camera2D** 顶视；可见高度由 `camera_ortho_size` 与滚轮缩放 `_zoom` 决定（`zoom.y ≈ viewport_h * _zoom / camera_ortho_size`）。
-- **地块绘制**（`Polygon2D`）：
+- **坐标**：逻辑格 `(x, y)` 先映射到地面 **XZ**（原点在盘心），再经 **`camera_pitch_deg` + `camera_yaw_deg`（默认各 45°）** 正交投影到 SubViewport 2D。
+- **视角**：仍用 **Camera2D** 平移/缩放视口；投影公式与旧 3D 斜视正交一致，棋盘呈斜 45° 俯视（非顶视）。
+- **地块绘制**（`Polygon2D`，投影四边形）：
   - 草地：方 footprint `cell_size × tile_inset`（默认 **0.98U**）；顶面色按 `(x+y)%2` **`#B4A158` / `#8F884C`**。
   - 直城墙：草地底同上；格内居中条形墙身（厚 **0.16U**、长 **inset**），石砖 **`#9C958C` / `#716C65`**；按相邻同类 **0° / 90°** 转向（与旧 3D 规则一致）。
 - **3D 网格资源**：`resources/terrain/meshes/*.tres` 仍供 headless 尺寸/生成脚本使用，**运行时沙盘与地图编辑器不再实例化 MeshInstance3D**。

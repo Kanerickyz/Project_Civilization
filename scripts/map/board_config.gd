@@ -12,7 +12,7 @@ extends Resource
 @export_file("*.json") var terrain_map_path: String = ""
 @export var color_light: Color = Color("3d4a58")
 @export var color_dark: Color = Color("2a3440")
-## 2D Camera2D：可见世界高度基准（与滚轮 _zoom 相乘）。下列俯仰/偏航/距离为旧 3D 残留字段，运行时未使用。
+## 2D 斜视：pitch/yaw 参与地面→屏幕正交投影；Camera2D 可见高度基准为 camera_ortho_size（与滚轮 _zoom 相乘）。camera_distance 未使用。
 @export var camera_pitch_deg: float = 45.0
 @export var camera_yaw_deg: float = 45.0
 @export var camera_distance: float = 36.0

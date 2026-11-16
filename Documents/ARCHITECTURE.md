@@ -6,7 +6,7 @@ Godot 4.6 · GL Compatibility · 横屏 UI（852×393 逻辑点）。
 
 - **入口**：`scenes/main/main_menu.tscn` → `sandbox.tscn`
 - **回合**：`TurnClock`（`scripts/core/turn_clock.gd`），UI 只调用 `end_turn()`，不自写计数
-- **地图**：2D 顶视方格盘、Camera2D 拖拽/滚轮（见 Features/GRID_BOARD）
+- **地图**：2D 斜 45° 投影方格盘、Camera2D 拖拽/滚轮（见 Features/GRID_BOARD）
 - **设置**：`GameSettings` autoload 持久化音量/全屏（主菜单尚无设置 UI）
 
 ## 目录

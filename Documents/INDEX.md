@@ -1,6 +1,6 @@
 # 战术战棋 — 文档索引
 
-> 小地图战术战棋 · Godot 4.6 · 2D 顶视棋盘 + Sprite2D 单位
+> 小地图战术战棋 · Godot 4.6 · 2D 斜 45° 棋盘 + Sprite2D 单位
 
 玩法方向以 [GAME_VISION.md](./GAME_VISION.md) 为准。已经写进代码的规则以 Features 为准，并与代码对照。
 
@@ -12,7 +12,7 @@
 | [DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md) | Agent 职责、纵切片、L0–L5、轻量/完全验收 |
 | [GAME_VISION.md](./GAME_VISION.md) | 这是什么游戏、边界、当前做到哪 |
 | [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) | **回合钟**（已实现） |
-| [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **2D 顶视** · Sprite2D 单位 |
+| [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **2D 斜 45°** · Sprite2D 单位 |
 | [Features/MAP_EDITOR.md](./Features/MAP_EDITOR.md) | **地图编辑器 v1** · 8×8 · 草地/直城墙 · JSON v2 存读 |
 
 ## 仓库里有什么
@@ -65,6 +65,6 @@
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | 回合钟 | 当前 | 玩家/对手交替 |
-| 方格盘 | 当前 | 2D 顶视 Camera2D、拖拽缩放、Sprite2D 单位 |
+| 方格盘 | 当前 | 2D 斜 45° 投影、Camera2D 拖拽缩放、Sprite2D 单位 |
 | 单位移动 | 未做 | — |
 | 战斗 | 未做 | — |
