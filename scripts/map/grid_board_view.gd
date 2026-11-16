@@ -58,6 +58,12 @@ var _last_unit_cells: Dictionary = {}
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label
 var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
+## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
+var _unit_idle_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
+
+const UNIT_IDLE_BOB_PX := 3.0
+const UNIT_IDLE_HALF_SEC := 0.95
 
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {}
@@ -221,6 +227,7 @@ func _rebuild_board() -> void:
 	if config == null or _tiles_root == null:
 		return
 	for key in _unit_sprites.keys():
+		_kill_unit_idle(key as TacticalUnitInstance)
 		(_unit_sprites[key] as Node).queue_free()
 	for child in _tiles_root.get_children():
 		child.queue_free()
@@ -232,6 +239,8 @@ func _rebuild_board() -> void:
 	_unit_blobs.clear()
 	_hp_bars.clear()
 	_last_unit_cells.clear()
+	_unit_idle_tweens.clear()
+	_unit_base_offsets.clear()
 
 	var cell_size := config.cell_size
 	for gx in range(config.grid_width):
@@ -302,12 +311,14 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	_last_unit_cells[unit] = unit.cell
 	_apply_unit_draw_depth(unit)
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
+		_pause_unit_idle(unit)
 		_float_unit_for_world_tween(spr)
 		_tween_unit_to(spr, _cell_to_world(unit.cell, config.cell_size), unit)
 	else:
 		_mount_unit_on_tile(unit)
 		spr.position = Vector2.ZERO
 		_place_unit_blob(unit)
+		_ensure_unit_idle(unit)
 	_update_hp_bar(unit)
 
 
@@ -329,12 +340,14 @@ func _tween_unit_to(spr: Sprite2D, target_world: Vector2, unit: TacticalUnitInst
 		_place_unit_blob(unit)
 		_apply_unit_draw_depth(unit)
 		_update_hp_bar(unit)
+		_ensure_unit_idle(unit)
 	)
 
 
 func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> Tween:
 	if config == null or not _unit_sprites.has(attacker):
 		return null
+	_pause_unit_idle(attacker)
 	var spr := _unit_sprites[attacker] as Sprite2D
 	var home := spr.position
 	var world := _cell_to_world(target_cell, config.cell_size)
@@ -346,6 +359,10 @@ func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> 
 	var tw := create_tween()
 	tw.tween_property(spr, "position", lunge, 0.09).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(spr, "position", home, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.finished.connect(func() -> void:
+		if _unit_sprites.has(attacker):
+			_ensure_unit_idle(attacker)
+	)
 	return tw
 
 
@@ -354,6 +371,8 @@ func attack_tween_duration_sec() -> float:
 
 
 func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
+	_kill_unit_idle(unit)
+	_unit_base_offsets.erase(unit)
 	if _unit_sprites.has(unit):
 		var spr: Sprite2D = _unit_sprites[unit] as Sprite2D
 		spr.queue_free()
@@ -391,6 +410,7 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 func play_unit_hit(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
 		return
+	_pause_unit_idle(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var base := spr.position
 	spr.modulate = Color("ff8888")
@@ -399,11 +419,16 @@ func play_unit_hit(unit: TacticalUnitInstance) -> void:
 	tw.tween_property(spr, "modulate", _look().unit_modulate, 0.32)
 	tw.tween_property(spr, "position:x", base.x + 4.0, 0.06).set_trans(Tween.TRANS_SINE)
 	tw.chain().tween_property(spr, "position", base, 0.12).set_trans(Tween.TRANS_SINE)
+	tw.finished.connect(func() -> void:
+		if _unit_sprites.has(unit) and unit.is_alive():
+			_ensure_unit_idle(unit)
+	)
 
 
 func play_unit_death(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
 		return
+	_kill_unit_idle(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var tw := create_tween()
 	tw.set_parallel(true)
@@ -435,8 +460,53 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	spr.scale = Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
 	# 节点原点 = 脚点。贴图上移半高，脚落在格心，身体在脚点上方。
 	spr.centered = true
-	spr.offset = Vector2(0.0, -tex_h * 0.5)
+	var base_offset := Vector2(0.0, -tex_h * 0.5)
+	_unit_base_offsets[unit] = base_offset
+	if not _unit_idle_tweens.has(unit):
+		spr.offset = base_offset
 	_ensure_hp_bar(unit)
+
+
+func _kill_unit_idle(unit: TacticalUnitInstance) -> void:
+	if not _unit_idle_tweens.has(unit):
+		return
+	var tw: Tween = _unit_idle_tweens[unit] as Tween
+	_unit_idle_tweens.erase(unit)
+	if tw != null and is_instance_valid(tw):
+		tw.kill()
+
+
+func _pause_unit_idle(unit: TacticalUnitInstance) -> void:
+	_kill_unit_idle(unit)
+	if _unit_sprites.has(unit) and _unit_base_offsets.has(unit):
+		(_unit_sprites[unit] as Sprite2D).offset = _unit_base_offsets[unit] as Vector2
+
+
+func _ensure_unit_idle(unit: TacticalUnitInstance) -> void:
+	if config == null or not unit.is_alive() or not _unit_sprites.has(unit):
+		return
+	if _unit_idle_tweens.has(unit):
+		var existing: Tween = _unit_idle_tweens[unit] as Tween
+		if existing != null and is_instance_valid(existing) and existing.is_running():
+			return
+	_kill_unit_idle(unit)
+	var spr := _unit_sprites[unit] as Sprite2D
+	var base: Vector2 = _unit_base_offsets.get(unit, spr.offset) as Vector2
+	_unit_base_offsets[unit] = base
+	# 各单位从不同相位起漂，避免齐步呼吸；不设 per-loop delay。
+	var phase_i := absi(int(hash("%s:%s" % [unit.def.id, unit.faction]))) % 8
+	var start_y := base.y - UNIT_IDLE_BOB_PX * (float(phase_i) / 7.0)
+	spr.offset = Vector2(base.x, start_y)
+	# 绑在单位 Sprite 上：随单位释放；headless 在尚未 enter tree 时也可创建。
+	var tw: Tween = spr.create_tween() if spr.is_inside_tree() else create_tween()
+	tw.set_loops()
+	tw.tween_property(spr, "offset:y", base.y - UNIT_IDLE_BOB_PX, UNIT_IDLE_HALF_SEC).set_trans(
+		Tween.TRANS_SINE
+	).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(spr, "offset:y", base.y, UNIT_IDLE_HALF_SEC).set_trans(Tween.TRANS_SINE).set_ease(
+		Tween.EASE_IN_OUT
+	)
+	_unit_idle_tweens[unit] = tw
 
 
 func _attach_unit_blob(unit: TacticalUnitInstance) -> void:
