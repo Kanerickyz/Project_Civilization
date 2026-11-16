@@ -121,14 +121,15 @@ func _test_board_look_and_unit_blob() -> bool:
 	if blob.get_parent() != spr:
 		push_error("GridBoardView: foot blob should be a child of the unit sprite (2D depth)")
 		return false
-	var local_pose := view._unit_local_pose_on_tile(Vector2i(1, 1))
-	view._sync_unit_blob_pose(unit, local_pose)
-	var expect_blob := (local_pose["feet"] as Vector2) - (local_pose["torso"] as Vector2)
-	if blob.position.distance_to(expect_blob) > 0.05:
-		push_error("GridBoardView: foot blob should sit on projected cell feet")
+	if spr.position.length() > 0.02:
+		push_error("GridBoardView: feet node should sit on the cell center, got %s" % spr.position)
 		return false
-	if local_pose["feet"].length() > 0.08:
-		push_error("GridBoardView: unit feet should sit on cell center (local ~0)")
+	var tex_h := float(spr.texture.get_height())
+	if absf(spr.offset.y + tex_h * 0.5) > 0.5:
+		push_error("GridBoardView: sprite offset should lift the body so feet stay at the cell center")
+		return false
+	if blob.position.length() > 0.02:
+		push_error("GridBoardView: foot blob should stay on the feet at the cell center")
 		return false
 	spr.scale = Vector2.ONE * 0.5
 	spr.modulate.a = 0.3
@@ -324,17 +325,29 @@ func _test_unit_draw_depth() -> bool:
 	var far: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.OPPONENT, Vector2i(6, 6))
 	view.sync_tactical_units([near, far], Vector2i(-1, -1), [], [])
 	var spr_near: Sprite2D = view._unit_sprites[near] as Sprite2D
+	var spr_far: Sprite2D = view._unit_sprites[far] as Sprite2D
 	var tile_near: Node2D = view._tile_nodes[Vector2i(1, 1)] as Node2D
-	var tile_far: Node2D = view._tile_nodes[Vector2i(6, 6)] as Node2D
-	var ov_near: Polygon2D = tile_near.get_node("Overlay") as Polygon2D
+	if spr_near.position.length() > 0.02 or spr_far.position.length() > 0.02:
+		push_error("GridBoardView: unit feet should sit at cell center (local origin)")
+		return false
+	if spr_near.offset.y >= 0.0 or spr_far.offset.y >= 0.0:
+		push_error("GridBoardView: body texture should be offset upward from the feet")
+		return false
+	if spr_near.z_as_relative or spr_far.z_as_relative:
+		push_error("GridBoardView: unit z_index must be absolute so tiles cannot cover them")
+		return false
+	var y_near := view._cell_to_world(Vector2i(1, 1), cfg.cell_size).y
+	var y_far := view._cell_to_world(Vector2i(6, 6), cfg.cell_size).y
+	if (spr_far.z_index - spr_near.z_index) * (y_far - y_near) <= 0.0:
+		push_error("GridBoardView: unit draw order should follow screen Y")
+		return false
+	for cell in view._tile_nodes.keys():
+		var tile: Node2D = view._tile_nodes[cell] as Node2D
+		if spr_near.z_index <= tile.z_index + 8 or spr_far.z_index <= tile.z_index + 8:
+			push_error("GridBoardView: unit z %d covered by tile %s z %d" % [spr_near.z_index, cell, tile.z_index])
+			return false
 	if spr_near.get_parent() != tile_near:
-		push_error("GridBoardView: unit should parent to its tile for depth sorting")
-		return false
-	if spr_near.z_index <= ov_near.z_index:
-		push_error("GridBoardView: unit should draw above overlay on same tile")
-		return false
-	if tile_far.z_index <= tile_near.z_index:
-		push_error("GridBoardView: farther tile should have higher tile-root z_index")
+		push_error("GridBoardView: unit should parent to its tile so local origin is the cell center")
 		return false
 	return true
 

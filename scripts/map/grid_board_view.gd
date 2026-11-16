@@ -34,10 +34,9 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 const OVERLAY_Z := 4
 const WALL_Z := 2
 const GRASS_Z := 0
-## 按格深度排序：同 stride 下 overlay(4) < 单位(8)。
+## 地块按屏幕纵深；单位用绝对 z，整层高于任何格子，彼此再按脚底屏幕 Y 排序。
 const DRAW_DEPTH_STRIDE := 16
-const UNIT_DRAW_LAYER := 8
-const UNIT_FEET_LIFT := 0.02
+const UNIT_Z_BASE := 1000
 const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
@@ -221,6 +220,8 @@ func _try_center_on_board() -> void:
 func _rebuild_board() -> void:
 	if config == null or _tiles_root == null:
 		return
+	for key in _unit_sprites.keys():
+		(_unit_sprites[key] as Node).queue_free()
 	for child in _tiles_root.get_children():
 		child.queue_free()
 	for child in _units_root.get_children():
@@ -297,17 +298,16 @@ func sync_tactical_units(
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites[unit] as Sprite2D
-	var local_pose := _unit_local_pose_on_tile(unit.cell)
-	var world_pose := _unit_pose_screen(unit.cell)
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
+	_apply_unit_draw_depth(unit)
 	if prev is Vector2i and prev != unit.cell and is_inside_tree():
 		_float_unit_for_world_tween(spr)
-		_tween_unit_to(spr, world_pose["torso"], unit, local_pose)
+		_tween_unit_to(spr, _cell_to_world(unit.cell, config.cell_size), unit)
 	else:
 		_mount_unit_on_tile(unit)
-		spr.position = local_pose["torso"]
-		_sync_unit_blob_pose(unit, local_pose)
+		spr.position = Vector2.ZERO
+		_place_unit_blob(unit)
 	_update_hp_bar(unit)
 
 
@@ -318,20 +318,16 @@ func unit_move_duration_sec() -> float:
 	return UNIT_MOVE_TWEEN_SEC
 
 
-func _tween_unit_to(
-	spr: Sprite2D,
-	target_world: Vector2,
-	unit: TacticalUnitInstance,
-	target_local: Dictionary
-) -> void:
+func _tween_unit_to(spr: Sprite2D, target_world: Vector2, unit: TacticalUnitInstance) -> void:
 	var tw := create_tween()
 	tw.tween_property(spr, "position", target_world, UNIT_MOVE_TWEEN_SEC).set_trans(Tween.TRANS_QUAD).set_ease(
 		Tween.EASE_OUT
 	)
 	tw.finished.connect(func() -> void:
 		_mount_unit_on_tile(unit)
-		spr.position = target_local["torso"]
-		_sync_unit_blob_pose(unit, target_local)
+		spr.position = Vector2.ZERO
+		_place_unit_blob(unit)
+		_apply_unit_draw_depth(unit)
 		_update_hp_bar(unit)
 	)
 
@@ -437,6 +433,9 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	spr.texture = tex
 	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
 	spr.scale = Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
+	# 节点原点 = 脚点。贴图上移半高，脚落在格心，身体在脚点上方。
+	spr.centered = true
+	spr.offset = Vector2(0.0, -tex_h * 0.5)
 	_ensure_hp_bar(unit)
 
 
@@ -483,9 +482,11 @@ func _process(_delta: float) -> void:
 		if spr == null:
 			continue
 		var blob := _unit_blobs[unit] as Sprite2D
-		var s := absf(spr.scale.x)
+		var parent_s := maxf(absf(spr.scale.x), 0.0001)
 		var r := _look().unit_blob_radius * config.cell_size * 2.0
-		blob.scale = Vector2(s * r / 64.0, s * r / 64.0 * 0.7)
+		# 抵消父节点缩放，软影保持格子尺度并留在脚点。
+		blob.scale = Vector2((r / 64.0) / parent_s, (r / 64.0) / parent_s * 0.7)
+		blob.position = Vector2.ZERO
 		blob.visible = spr.modulate.a > BLOB_HIDE_ALPHA
 
 
@@ -509,8 +510,8 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	var bar := _hp_bars[unit] as Label
 	var spr := _unit_sprites[unit] as Sprite2D
 	bar.text = "%d/%d" % [unit.hp, unit.def.max_hp]
-	var local_pose := _unit_local_pose_on_tile(unit.cell)
-	var head_off: Vector2 = local_pose["head"] - local_pose["torso"]
+	# 节点在脚点；HP 放在头顶（整段身高之上）。
+	var head_off := Vector2(0.0, -config.unit_world_height * 1.08)
 	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
 	if unit.hp <= unit.def.max_hp / 3:
 		bar.modulate = Color("ff6666")
@@ -555,6 +556,7 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		if is_wall:
 			_update_wall_geometry(cell, _tile_yaw(cell, terrain_id, def))
 	root.rotation = 0.0
+	root.z_as_relative = false
 	root.z_index = _draw_depth_for_cell(cell)
 	_apply_overlay(cell)
 
@@ -592,32 +594,9 @@ func _draw_depth_for_cell(cell: Vector2i) -> int:
 	return (cell.x + cell.y) * DRAW_DEPTH_STRIDE
 
 
-func _unit_pose_screen(cell: Vector2i) -> Dictionary:
-	var unit_h: float = config.unit_world_height if config != null else 0.88
-	var feet := _cell_ground_center(cell, config.cell_size)
-	feet.y = config.tile_height + UNIT_FEET_LIFT
-	var torso := feet + Vector3(0.0, unit_h * 0.5, 0.0)
-	var head := feet + Vector3(0.0, unit_h * 0.92, 0.0)
-	return {
-		"feet": _oblique_project(feet),
-		"torso": _oblique_project(torso),
-		"head": _oblique_project(head),
-	}
-
-
-func _unit_local_pose_on_tile(cell: Vector2i) -> Dictionary:
-	var center := _cell_to_world(cell, config.cell_size)
-	var pose := _unit_pose_screen(cell)
-	return {
-		"feet": (pose["feet"] as Vector2) - center,
-		"torso": (pose["torso"] as Vector2) - center,
-		"head": (pose["head"] as Vector2) - center,
-	}
-
-
 func _unit_world_position(spr: Sprite2D) -> Vector2:
 	var parent := spr.get_parent() as Node2D
-	if parent == null:
+	if parent == null or parent == _units_root:
 		return spr.position
 	return parent.position + spr.position
 
@@ -631,24 +610,39 @@ func _mount_unit_on_tile(unit: TacticalUnitInstance) -> void:
 		return
 	if spr.get_parent() != tile:
 		if spr.get_parent() != null:
-			spr.reparent(tile, true)
+			spr.reparent(tile, false)
 		else:
 			tile.add_child(spr)
-	spr.z_index = UNIT_DRAW_LAYER
-	spr.z_as_relative = true
+	spr.position = Vector2.ZERO
+	_apply_unit_draw_depth(unit)
 
 
 func _float_unit_for_world_tween(spr: Sprite2D) -> void:
 	if spr.get_parent() == _units_root:
 		return
-	spr.reparent(_units_root, true)
+	var world := _unit_world_position(spr)
+	spr.reparent(_units_root, false)
+	spr.position = world
 
 
-func _sync_unit_blob_pose(unit: TacticalUnitInstance, pose: Dictionary) -> void:
-	if not _unit_blobs.has(unit):
+func _apply_unit_draw_depth(unit: TacticalUnitInstance) -> void:
+	var spr := _unit_sprites.get(unit) as Sprite2D
+	if spr == null or config == null:
+		return
+	# 绝对层级：高于全部地块；更靠屏幕下方的单位后画。
+	var screen_y := _cell_to_world(unit.cell, config.cell_size).y
+	spr.z_as_relative = false
+	spr.z_index = UNIT_Z_BASE + int(round(screen_y * 100.0))
+
+
+func _place_unit_blob(unit: TacticalUnitInstance) -> void:
+	if not _unit_blobs.has(unit) or config == null:
 		return
 	var blob := _unit_blobs[unit] as Sprite2D
-	blob.position = (pose["feet"] as Vector2) - (pose["torso"] as Vector2)
+	# 软影贴在脚点（节点原点 = 格心），不跟贴图上移。
+	blob.position = Vector2.ZERO
+	blob.z_as_relative = true
+	blob.z_index = -1
 
 
 func _oblique_project(p: Vector3) -> Vector2:
@@ -723,6 +717,7 @@ func _update_tile_geometry(cell: Vector2i) -> void:
 	grass.polygon = poly
 	var ov: Polygon2D = root.get_node("Overlay") as Polygon2D
 	ov.polygon = poly
+	root.z_as_relative = false
 	root.z_index = _draw_depth_for_cell(cell)
 	_update_wall_geometry(cell, 0.0)
 
