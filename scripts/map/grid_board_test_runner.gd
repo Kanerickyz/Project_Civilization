@@ -46,6 +46,9 @@ func _initialize() -> void:
 	if not await _test_combat_tweens_stay_in_cell():
 		quit(1)
 		return
+	if not _test_move_tween_survives_double_sync():
+		quit(1)
+		return
 	if not _test_unit_idle_tween():
 		quit(1)
 		return
@@ -650,6 +653,47 @@ func _find_node_named(node: Node, node_name: String) -> Node:
 		if found != null:
 			return found
 	return null
+
+
+func _test_move_tween_survives_double_sync() -> bool:
+	## 模拟 try_move 后 changed + _refresh_all 连续两次 sync，移动 Tween 不得被掐断瞬移。
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 8
+	cfg.grid_height = 8
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var def_path := "res://resources/units/knight.tres"
+	if not ResourceLoader.exists(def_path):
+		return true
+	var def: TacticalUnitDef = load(def_path) as TacticalUnitDef
+	if def == null:
+		return true
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	unit.cell = Vector2i(3, 1)
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	if not view._unit_move_tweens.has(unit):
+		push_error("GridBoardView: first sync after cell change should start move tween")
+		return false
+	var spr: Sprite2D = view._unit_sprites[unit] as Sprite2D
+	if spr.get_parent() != view._units_root:
+		push_error("GridBoardView: unit should float on units_root while tweening")
+		return false
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	if not view._unit_move_tweens.has(unit):
+		push_error("GridBoardView: second sync must not kill active move tween (player refresh)")
+		return false
+	if spr.get_parent() != view._units_root:
+		push_error("GridBoardView: second sync must not remount unit mid-tween")
+		return false
+	view._kill_unit_move_tween(unit)
+	return true
 
 
 ## 受击抖动/冲刺不得超过格半宽；受击瞬间应为闪白；结束后强制回格心。

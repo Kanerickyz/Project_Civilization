@@ -516,9 +516,15 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			]
 			if _focus_unit.remaining_move_budget <= 0:
 				_pending_kind = PendingKind.NONE
+			_refresh_all()
+			_input_locked = true
+			_refresh_action_buttons()
+			await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+			_input_locked = false
+			_refresh_all()
 		else:
 			_last_log = "无法移动到该格"
-		_refresh_all()
+			_refresh_all()
 		return
 
 	# 攻击瞄准：攻击者已由拖卡选定。
