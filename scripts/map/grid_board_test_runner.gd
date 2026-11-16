@@ -10,6 +10,12 @@ func _initialize() -> void:
 	if not _test_cell_mapping():
 		quit(1)
 		return
+	if not _test_oblique_unproject_matches_tile_height():
+		quit(1)
+		return
+	if not await _test_pick_cell_portrait_and_edges():
+		quit(1)
+		return
 	if not _test_pan_vertical_intuitive():
 		quit(1)
 		return
@@ -445,6 +451,141 @@ func _test_cell_mapping() -> bool:
 			if back != cell:
 				push_error("GridBoardView: cell roundtrip failed %s -> %s" % [cell, back])
 				return false
+	return true
+
+
+func _test_oblique_unproject_matches_tile_height() -> bool:
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 8
+	cfg.grid_height = 8
+	cfg.cell_size = 1.0
+	cfg.tile_height = 0.14
+	cfg.camera_pitch_deg = 45.0
+	cfg.camera_yaw_deg = 45.0
+	var view := GridBoardViewScript.new()
+	view.config = cfg
+	for gx in range(cfg.grid_width):
+		for gy in range(cfg.grid_height):
+			var cell := Vector2i(gx, gy)
+			var ground := view._cell_ground_center(cell, cfg.cell_size)
+			var screen: Vector2 = view._oblique_project(ground)
+			var back: Vector3 = view._oblique_unproject_ground(screen)
+			if not is_equal_approx(back.y, cfg.tile_height):
+				push_error("GridBoardView: unproject y %.4f != tile_height" % back.y)
+				return false
+			if back.distance_to(Vector3(ground.x, cfg.tile_height, ground.z)) > 1e-4:
+				push_error(
+					"GridBoardView: project/unproject drift cell=%s got=%s want xz=(%.3f,%.3f)"
+					% [cell, back, ground.x, ground.z]
+				)
+				return false
+			# 格角（inset 内）经投影反变换仍须落在同格。
+			var half := cfg.cell_size * 0.48
+			for off in [
+				Vector3(-half, 0.0, -half),
+				Vector3(half, 0.0, -half),
+				Vector3(half, 0.0, half),
+				Vector3(-half, 0.0, half),
+			]:
+				var corner := Vector3(ground.x + off.x, cfg.tile_height, ground.z + off.z)
+				var c_screen: Vector2 = view._oblique_project(corner)
+				var c_back: Vector3 = view._oblique_unproject_ground(c_screen)
+				var c_cell: Variant = view._world_to_cell(c_back)
+				if c_cell != cell:
+					push_error(
+						"GridBoardView: corner unproject mis-pick cell=%s off=%s -> %s"
+						% [cell, off, c_cell]
+					)
+					return false
+	return true
+
+
+func _test_pick_cell_portrait_and_edges() -> bool:
+	## 竖屏沙盘棋盘 inset 约 393×574；含平移/缩放后格心与近角点选。
+	var loaded = load("res://resources/map/board_config.tres")
+	var cfg = loaded.duplicate(true) if loaded != null else BoardConfigScript.new()
+	var host := Control.new()
+	host.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	host.custom_minimum_size = Vector2(393, 574)
+	host.size = Vector2(393, 574)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	view.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	view.position = Vector2.ZERO
+	view.size = Vector2(393, 574)
+	host.add_child(view)
+	view.setup(cfg)
+	# SubViewport / Camera2D 需进树并跑帧后 canvas transform 才可用。
+	await process_frame
+	await process_frame
+	view._sync_viewport_size()
+	view._apply_camera()
+	await process_frame
+
+	if view._viewport == null or view._viewport.size != Vector2i(393, 574):
+		push_error("GridBoardView: portrait SubViewport size should sync to 393x574, got %s" % view._viewport.size)
+		return false
+	if view._viewport_container.stretch:
+		push_error("GridBoardView: SubViewportContainer.stretch should be false for 1:1 picking")
+		return false
+	if view._camera == null or not view._camera.is_inside_tree():
+		push_error("GridBoardView: camera must be inside tree for pick test")
+		return false
+
+	if not _assert_pick_roundtrip(view, cfg, "portrait-default"):
+		return false
+
+	# 平移 + 非默认缩放后仍准确。
+	view._target += Vector3(1.2, 0.0, -0.8)
+	view._set_zoom(cfg.camera_zoom_default * 1.25)
+	view._apply_camera()
+	await process_frame
+	if not _assert_pick_roundtrip(view, cfg, "portrait-pan-zoom"):
+		return false
+	return true
+
+
+func _assert_pick_roundtrip(view: GridBoardView, cfg: BoardConfig, tag: String) -> bool:
+	var half := cfg.cell_size * 0.48
+	var samples: Array = [Vector3.ZERO]
+	for off in [
+		Vector3(-half, 0.0, -half),
+		Vector3(half, 0.0, -half),
+		Vector3(half, 0.0, half),
+		Vector3(-half, 0.0, half),
+	]:
+		samples.append(off)
+	var checked := 0
+	for gx in range(cfg.grid_width):
+		for gy in range(cfg.grid_height):
+			var cell := Vector2i(gx, gy)
+			for off2 in samples:
+				var ground: Vector3 = view._cell_ground_center(cell, cfg.cell_size)
+				ground.x += (off2 as Vector3).x
+				ground.z += (off2 as Vector3).z
+				ground.y = cfg.tile_height
+				var world: Vector2 = view._oblique_project(ground)
+				var canvas: Transform2D = view._camera.get_canvas_transform()
+				var vp_pos: Vector2 = canvas * world
+				var cs: Vector2 = view._viewport_container.size
+				var vs: Vector2i = view._viewport.size
+				var local := vp_pos
+				if cs.x > 0.0 and cs.y > 0.0 and vs.x > 0 and vs.y > 0:
+					local = Vector2(vp_pos.x * cs.x / float(vs.x), vp_pos.y * cs.y / float(vs.y))
+				# 竖屏 ortho 按高度适配时盘角常在视口外，只能验屏内点。
+				if local.x < 2.0 or local.y < 2.0 or local.x > view.size.x - 2.0 or local.y > view.size.y - 2.0:
+					continue
+				var picked: Variant = view._pick_cell(local)
+				checked += 1
+				if picked != cell:
+					push_error(
+						"GridBoardView: pick fail %s cell=%s off=%s local=%s picked=%s"
+						% [tag, cell, off2, local, picked]
+					)
+					return false
+	if checked < 8:
+		push_error("GridBoardView: pick roundtrip %s too few on-screen samples (%d)" % [tag, checked])
+		return false
 	return true
 
 

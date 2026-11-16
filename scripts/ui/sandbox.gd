@@ -128,17 +128,20 @@ func _build() -> void:
 	top_row.add_child(_hint_label)
 
 	_side_panel = PanelContainer.new()
-	_side_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	# 纯展示：勿 STOP，否则竖屏顶条/横屏右侧条会吞掉下层棋盘点选。
+	_side_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_side_panel)
 
 	var side_box := VBoxContainer.new()
 	side_box.add_theme_constant_override("separation", 6)
+	side_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_side_panel.add_child(side_box)
 
 	_unit_panel = Label.new()
 	_unit_panel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_unit_panel.custom_minimum_size = Vector2(150, 0)
 	_unit_panel.add_theme_font_size_override("font_size", 13)
+	_unit_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	side_box.add_child(_unit_panel)
 
 	_bottom_bar = MarginContainer.new()

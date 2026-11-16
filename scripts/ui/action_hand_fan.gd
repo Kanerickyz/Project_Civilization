@@ -40,7 +40,8 @@ var _detail_body: Label
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	# 根节点 IGNORE：空白区不挡棋盘；单卡 Panel 仍 STOP 接收拖拽/长按。
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clip_contents = false
 	custom_minimum_size = Vector2(320, 118)
 	resized.connect(_relayout)
