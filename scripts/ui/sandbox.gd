@@ -13,6 +13,7 @@ const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
+const ActionHandFanScript := preload("res://scripts/ui/action_hand_fan.gd")
 
 enum PendingKind { NONE, MOVE, ATTACK }
 
@@ -29,8 +30,7 @@ var _deck: TacticalCardDeck
 var _selected_unit: TacticalUnitInstance
 var _focus_unit: TacticalUnitInstance
 var _pending_kind: PendingKind = PendingKind.NONE
-var _hand_row: HBoxContainer
-var _hand_buttons: Array[Button] = []
+var _hand_fan: ActionHandFan
 var _last_log: String = ""
 var _input_locked: bool = false
 var _game_over: bool = false
@@ -148,19 +148,19 @@ func _build() -> void:
 	bottom_bar.add_theme_constant_override("margin_left", 8)
 	bottom_bar.add_theme_constant_override("margin_top", 0)
 	bottom_bar.add_theme_constant_override("margin_right", 8)
-	bottom_bar.add_theme_constant_override("margin_bottom", 6)
+	bottom_bar.add_theme_constant_override("margin_bottom", 4)
 	bottom_bar.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bottom_bar)
 
 	var bottom_col := VBoxContainer.new()
-	bottom_col.add_theme_constant_override("separation", 4)
+	bottom_col.add_theme_constant_override("separation", 2)
 	bottom_bar.add_child(bottom_col)
 
-	_hand_row = HBoxContainer.new()
-	_hand_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_hand_row.add_theme_constant_override("separation", 6)
-	_hand_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bottom_col.add_child(_hand_row)
+	_hand_fan = ActionHandFanScript.new()
+	_hand_fan.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hand_fan.custom_minimum_size = Vector2(0, 118)
+	_hand_fan.card_pressed.connect(_on_hand_card_pressed)
+	bottom_col.add_child(_hand_fan)
 
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
@@ -290,17 +290,17 @@ func _refresh_all() -> void:
 
 
 func _compose_hint() -> String:
+	if _pending_kind == PendingKind.MOVE:
+		if _focus_unit == null:
+			return "已打出移动 · 点己方单位作为行动者"
+		return "移动中：%s · 点绿格（可多步）" % _focus_unit.def.display_name
+	if _pending_kind == PendingKind.ATTACK:
+		if _focus_unit == null:
+			return "已打出攻击 · 点己方单位作为攻击者"
+		return "攻击中：%s · 点红圈内敌人" % _focus_unit.def.display_name
 	if _last_log != "":
-		if _pending_kind == PendingKind.MOVE:
-			return "%s · 点绿格移动（移力池内可多步）" % _last_log
-		if _pending_kind == PendingKind.ATTACK:
-			return "%s · 点红圈内敌人攻击" % _last_log
 		return _last_log
-	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
-		return "移动：%s · 点绿格" % _focus_unit.def.display_name
-	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
-		return "攻击：%s · 点敌方" % _focus_unit.def.display_name
-	return "打出手牌再点目标 · 库 %d · 弃 %d" % [
+	return "打出通用「移动/攻击」卡 · 库 %d · 弃 %d" % [
 		_deck.draw_pile.size(),
 		_deck.discard_pile.size(),
 	]
@@ -342,38 +342,16 @@ func _refresh_unit_panel() -> void:
 
 
 func _refresh_hand_ui() -> void:
-	if _hand_row == null:
+	if _hand_fan == null:
 		return
-	for b in _hand_buttons:
-		b.queue_free()
-	_hand_buttons.clear()
+	var labels: Array[String] = []
+	var kinds: Array[int] = []
+	for card in _deck.hand:
+		labels.append(card.display_label())
+		kinds.append(int(card.kind))
+	_hand_fan.set_hand(labels, kinds)
 	var player_turn := _clock.player_active and not _game_over and not _input_locked
-	for i in _deck.hand.size():
-		var card: TacticalActionCard = _deck.hand[i]
-		var btn := Button.new()
-		btn.text = card.display_label()
-		btn.custom_minimum_size = Vector2(88, 56)
-		btn.focus_mode = Control.FOCUS_NONE
-		btn.disabled = not player_turn or not card.is_valid()
-		var style := StyleBoxFlat.new()
-		if card.kind == TacticalActionCardScript.Kind.MOVE:
-			style.bg_color = Color(0.18, 0.42, 0.28, 0.95)
-		else:
-			style.bg_color = Color(0.48, 0.2, 0.2, 0.95)
-		style.set_corner_radius_all(6)
-		style.content_margin_left = 6
-		style.content_margin_right = 6
-		style.content_margin_top = 6
-		style.content_margin_bottom = 6
-		btn.add_theme_stylebox_override("normal", style)
-		var hover := style.duplicate() as StyleBoxFlat
-		hover.bg_color = style.bg_color.lightened(0.12)
-		btn.add_theme_stylebox_override("hover", hover)
-		btn.add_theme_font_size_override("font_size", 12)
-		var idx := i
-		btn.pressed.connect(_on_hand_card_pressed.bind(idx))
-		_hand_row.add_child(btn)
-		_hand_buttons.append(btn)
+	_hand_fan.set_interactive(player_turn)
 
 
 func _show_turn_banner() -> void:
@@ -398,14 +376,13 @@ func _on_hand_card_pressed(index: int) -> void:
 		_last_log = "无法打出该卡"
 		_refresh_all()
 		return
-	_focus_unit = card.unit
-	_selected_unit = card.unit
+	_focus_unit = null
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
 		_pending_kind = PendingKind.MOVE
-		_last_log = "打出 %s" % card.display_label()
+		_last_log = "打出通用移动 · 选择己方单位"
 	else:
 		_pending_kind = PendingKind.ATTACK
-		_last_log = "打出 %s" % card.display_label()
+		_last_log = "打出通用攻击 · 选择己方攻击者"
 	_refresh_all()
 
 
@@ -422,24 +399,28 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		return
 
 	var clicked := _board.unit_at(cell)
-	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
-		if clicked != null and clicked.faction != TacticalFactionScript.Id.PLAYER:
-			_run_player_attack_async(cell, clicked)
-			return
-		_last_log = "请点敌方单位，或取消目标"
-		_refresh_all()
-		return
 
-	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
+	# 通用移动：先选行动者，再点空格。
+	if _pending_kind == PendingKind.MOVE:
+		if _focus_unit == null:
+			if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
+				_deck.authorize_move(clicked)
+				_focus_unit = clicked
+				_selected_unit = clicked
+				_last_log = "移动行动者：%s" % clicked.def.display_name
+				_refresh_all()
+				return
+			_last_log = "请先点己方单位"
+			_refresh_all()
+			return
 		if clicked != null:
 			if clicked.faction == TacticalFactionScript.Id.PLAYER:
 				_selected_unit = clicked
 				if _deck.is_move_authorized(clicked):
 					_focus_unit = clicked
-					_pending_kind = PendingKind.MOVE
 					_last_log = "切换至 %s 移动" % clicked.def.display_name
 				else:
-					_last_log = "%s 需先打出移动卡" % clicked.def.display_name
+					_last_log = "%s 尚未获得本次移动授权" % clicked.def.display_name
 				_refresh_all()
 				return
 			_last_log = "移动请点空格"
@@ -468,10 +449,35 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		_refresh_all()
 		return
 
+	# 通用攻击：先选攻击者，再点敌人。
+	if _pending_kind == PendingKind.ATTACK:
+		if _focus_unit == null:
+			if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
+				_focus_unit = clicked
+				_selected_unit = clicked
+				_last_log = "攻击者：%s · 再点敌人" % clicked.def.display_name
+				_refresh_all()
+				return
+			_last_log = "请先点己方攻击者"
+			_refresh_all()
+			return
+		if clicked != null and clicked.faction != TacticalFactionScript.Id.PLAYER:
+			_run_player_attack_async(cell, clicked)
+			return
+		if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
+			_focus_unit = clicked
+			_selected_unit = clicked
+			_last_log = "攻击者改为：%s" % clicked.def.display_name
+			_refresh_all()
+			return
+		_last_log = "请点敌方单位，或取消目标"
+		_refresh_all()
+		return
+
 	# 无待结算卡：仅查看单位，不提供移/攻。
 	if clicked != null:
 		_selected_unit = clicked
-		_last_log = "查看 %s · 移/攻请打出手牌" % clicked.def.display_name
+		_last_log = "查看 %s · 移/攻请打出通用手牌" % clicked.def.display_name
 		_refresh_all()
 		return
 	if not _board.is_passable(cell):
@@ -522,9 +528,12 @@ func _feedback_from_attack(target: TacticalUnitInstance, res: Dictionary) -> voi
 func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
 	if unit == null:
 		return
-	var n := _deck.remove_unit_cards(unit)
+	# 仅己方阵亡削减通用移/攻各 1；敌方不影响玩家牌库。
+	if unit.faction != TacticalFactionScript.Id.PLAYER:
+		return
+	var n := _deck.on_player_unit_died(unit)
 	if n > 0:
-		_last_log = "%s 阵亡，移除 %d 张对应卡" % [
+		_last_log = "%s 阵亡，库中减去移动/攻击各最多 1 张（共 %d）" % [
 			unit.def.display_name if unit.def != null else "单位",
 			n,
 		]
