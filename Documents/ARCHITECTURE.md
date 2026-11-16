@@ -7,6 +7,7 @@ Godot 4.6 · GL Compatibility · 横屏 UI（852×393 逻辑点）。
 - **入口**：`scenes/main/main_menu.tscn` → `sandbox.tscn`
 - **回合**：`TurnClock`（`scripts/core/turn_clock.gd`），UI 只调用 `end_turn()`，不自写计数
 - **地图**：2D 斜 45° 投影方格盘、Camera2D 拖拽/滚轮（见 Features/GRID_BOARD）
+- **卡牌行动**：玩家三库与底栏手牌（见 Features/CARD_ACTIONS）
 - **设置**：`GameSettings` autoload 持久化音量/全屏（主菜单尚无设置 UI）
 
 ## 目录
@@ -14,8 +15,10 @@ Godot 4.6 · GL Compatibility · 横屏 UI（852×393 逻辑点）。
 | 路径 | 职责 |
 |------|------|
 | `scripts/core/` | 回合钟、加载烟测 |
+| `scripts/cards/` | 行动卡、牌库/手牌/弃牌 |
 | `scripts/ui/` | 主菜单、沙盘 HUD |
 | `scripts/map/` | `BoardConfig`、`GridBoardView`（2D SubViewport + Camera2D） |
+| `scripts/units/` | 单位、战斗、对手 AI |
 | `resources/map/` | 棋盘 `.tres` |
 | `scenes/main/` | 主菜单与沙盘场景 |
 | `tools/` | Godot 安装与验收脚本 |
