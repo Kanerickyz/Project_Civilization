@@ -37,6 +37,9 @@ func _initialize() -> void:
 	if not _test_unit_draw_depth():
 		quit(1)
 		return
+	if not await _test_combat_tweens_stay_in_cell():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -435,3 +438,68 @@ func _find_node_named(node: Node, node_name: String) -> Node:
 		if found != null:
 			return found
 	return null
+
+
+## 受击抖动/冲刺不得超过格半宽；受击瞬间应为闪白；结束后强制回格心。
+func _test_combat_tweens_stay_in_cell() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	cfg.grid_width = 6
+	cfg.grid_height = 6
+	var host := Control.new()
+	host.size = Vector2(640, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		push_error("combat tween: knight.tres missing")
+		return false
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var attacker: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(2, 2))
+	var target: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.OPPONENT, Vector2i(3, 2))
+	view.sync_tactical_units([attacker, target], Vector2i(-1, -1), [], [])
+	var half := cfg.cell_size * 0.5
+	if view.unit_hit_shake_px() > half:
+		push_error("hit shake %.3f exceeds half cell %.3f" % [view.unit_hit_shake_px(), half])
+		return false
+	if view.unit_attack_lunge_cap() > half:
+		push_error("attack lunge cap %.3f exceeds half cell %.3f" % [view.unit_attack_lunge_cap(), half])
+		return false
+	var spr_t := view._unit_sprites[target] as Sprite2D
+	var spr_a := view._unit_sprites[attacker] as Sprite2D
+	var hit_tw := view.play_unit_hit(target)
+	if hit_tw == null:
+		push_error("hit tween missing")
+		return false
+	if spr_t.modulate.r < 1.2 or spr_t.modulate.g < 1.2 or spr_t.modulate.b < 1.2:
+		push_error("hit should flash white first, got %s" % spr_t.modulate)
+		return false
+	var max_hit := 0.0
+	while hit_tw.is_running():
+		await process_frame
+		max_hit = maxf(max_hit, spr_t.position.length())
+		if max_hit > half + 0.02:
+			push_error("hit displacement %.3f left the cell (half=%.3f)" % [max_hit, half])
+			return false
+	await process_frame
+	if spr_t.position.length() > 0.02:
+		push_error("after hit, sprite should snap to cell center, got %s" % spr_t.position)
+		return false
+	var tw := view.play_unit_attack(attacker, target.cell)
+	if tw == null:
+		push_error("attack tween missing")
+		return false
+	var max_lunge := 0.0
+	while tw.is_running():
+		await process_frame
+		max_lunge = maxf(max_lunge, spr_a.position.length())
+		if max_lunge > half + 0.02:
+			push_error("attack lunge %.3f left the cell (half=%.3f)" % [max_lunge, half])
+			return false
+	await process_frame
+	if spr_a.position.length() > 0.02:
+		push_error("after attack, sprite should snap to cell center, got %s" % spr_a.position)
+		return false
+	return true

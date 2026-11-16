@@ -312,10 +312,24 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 
 
 const UNIT_MOVE_TWEEN_SEC := 0.26
+## 受击/冲刺位移相对 cell_size 的上限（世界单位；旧 +4.0 在 cell_size=1 时飞出数格）。
+const UNIT_HIT_SHAKE_FRAC := 0.08
+const UNIT_ATTACK_LUNGE_FRAC := 0.28
+const UNIT_HIT_FLASH := Color(1.35, 1.35, 1.35, 1.0)
 
 
 func unit_move_duration_sec() -> float:
 	return UNIT_MOVE_TWEEN_SEC
+
+
+func unit_hit_shake_px(cell_size: float = -1.0) -> float:
+	var cs := cell_size if cell_size > 0.0 else (config.cell_size if config != null else 1.0)
+	return cs * UNIT_HIT_SHAKE_FRAC
+
+
+func unit_attack_lunge_cap(cell_size: float = -1.0) -> float:
+	var cs := cell_size if cell_size > 0.0 else (config.cell_size if config != null else 1.0)
+	return cs * UNIT_ATTACK_LUNGE_FRAC
 
 
 func _tween_unit_to(spr: Sprite2D, target_world: Vector2, unit: TacticalUnitInstance) -> void:
@@ -336,16 +350,21 @@ func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> 
 	if config == null or not _unit_sprites.has(attacker):
 		return null
 	var spr := _unit_sprites[attacker] as Sprite2D
-	var home := spr.position
-	var world := _cell_to_world(target_cell, config.cell_size)
+	var home := _unit_combat_home(attacker, spr)
+	spr.position = home
 	var delta := _cell_to_world(target_cell, config.cell_size) - _cell_to_world(attacker.cell, config.cell_size)
-	var flat := delta
 	var lunge := home
-	if flat.length_squared() > 0.0001:
-		lunge = home + flat.normalized() * minf(flat.length() * 0.42, config.cell_size * 0.55)
+	if delta.length_squared() > 0.0001:
+		lunge = home + delta.normalized() * minf(delta.length() * 0.42, unit_attack_lunge_cap())
 	var tw := create_tween()
 	tw.tween_property(spr, "position", lunge, 0.09).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(spr, "position", home, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# 不用 TRANS_BACK：回弹会短暂越过格心。
+	tw.tween_property(spr, "position", home, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.finished.connect(func() -> void:
+		if not is_instance_valid(spr) or not _unit_sprites.has(attacker):
+			return
+		_snap_unit_to_cell_center(attacker)
+	)
 	return tw
 
 
@@ -388,17 +407,27 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	tw.finished.connect(lbl.queue_free)
 
 
-func play_unit_hit(unit: TacticalUnitInstance) -> void:
-	if not _unit_sprites.has(unit):
-		return
+func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
+	if config == null or not _unit_sprites.has(unit):
+		return null
 	var spr := _unit_sprites[unit] as Sprite2D
-	var base := spr.position
-	spr.modulate = Color("ff8888")
+	var home := _unit_combat_home(unit, spr)
+	spr.position = home
+	var shake := unit_hit_shake_px()
+	var rest := _look().unit_modulate
+	# 短促闪白 → 回原色；位移限制在格内并结束时强制回格心。
+	spr.modulate = UNIT_HIT_FLASH
 	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(spr, "modulate", _look().unit_modulate, 0.32)
-	tw.tween_property(spr, "position:x", base.x + 4.0, 0.06).set_trans(Tween.TRANS_SINE)
-	tw.chain().tween_property(spr, "position", base, 0.12).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.05).set_trans(Tween.TRANS_SINE)
+	tw.parallel().tween_property(spr, "modulate", rest, 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "position", home, 0.10).set_trans(Tween.TRANS_SINE)
+	tw.finished.connect(func() -> void:
+		if not is_instance_valid(spr) or not _unit_sprites.has(unit):
+			return
+		spr.modulate = rest
+		_snap_unit_to_cell_center(unit)
+	)
+	return tw
 
 
 func play_unit_death(unit: TacticalUnitInstance) -> void:
@@ -409,6 +438,23 @@ func play_unit_death(unit: TacticalUnitInstance) -> void:
 	tw.set_parallel(true)
 	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), 0.32)
 	tw.tween_property(spr, "modulate:a", 0.0, 0.32)
+
+
+func _unit_combat_home(unit: TacticalUnitInstance, spr: Sprite2D) -> Vector2:
+	if spr.get_parent() == _units_root:
+		return _cell_to_world(unit.cell, config.cell_size)
+	_mount_unit_on_tile(unit)
+	return Vector2.ZERO
+
+
+func _snap_unit_to_cell_center(unit: TacticalUnitInstance) -> void:
+	if not _unit_sprites.has(unit):
+		return
+	var spr := _unit_sprites[unit] as Sprite2D
+	_mount_unit_on_tile(unit)
+	spr.position = Vector2.ZERO
+	_place_unit_blob(unit)
+	_apply_unit_draw_depth(unit)
 
 
 func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
