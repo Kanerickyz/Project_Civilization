@@ -46,7 +46,7 @@ func _initialize() -> void:
 	if not await _test_combat_tweens_stay_in_cell():
 		quit(1)
 		return
-	if not _test_move_tween_survives_double_sync():
+	if not await _test_move_tween_survives_double_sync():
 		quit(1)
 		return
 	if not _test_unit_idle_tween():
@@ -691,6 +691,18 @@ func _test_move_tween_survives_double_sync() -> bool:
 		return false
 	if spr.get_parent() != view._units_root:
 		push_error("GridBoardView: second sync must not remount unit mid-tween")
+		return false
+	var start_w: Vector2 = view._cell_to_world(Vector2i(1, 1), cfg.cell_size)
+	var dest_w: Vector2 = view._cell_to_world(Vector2i(3, 1), cfg.cell_size)
+	var moved := false
+	for i in 12:
+		await process_frame
+		var w: Vector2 = view._unit_world_position(spr)
+		if w.distance_to(start_w) > 0.05 and w.distance_to(dest_w) > 0.05:
+			moved = true
+			break
+	if not moved:
+		push_error("GridBoardView: move tween must interpolate world position (got hop MethodTweener errors?)")
 		return false
 	view._kill_unit_move_tween(unit)
 	return true

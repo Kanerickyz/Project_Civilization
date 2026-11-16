@@ -384,6 +384,7 @@ func _tween_unit_along_path(
 	for i in hops:
 		var start_w := spr.position if i == 0 else _cell_to_world(path[i], config.cell_size)
 		var end_w := _cell_to_world(path[i + 1], config.cell_size)
+		# tween_method 把插值作为第 1 个实参；bind 的参数接在后面。
 		tw.tween_method(
 			_apply_move_hop.bind(spr, start_w, end_w),
 			0.0,
@@ -403,11 +404,12 @@ func _tween_unit_along_path(
 	)
 
 
-func _apply_move_hop(spr: Sprite2D, start_w: Vector2, end_w: Vector2, t: float) -> void:
+func _apply_move_hop(t: float, spr: Sprite2D, start_w: Vector2, end_w: Vector2) -> void:
 	if spr == null or not is_instance_valid(spr) or config == null:
 		return
-	var flat := start_w.lerp(end_w, t)
-	var hop := sin(clampf(t, 0.0, 1.0) * PI) * config.cell_size * UNIT_MOVE_HOP_HEIGHT_FRAC
+	var u := clampf(t, 0.0, 1.0)
+	var flat := start_w.lerp(end_w, u)
+	var hop := sin(u * PI) * config.cell_size * UNIT_MOVE_HOP_HEIGHT_FRAC
 	spr.position = flat - Vector2(0.0, hop)
 	spr.z_as_relative = false
 	spr.z_index = UNIT_Z_BASE + int(round(spr.position.y * 100.0))
