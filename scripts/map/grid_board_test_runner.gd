@@ -518,18 +518,31 @@ func _test_pick_cell_portrait_and_edges() -> bool:
 	# SubViewport / Camera2D 需进树并跑帧后 canvas transform 才可用。
 	await process_frame
 	await process_frame
-	view._sync_viewport_size()
 	view._apply_camera()
 	await process_frame
 
-	if view._viewport == null or view._viewport.size != Vector2i(393, 574):
-		push_error("GridBoardView: portrait SubViewport size should sync to 393x574, got %s" % view._viewport.size)
+	if view._viewport == null:
+		push_error("GridBoardView: portrait SubViewport missing")
 		return false
-	if view._viewport_container.stretch:
-		push_error("GridBoardView: SubViewportContainer.stretch should be false for 1:1 picking")
+	if not view._viewport_container.stretch:
+		push_error("GridBoardView: SubViewportContainer.stretch should be true so the board fills")
+		return false
+	if view._chrome == null or view._chrome.color != view._look().background_color:
+		push_error("GridBoardView: Control chrome should match BoardLook.background_color")
 		return false
 	if view._camera == null or not view._camera.is_inside_tree():
 		push_error("GridBoardView: camera must be inside tree for pick test")
+		return false
+
+	# 多边形命中：格心世界坐标必须命中该格 Grass 菱形。
+	var center_cell := Vector2i(3, 3)
+	var center_world: Vector2 = view._cell_to_world(center_cell, cfg.cell_size)
+	if not view._world_hits_cell_poly(center_world, center_cell):
+		push_error("GridBoardView: cell center should hit its grass polygon")
+		return false
+	var poly_pick: Variant = view._pick_cell_at_world(center_world)
+	if poly_pick != center_cell:
+		push_error("GridBoardView: polygon pick at center got %s want %s" % [poly_pick, center_cell])
 		return false
 
 	if not _assert_pick_roundtrip(view, cfg, "portrait-default"):
