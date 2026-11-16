@@ -347,9 +347,9 @@ func _refresh_hand_ui() -> void:
 		labels.append(card.display_label())
 		kinds.append(int(card.kind))
 		if card.kind == TacticalActionCardScript.Kind.MOVE:
-			details.append("拖到己方单位：获得其本段移力池授权，再点绿格移动。")
+			details.append("拖到己方单位：重置其本段移力为满池并授权移动，再点绿格。可打多张再移。")
 		else:
-			details.append("拖到己方单位：选定攻击者，再点红圈内敌人普攻。")
+			details.append("拖到己方单位：选定攻击者并发动一次普攻许可，再点红圈内敌人。可打多张再攻。")
 	_hand_fan.set_hand(labels, kinds, details)
 	var player_turn := _clock.player_active and not _game_over and not _input_locked
 	_hand_fan.set_interactive(player_turn)
@@ -400,8 +400,9 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
 		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
-		_last_log = "移动：%s · 点绿格" % target.def.display_name
+		_last_log = "移动：%s · 移力已重置 · 点绿格" % target.def.display_name
 	else:
+		_deck.prepare_attack(target)
 		_pending_kind = PendingKind.ATTACK
 		_last_log = "攻击者：%s · 点敌人" % target.def.display_name
 	_refresh_all()
@@ -673,6 +674,7 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 		_deck.authorize_move(unit)
 		_pending_kind = PendingKind.MOVE
 	else:
+		_deck.prepare_attack(unit)
 		_pending_kind = PendingKind.ATTACK
 	_refresh_all()
 	return true

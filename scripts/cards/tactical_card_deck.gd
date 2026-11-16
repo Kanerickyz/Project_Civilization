@@ -115,12 +115,28 @@ func play_hand_index(index: int) -> TacticalActionCard:
 	return card
 
 
+## 打出移动卡并选定己方单位：授权本段移动，并将剩余移力重置为满池。
+## 再打一张移动卡到同一单位可再次获得满池（玩家无次数上限；对手 AI 不走此路径）。
 func authorize_move(unit: TacticalUnitInstance) -> bool:
 	if unit == null or not unit.is_alive():
 		return false
 	if unit.faction != TacticalFactionScript.Id.PLAYER:
 		return false
 	move_authorized[unit] = true
+	unit.remaining_move_budget = unit.def.action_move_budget()
+	unit.moved_this_side_turn = false
+	changed.emit()
+	return true
+
+
+## 打出攻击卡并选定己方单位：清除本段已攻标记，允许再发动一次普攻。
+## 一张卡仍只结算一次攻；再打卡可再攻。对手 AI 不调用。
+func prepare_attack(unit: TacticalUnitInstance) -> bool:
+	if unit == null or not unit.is_alive():
+		return false
+	if unit.faction != TacticalFactionScript.Id.PLAYER:
+		return false
+	unit.attacked_this_side_turn = false
 	changed.emit()
 	return true
 
