@@ -13,9 +13,7 @@ const MapDataScript := preload("res://scripts/map/map_data.gd")
 const WALL := &"wall_straight"
 const SANDBOX_MAP_PATH := "res://resources/map/sandbox_battle_map.json"
 const BOARD_CONFIG_PATH := "res://resources/map/board_config.tres"
-const SANDBOX_WALLS: Array[Vector2i] = [
-	Vector2i(1, 3), Vector2i(2, 3), Vector2i(4, 3), Vector2i(5, 3), Vector2i(7, 3),
-]
+const GRASS := &"grass"
 
 
 func _initialize() -> void:
@@ -28,9 +26,9 @@ func _initialize() -> void:
 		_test_no_wall_matches_legacy,
 		_test_shortest_path_around_wall,
 		_test_sandbox_map_loads,
-		_test_sandbox_board_walls,
+		_test_sandbox_board_open,
 		_test_map_size_mismatch_falls_back,
-		_test_ai_respects_walls,
+		_test_ai_respects_passable_cells,
 	]
 	for t in tests:
 		if not t.call():
@@ -293,34 +291,31 @@ func _test_sandbox_map_loads() -> bool:
 	for y in range(map.height):
 		for x in range(map.width):
 			var c := Vector2i(x, y)
-			var want_wall := c in SANDBOX_WALLS
-			if (map.get_cell_vec(c) == WALL) != want_wall or map.is_passable(c) == want_wall:
-				push_error("TerrainMove: sandbox map cell %s wall=%s mismatch" % [c, want_wall])
+			if map.get_cell_vec(c) != GRASS or not map.is_passable(c):
+				push_error("TerrainMove: sandbox map cell %s should be open grass" % c)
 				return false
 	return true
 
 
-func _test_sandbox_board_walls() -> bool:
+func _test_sandbox_board_open() -> bool:
 	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
 	if cfg == null or cfg.terrain_map_path != SANDBOX_MAP_PATH:
 		push_error("TerrainMove: board_config should point at sandbox map")
 		return false
 	var board := TacticalSandboxRosterScript.build_board_for_config(cfg)
-	for w in SANDBOX_WALLS:
-		if board.is_passable(w):
-			push_error("TerrainMove: sandbox board wall %s should be impassable" % w)
-			return false
+	for y in range(board.grid_height):
+		for x in range(board.grid_width):
+			var c := Vector2i(x, y)
+			if not board.is_passable(c) or board.terrain_at(c) != GRASS:
+				push_error("TerrainMove: sandbox board cell %s should be open grass" % c)
+				return false
 	for u in board.living_units():
 		if not board.is_passable(u.cell):
-			push_error("TerrainMove: unit %s starts on wall %s" % [u.def.id, u.cell])
+			push_error("TerrainMove: unit %s starts on impassable %s" % [u.def.id, u.cell])
 			return false
-		for c in board.reachable_move_cells(u):
-			if c in SANDBOX_WALLS:
-				push_error("TerrainMove: %s can reach wall %s" % [u.def.id, c])
-				return false
 	var dict := board.terrain_cells()
-	if dict.size() != 64 or dict[Vector2i(1, 3)] != WALL or dict[Vector2i(0, 0)] != &"grass":
-		push_error("TerrainMove: board terrain_cells mismatch")
+	if dict.size() != 64 or dict[Vector2i(1, 3)] != GRASS or dict[Vector2i(0, 0)] != GRASS:
+		push_error("TerrainMove: board terrain_cells should be all grass")
 		return false
 	return true
 
@@ -345,14 +340,16 @@ func _test_map_size_mismatch_falls_back() -> bool:
 	return true
 
 
-func _test_ai_respects_walls() -> bool:
+func _test_ai_respects_passable_cells() -> bool:
 	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
 	var board := TacticalSandboxRosterScript.build_board_for_config(cfg)
+	# 在开放图上临时加一堵墙，确认 AI 不会踩上去。
+	board.set_terrain_cells({Vector2i(3, 3): WALL, Vector2i(4, 3): WALL})
 	for _round in range(4):
 		board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
 		TacticalEnemyAiScript.run_opponent_turn(board)
 		for u in board.living_units():
 			if not board.is_passable(u.cell):
-				push_error("TerrainMove: AI moved %s onto wall %s" % [u.def.id, u.cell])
+				push_error("TerrainMove: AI moved %s onto impassable %s" % [u.def.id, u.cell])
 				return false
 	return true

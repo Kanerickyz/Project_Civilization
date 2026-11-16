@@ -38,6 +38,9 @@ var _turn_banner_panel: PanelContainer
 var _turn_banner: Label
 var _game_over_panel: PanelContainer
 var _game_over_title: Label
+var _top_bar: MarginContainer
+var _side_panel: PanelContainer
+var _bottom_bar: MarginContainer
 
 
 func _ready() -> void:
@@ -47,9 +50,10 @@ func _ready() -> void:
 	_board = TacticalSandboxRosterScript.build_board_for_config(_board_config)
 	_board.changed.connect(_on_board_changed)
 	_deck = TacticalCardDeckScript.new()
-	_deck.changed.connect(_on_deck_changed)
 	_deck.build_from_living_player_units(_board)
 	_build()
+	# HUD 建好后再听牌库变化，避免 _ready 早期 changed 打到空 Label。
+	_deck.changed.connect(_on_deck_changed)
 	_fire_battle_start_triggers()
 	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_deck.begin_player_turn()
@@ -94,20 +98,20 @@ func _build() -> void:
 	_board_view.set_terrain_cells(_board.terrain_cells())
 	_board_view.cell_clicked.connect(_on_cell_clicked)
 
-	var top_bar := MarginContainer.new()
-	top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	top_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	top_bar.add_theme_constant_override("margin_left", 10)
-	top_bar.add_theme_constant_override("margin_top", 6)
-	top_bar.add_theme_constant_override("margin_right", 10)
-	top_bar.add_theme_constant_override("margin_bottom", 0)
-	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(top_bar)
+	_top_bar = MarginContainer.new()
+	_top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_top_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_top_bar.add_theme_constant_override("margin_left", 10)
+	_top_bar.add_theme_constant_override("margin_top", 6)
+	_top_bar.add_theme_constant_override("margin_right", 10)
+	_top_bar.add_theme_constant_override("margin_bottom", 0)
+	_top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_top_bar)
 
 	var top_row := HBoxContainer.new()
 	top_row.add_theme_constant_override("separation", 10)
 	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	top_bar.add_child(top_row)
+	_top_bar.add_child(top_row)
 
 	_turn_label = Label.new()
 	_turn_label.add_theme_font_size_override("font_size", 16)
@@ -120,20 +124,16 @@ func _build() -> void:
 	_hint_label.add_theme_font_size_override("font_size", 13)
 	_hint_label.add_theme_color_override("font_color", Color("c5d0dc"))
 	_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	top_row.add_child(_hint_label)
 
-	var side_panel := PanelContainer.new()
-	side_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
-	side_panel.offset_left = -168.0
-	side_panel.offset_top = -120.0
-	side_panel.offset_right = -8.0
-	side_panel.offset_bottom = 120.0
-	side_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(side_panel)
+	_side_panel = PanelContainer.new()
+	_side_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_side_panel)
 
 	var side_box := VBoxContainer.new()
 	side_box.add_theme_constant_override("separation", 6)
-	side_panel.add_child(side_box)
+	_side_panel.add_child(side_box)
 
 	_unit_panel = Label.new()
 	_unit_panel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -141,20 +141,22 @@ func _build() -> void:
 	_unit_panel.add_theme_font_size_override("font_size", 13)
 	side_box.add_child(_unit_panel)
 
-	var bottom_bar := MarginContainer.new()
-	bottom_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	bottom_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	bottom_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	bottom_bar.add_theme_constant_override("margin_left", 8)
-	bottom_bar.add_theme_constant_override("margin_top", 0)
-	bottom_bar.add_theme_constant_override("margin_right", 8)
-	bottom_bar.add_theme_constant_override("margin_bottom", 4)
-	bottom_bar.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(bottom_bar)
+	_bottom_bar = MarginContainer.new()
+	_bottom_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_bottom_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_bottom_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_bottom_bar.add_theme_constant_override("margin_left", 8)
+	_bottom_bar.add_theme_constant_override("margin_top", 0)
+	_bottom_bar.add_theme_constant_override("margin_right", 8)
+	_bottom_bar.add_theme_constant_override("margin_bottom", 4)
+	# 仅底栏自身响应；空白区不挡棋盘——子控件（手牌/按钮）自己 STOP。
+	_bottom_bar.mouse_filter = Control.MOUSE_FILTER_PASS
+	add_child(_bottom_bar)
 
 	var bottom_col := VBoxContainer.new()
 	bottom_col.add_theme_constant_override("separation", 2)
-	bottom_bar.add_child(bottom_col)
+	bottom_col.mouse_filter = Control.MOUSE_FILTER_PASS
+	_bottom_bar.add_child(bottom_col)
 
 	_hand_fan = ActionHandFanScript.new()
 	_hand_fan.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -239,6 +241,60 @@ func _build() -> void:
 	go_menu.custom_minimum_size = Vector2(160, 36)
 	go_menu.pressed.connect(_on_back_pressed)
 	go_box.add_child(go_menu)
+
+	resized.connect(_on_sandbox_resized)
+	_layout_hud_for_viewport()
+
+
+func _on_sandbox_resized() -> void:
+	_layout_hud_for_viewport()
+
+
+## 竖屏（高>宽）把单位条收成顶栏下短条，底栏手牌收紧；棋盘视口避开 HUD，勿挡可点格。
+func _layout_hud_for_viewport() -> void:
+	if _side_panel == null or _bottom_bar == null or _hand_fan == null or _board_view == null:
+		return
+	var portrait := size.y > size.x
+	if portrait:
+		_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		_side_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+		_side_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		_side_panel.offset_left = 8.0
+		_side_panel.offset_top = 34.0
+		_side_panel.offset_right = -8.0
+		_side_panel.offset_bottom = 118.0
+		_unit_panel.custom_minimum_size = Vector2(0, 0)
+		_unit_panel.add_theme_font_size_override("font_size", 12)
+		_hand_fan.custom_minimum_size = Vector2(0, 108)
+		_bottom_bar.add_theme_constant_override("margin_bottom", 6)
+		_end_turn_button.custom_minimum_size = Vector2(88, 30)
+		_cancel_target_button.custom_minimum_size = Vector2(88, 30)
+		_turn_banner_panel.anchor_top = 0.28
+		_turn_banner_panel.anchor_bottom = 0.28
+		# 顶条 + 底栏（手牌+按钮）留白，棋盘只占中间可点区。
+		_board_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_board_view.offset_top = 122.0
+		_board_view.offset_bottom = -156.0
+		_board_view.recenter_camera()
+	else:
+		_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_side_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+		_side_panel.offset_left = -168.0
+		_side_panel.offset_top = -120.0
+		_side_panel.offset_right = -8.0
+		_side_panel.offset_bottom = 120.0
+		_unit_panel.custom_minimum_size = Vector2(150, 0)
+		_unit_panel.add_theme_font_size_override("font_size", 13)
+		_hand_fan.custom_minimum_size = Vector2(0, 118)
+		_bottom_bar.add_theme_constant_override("margin_bottom", 4)
+		_end_turn_button.custom_minimum_size = Vector2(96, 32)
+		_cancel_target_button.custom_minimum_size = Vector2(96, 32)
+		_turn_banner_panel.anchor_top = 0.36
+		_turn_banner_panel.anchor_bottom = 0.36
+		_board_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_board_view.offset_top = 0.0
+		_board_view.offset_bottom = -140.0
+		_board_view.recenter_camera()
 
 
 func _on_board_changed() -> void:

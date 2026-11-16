@@ -1,11 +1,11 @@
 # 地图编辑器 v1
 
-> **已实现**（独立场景，默认 8×8）。对战沙盘与编辑器新建盘共用示例布局（8×8，第 4 行 `01101101`）；对战读 `board_config.terrain_map_path`（默认 `sandbox_battle_map.json`，见 [GRID_BOARD.md](./GRID_BOARD.md)）。
+> **已实现**（独立场景，默认 8×8）。对战默认战图为全草地；编辑器新建盘同为全草地，仍可点格画墙。对战读 `board_config.terrain_map_path`（默认 `sandbox_battle_map.json`，见 [GRID_BOARD.md](./GRID_BOARD.md)）。
 
 ## 玩家能做什么
 
 - 主菜单 **地图编辑** 进入独立编辑器（与沙盘对战分离）。
-- 默认 **8×8** 盘（`resources/map/map_editor_board_config.tres`），初始为与对战相同的示例城墙行（`MapData.create_example_layout()`）。
+- 默认 **8×8** 盘（`resources/map/map_editor_board_config.tres`），初始全草地（`MapData.create_example_layout()`）；城墙由点格轮换绘制。
 - **点击格子** 按地块类型表顺序轮换：**空草地 → 直城墙 → 空草地**；底栏显示本格坐标与类型名。
 - 直城墙按相邻城墙自动转向：仅南北有相邻城墙时沿南北摆放，否则沿东西。
 - **保存** / **加载** `user://maps/` 下的 JSON（文件名可改，默认 `map_001.json`）。

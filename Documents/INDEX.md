@@ -61,7 +61,7 @@
 | 版本 | 见 `project.godot` `application/config/version` |
 | 特性标签 | `4.6`, `GL Compatibility` |
 | 渲染器 | `gl_compatibility` |
-| 窗口 | 852×393（iPhone 14 Pro 横屏逻辑点），桌面覆盖 1704×786；`canvas_items` + `expand`；handheld 横屏 |
+| 窗口 | 393×852（iPhone 14 Pro 竖屏逻辑点），桌面覆盖 786×1704；`canvas_items` + `expand`；handheld 竖屏 |
 | Web | `export_presets.cfg` 单线程 Web；GitHub Pages：`.github/workflows/deploy-pages.yml` |
 
 ## 当前里程碑（代码对齐）
