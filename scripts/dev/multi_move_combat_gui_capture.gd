@@ -28,7 +28,7 @@ func _initialize() -> void:
 	await create_timer(0.35).timeout
 	_capture_viewport("04-archer-second-move-budget")
 	for u in sandbox._board.living_units():
-		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "knight":
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			u.cell = Vector2i(4, 2)
 			break
 	sandbox._board.changed.emit()

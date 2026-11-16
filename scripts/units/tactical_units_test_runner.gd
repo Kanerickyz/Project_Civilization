@@ -46,6 +46,16 @@ func _test_roster_loads() -> bool:
 	if board.living_units().size() != 8:
 		push_error("TacticalUnits: expected 8 units, got %d" % board.living_units().size())
 		return false
+	var riders := 0
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT:
+			if u.def.id != "rider":
+				push_error("TacticalUnits: opponent should be rider, got %s" % u.def.id)
+				return false
+			riders += 1
+	if riders != 4:
+		push_error("TacticalUnits: expected 4 wolf cavalry, got %d" % riders)
+		return false
 	return true
 
 
@@ -96,7 +106,7 @@ func _test_archer_kill_grants_card() -> bool:
 	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
 	board.player_deck = deck
 	var archer := _player_unit(board, "archer")
-	var foe := _opponent_unit(board, "wardrum")
+	var foe := _opponent_unit(board, "rider")
 	if archer == null or foe == null:
 		return false
 	foe.hp = 1
@@ -168,7 +178,7 @@ func _test_wardrum_move_end_buff() -> bool:
 func _test_pekka_no_passive() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var pekka := _player_unit(board, "mini_pekka")
-	var foe := _opponent_unit(board, "archer")
+	var foe := _opponent_unit(board, "rider")
 	if pekka == null or foe == null:
 		return false
 	if pekka.def.triggered_ability != null:
@@ -178,7 +188,7 @@ func _test_pekka_no_passive() -> bool:
 	var before := pekka.effective_attack()
 	board.apply_damage(foe, 1, pekka)
 	if foe.is_alive():
-		push_error("TacticalUnits: pekka should kill weak archer")
+		push_error("TacticalUnits: pekka should kill weak rider")
 		return false
 	if pekka.effective_attack() != before:
 		push_error("TacticalUnits: pekka kill must not grant atk")
@@ -189,7 +199,7 @@ func _test_pekka_no_passive() -> bool:
 func _test_basic_attack_flag() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var knight := _player_unit(board, "knight")
-	var foe := _opponent_unit(board, "archer")
+	var foe := _opponent_unit(board, "rider")
 	if knight == null or foe == null:
 		return false
 	foe.cell = knight.cell + Vector2i(0, 1)
@@ -214,7 +224,7 @@ func _test_basic_attack_flag() -> bool:
 func _test_side_turn_resets_attack() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var knight := _player_unit(board, "knight")
-	var foe := _opponent_unit(board, "archer")
+	var foe := _opponent_unit(board, "rider")
 	if knight == null or foe == null:
 		return false
 	foe.cell = knight.cell + Vector2i(0, 1)

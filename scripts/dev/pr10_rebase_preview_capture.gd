@@ -24,7 +24,7 @@ func _capture_at_size(win: Vector2i, tag: String) -> void:
 	await create_timer(0.45).timeout
 	_shot(sandbox, "%s-02-range-rings-archer" % tag)
 	for u in sandbox._board.living_units():
-		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "archer":
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			u.cell = Vector2i(4, 4)
 			break
 	sandbox._board.changed.emit()

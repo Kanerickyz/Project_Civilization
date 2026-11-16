@@ -303,10 +303,10 @@ func _test_attack_card_clears_flag_for_second_hit() -> bool:
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
 			knight = u
-		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "archer":
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			foe = u
 	if knight == null or foe == null:
-		push_error("CardActions: need knight + foe archer")
+		push_error("CardActions: need knight + foe rider")
 		return false
 	foe.cell = knight.cell + Vector2i(0, 1)
 	foe.hp = 99
@@ -408,7 +408,7 @@ func _test_strong_attack_bonus() -> bool:
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
 			knight = u
-		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "archer":
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			foe = u
 	if knight == null or foe == null:
 		return false
@@ -436,7 +436,7 @@ func _test_ephemeral_attack_not_in_piles() -> bool:
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
 			archer = u
-		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "wardrum":
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			foe = u
 	if archer == null or foe == null:
 		push_error("CardActions: need archer + foe")
