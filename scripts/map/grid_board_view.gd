@@ -85,6 +85,7 @@ func setup(p_config: BoardConfig) -> void:
 	_zoom = clampf(config.camera_zoom_default, config.camera_zoom_min, config.camera_zoom_max)
 	_needs_center = true
 	_rebuild_board()
+	_sync_viewport_size()
 	_try_center_on_board()
 	_apply_camera()
 
@@ -149,7 +150,9 @@ func _ensure_viewport_tree() -> void:
 		return
 	_viewport_container = SubViewportContainer.new()
 	_viewport_container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_viewport_container.stretch = true
+	# stretch=false：由我们把 SubViewport 尺寸同步成容器像素，点选坐标 1:1，避免 stretch 下
+	# 无法手改 size、容器与视口比例短暂不一致导致的射线偏移。
+	_viewport_container.stretch = false
 	_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_viewport_container)
 
@@ -208,15 +211,24 @@ func _apply_look() -> void:
 
 
 func _on_resized() -> void:
+	_sync_viewport_size()
 	if config == null:
 		return
-	if _viewport != null and _viewport_container != null:
-		var sz := _viewport_container.size
-		if sz.x > 1.0 and sz.y > 1.0:
-			_viewport.size = Vector2i(sz)
 	if _needs_center:
 		_try_center_on_board()
 	_apply_camera()
+
+
+func _sync_viewport_size() -> void:
+	if _viewport == null:
+		return
+	# 用本控件 size（而非尚可能为 0 的 container.size），保证 stretch=false 时像素 1:1。
+	var sz := size
+	if sz.x <= 1.0 or sz.y <= 1.0:
+		return
+	var want := Vector2i(maxi(1, int(round(sz.x))), maxi(1, int(round(sz.y))))
+	if _viewport.size != want:
+		_viewport.size = want
 
 
 func recenter_camera() -> void:
@@ -836,19 +848,24 @@ func _oblique_project(p: Vector3) -> Vector2:
 
 
 func _oblique_unproject_ground(screen: Vector2) -> Vector3:
+	## 反投影到地块顶面 y=tile_height（与 `_cell_ground_center` / 绘制一致）。
+	## 若按 y=0 解，斜 45° 下会系统性偏移约 tile_height，格边/角点常点到邻格或盘外 null。
 	var pitch := deg_to_rad(config.camera_pitch_deg)
 	var yaw := deg_to_rad(config.camera_yaw_deg)
 	var cp := cos(pitch)
+	var sp := sin(pitch)
 	var rx := cos(yaw)
 	var rz := -sin(yaw)
 	var fx := sin(yaw)
 	var fz := cos(yaw)
+	var h := config.tile_height
+	var adj := Vector2(screen.x, screen.y - h * sp)
 	var det := rx * (-fz * cp) - rz * (-fx * cp)
 	if absf(det) < 1e-8:
-		return Vector3.ZERO
-	var gx := (screen.x * (-fz * cp) - screen.y * rz) / det
-	var gz := (rx * screen.y - screen.x * (-fx * cp)) / det
-	return Vector3(gx, 0.0, gz)
+		return Vector3(0.0, h, 0.0)
+	var gx := (adj.x * (-fz * cp) - adj.y * rz) / det
+	var gz := (rx * adj.y - adj.x * (-fx * cp)) / det
+	return Vector3(gx, h, gz)
 
 
 func _cell_ground_center(cell: Vector2i, cell_size: float) -> Vector3:
@@ -973,9 +990,10 @@ func _apply_camera() -> void:
 		return
 	_pivot.position = _oblique_project(Vector3(_target.x, 0.0, _target.z))
 	var vs := _viewport.size if _viewport != null else Vector2i(393, 852)
-	var vh := maxf(float(vs.y), 1.0)
+	# 按短边适配：竖屏若用高度会过度放大，盘角出屏、点选需狂拖；横屏短边仍是高度，行为与旧版一致。
+	var fit := maxf(minf(float(vs.x), float(vs.y)), 1.0)
 	var ortho := maxf(config.camera_ortho_size, 0.1)
-	var cam_zoom := vh * maxf(_zoom, 0.05) / ortho
+	var cam_zoom := fit * maxf(_zoom, 0.05) / ortho
 	_camera.zoom = Vector2(cam_zoom, cam_zoom)
 	_camera.offset = Vector2.ZERO
 
@@ -1128,7 +1146,9 @@ func pick_cell_at_global(global_pos: Vector2) -> Variant:
 
 
 func _pick_cell(local_pos: Vector2) -> Variant:
-	if _camera == null or size.y <= 0.0 or not _camera.is_inside_tree():
+	if _camera == null or size.y <= 0.0 or size.x <= 0.0 or not _camera.is_inside_tree():
+		return null
+	if local_pos.x < 0.0 or local_pos.y < 0.0 or local_pos.x > size.x or local_pos.y > size.y:
 		return null
 	var vp_pos := _to_viewport_pos(local_pos)
 	var inv := _camera.get_canvas_transform().affine_inverse()
@@ -1149,6 +1169,7 @@ func _world_to_cell(world: Vector3) -> Variant:
 
 
 func _to_viewport_pos(local_pos: Vector2) -> Vector2:
+	## Control 本地像素 → SubViewport 像素。stretch=false 且尺寸已同步时应为恒等；仍按比例换算以防首帧。
 	if _viewport == null or _viewport_container == null:
 		return local_pos
 	var container_size := _viewport_container.size
@@ -1157,7 +1178,7 @@ func _to_viewport_pos(local_pos: Vector2) -> Vector2:
 	var vs := _viewport.size
 	if vs.x <= 0 or vs.y <= 0:
 		return local_pos
-	return Vector2(local_pos.x * vs.x / container_size.x, local_pos.y * vs.y / container_size.y)
+	return Vector2(local_pos.x * float(vs.x) / container_size.x, local_pos.y * float(vs.y) / container_size.y)
 
 
 func _clamp_target() -> void:
