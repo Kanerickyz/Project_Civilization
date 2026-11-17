@@ -1,17 +1,20 @@
 extends SceneTree
-## 地块对移动/寻路的约束：城墙不可通行、绕路、禁止斜穿墙角、无墙时与旧链式切比雪夫语义一致、沙盘开局地图。
+## 地块对移动/寻路的约束：城墙/树林不可通行、绕路、禁止斜穿墙角、湖林成簇开局、林挡攻、湖清燃。
 
 const TacticalBoardScript := preload("res://scripts/units/tactical_board.gd")
 const TacticalSandboxRosterScript := preload("res://scripts/units/tactical_sandbox_roster.gd")
 const TacticalUnitInstanceScript := preload("res://scripts/units/tactical_unit_instance.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd")
+const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
 const MapDataScript := preload("res://scripts/map/map_data.gd")
+const ClusterTerrainGeneratorScript := preload("res://scripts/map/cluster_terrain_generator.gd")
 
 const WALL := &"wall_straight"
-const SANDBOX_MAP_PATH := "res://resources/map/sandbox_battle_map.json"
+const LAKE := &"lake"
+const FOREST := &"forest"
 const BOARD_CONFIG_PATH := "res://resources/map/board_config.tres"
 const GRASS := &"grass"
 
@@ -25,9 +28,10 @@ func _initialize() -> void:
 		_test_no_corner_cutting,
 		_test_no_wall_matches_legacy,
 		_test_shortest_path_around_wall,
-		_test_sandbox_map_loads,
-		_test_sandbox_board_open,
-		_test_map_size_mismatch_falls_back,
+		_test_cluster_seed_reproducible,
+		_test_sandbox_board_units_passable,
+		_test_forest_blocks_attack_los,
+		_test_lake_clears_burn_and_immune,
 		_test_ai_respects_passable_cells,
 	]
 	for t in tests:
@@ -283,67 +287,101 @@ func _test_shortest_path_around_wall() -> bool:
 	return true
 
 
-func _test_sandbox_map_loads() -> bool:
-	var map := MapDataScript.load_json_from_path(SANDBOX_MAP_PATH)
-	if map == null or map.width != 8 or map.height != 8:
-		push_error("TerrainMove: sandbox map should load as 8x8")
+func _test_cluster_seed_reproducible() -> bool:
+	var a: Dictionary = ClusterTerrainGeneratorScript.generate(8, 8, 4242)
+	var b: Dictionary = ClusterTerrainGeneratorScript.generate(8, 8, 4242)
+	var map_a: MapData = a["map"] as MapData
+	var map_b: MapData = b["map"] as MapData
+	if map_a.to_dict()["cells"] != map_b.to_dict()["cells"]:
+		push_error("TerrainMove: same seed should reproduce cluster map")
 		return false
-	for y in range(map.height):
-		for x in range(map.width):
-			var c := Vector2i(x, y)
-			if map.get_cell_vec(c) != GRASS or not map.is_passable(c):
-				push_error("TerrainMove: sandbox map cell %s should be open grass" % c)
-				return false
+	var total := 64
+	var lake_n: int = int(a["lake_count"])
+	var forest_n: int = int(a["forest_count"])
+	if lake_n < 0 or lake_n > int(round(total * 0.15)):
+		push_error("TerrainMove: lake count %d out of 0–15%%" % lake_n)
+		return false
+	if forest_n < 0 or forest_n > int(round(total * 0.15)):
+		push_error("TerrainMove: forest count %d out of 0–15%%" % forest_n)
+		return false
 	return true
 
 
-func _test_sandbox_board_open() -> bool:
+func _test_sandbox_board_units_passable() -> bool:
 	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
-	if cfg == null or cfg.terrain_map_path != SANDBOX_MAP_PATH:
-		push_error("TerrainMove: board_config should point at sandbox map")
+	if cfg == null:
+		push_error("TerrainMove: missing board_config")
 		return false
-	var board := TacticalSandboxRosterScript.build_board_for_config(cfg)
-	for y in range(board.grid_height):
-		for x in range(board.grid_width):
-			var c := Vector2i(x, y)
-			if not board.is_passable(c) or board.terrain_at(c) != GRASS:
-				push_error("TerrainMove: sandbox board cell %s should be open grass" % c)
-				return false
+	var board := TacticalSandboxRosterScript.build_board_for_config(cfg, 777)
+	if board.terrain_cells().size() != cfg.grid_width * cfg.grid_height:
+		push_error("TerrainMove: board terrain_cells size mismatch")
+		return false
 	for u in board.living_units():
 		if not board.is_passable(u.cell):
 			push_error("TerrainMove: unit %s starts on impassable %s" % [u.def.id, u.cell])
 			return false
-	var dict := board.terrain_cells()
-	if dict.size() != 64 or dict[Vector2i(1, 3)] != GRASS or dict[Vector2i(0, 0)] != GRASS:
-		push_error("TerrainMove: board terrain_cells should be all grass")
+	return true
+
+
+func _test_forest_blocks_attack_los() -> bool:
+	var board: TacticalBoard = TacticalBoardScript.new()
+	board.setup(8, 8)
+	board.set_terrain_cells({Vector2i(3, 3): FOREST})
+	var archer := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/archer.tres"), TacticalFactionScript.Id.PLAYER, Vector2i(2, 3)
+	)
+	var foe := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/rider.tres"), TacticalFactionScript.Id.OPPONENT, Vector2i(4, 3)
+	)
+	board.add_unit(archer)
+	board.add_unit(foe)
+	if board.has_attack_los(archer.cell, foe.cell):
+		push_error("TerrainMove: forest between units must block LOS")
+		return false
+	var atk := TacticalCombatScript.try_basic_attack(
+		board, archer, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if atk.get("ok", false):
+		push_error("TerrainMove: attack through forest must fail")
+		return false
+	# 邻格不挡。
+	foe.cell = Vector2i(3, 2)
+	if not board.has_attack_los(archer.cell, foe.cell):
+		push_error("TerrainMove: adjacent attack should ignore forest LOS")
 		return false
 	return true
 
 
-func _test_map_size_mismatch_falls_back() -> bool:
-	var cfg := BoardConfig.new()
-	cfg.grid_width = 6
-	cfg.grid_height = 5
-	cfg.terrain_map_path = SANDBOX_MAP_PATH
-	var map := TacticalSandboxRosterScript.load_battle_map(cfg)
-	if map.width != 6 or map.height != 5:
-		push_error("TerrainMove: size mismatch should fall back to config size")
+func _test_lake_clears_burn_and_immune() -> bool:
+	var board: TacticalBoard = TacticalBoardScript.new()
+	board.setup(8, 8)
+	board.set_terrain_cells({Vector2i(2, 2): LAKE, Vector2i(3, 2): LAKE})
+	var unit := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/knight.tres"), TacticalFactionScript.Id.PLAYER, Vector2i(1, 2)
+	)
+	board.add_unit(unit)
+	unit.add_burn_stacks(3)
+	unit.remaining_move_budget = 4
+	if not board.try_move(unit, Vector2i(2, 2)):
+		push_error("TerrainMove: lake should be walkable")
 		return false
-	for c in map.terrain_dictionary():
-		if not map.is_passable(c):
-			push_error("TerrainMove: fallback map should be all passable")
-			return false
-	cfg.terrain_map_path = "res://resources/map/__missing_map__.json"
-	if TacticalSandboxRosterScript.load_battle_map(cfg).width != 6:
-		push_error("TerrainMove: missing map should fall back")
+	if unit.burn_stacks != 0:
+		push_error("TerrainMove: entering lake should clear burn")
+		return false
+	var burned := board.apply_burn_aoe(Vector2i(2, 2), 3, 1, null)
+	if burned != 0 or unit.burn_stacks != 0:
+		push_error("TerrainMove: unit on lake must be burn-immune")
+		return false
+	if board.ignited_cells_for_view().has(Vector2i(2, 2)):
+		push_error("TerrainMove: lake cell must not stay ignited")
 		return false
 	return true
 
 
 func _test_ai_respects_passable_cells() -> bool:
 	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
-	var board := TacticalSandboxRosterScript.build_board_for_config(cfg)
-	# 在开放图上临时加一堵墙，确认 AI 不会踩上去。
+	var board := TacticalSandboxRosterScript.build_board_for_config(cfg, 99)
+	# 临时加墙，确认 AI 不会踩上去。
 	board.set_terrain_cells({Vector2i(3, 3): WALL, Vector2i(4, 3): WALL})
 	for _round in range(4):
 		board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)

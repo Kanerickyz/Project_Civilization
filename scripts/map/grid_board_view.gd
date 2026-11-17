@@ -390,6 +390,12 @@ func _rebuild_board() -> void:
 			wall.visible = false
 			root.add_child(wall)
 
+			var forest := Node2D.new()
+			forest.name = "Forest"
+			forest.z_index = WALL_Z
+			forest.visible = false
+			root.add_child(forest)
+
 			var ov := Polygon2D.new()
 			ov.name = "Overlay"
 			ov.z_index = OVERLAY_Z
@@ -1025,6 +1031,12 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 		wall.visible = is_wall
 		if is_wall:
 			_update_wall_geometry(cell, _tile_yaw(cell, terrain_id, def))
+	var forest: Node2D = root.get_node_or_null("Forest") as Node2D
+	var is_forest := terrain_id == &"forest"
+	if forest != null:
+		forest.visible = is_forest
+		if is_forest:
+			_update_forest_geometry(cell)
 	root.rotation = 0.0
 	root.z_as_relative = false
 	root.z_index = _draw_depth_for_cell(cell)
@@ -1426,6 +1438,43 @@ func _update_wall_geometry(cell: Vector2i, yaw_rad: float) -> void:
 	stripe.color = WALL_STONE_DARK
 	stripe.polygon = _project_poly_local(cell, stripe_corners)
 	wall.add_child(stripe)
+
+
+func _update_forest_geometry(cell: Vector2i) -> void:
+	var root: Node2D = _tile_nodes[cell] as Node2D
+	var forest: Node2D = root.get_node_or_null("Forest") as Node2D
+	if forest == null:
+		return
+	for ch in forest.get_children():
+		ch.queue_free()
+	var half := config.cell_size * config.tile_inset * 0.28
+	var canopy_corners: Array = []
+	for lc in [
+		Vector2(0.0, -half),
+		Vector2(half * 0.9, half * 0.35),
+		Vector2(0.0, half * 0.55),
+		Vector2(-half * 0.9, half * 0.35),
+	]:
+		canopy_corners.append(_cell_ground_corner(cell, lc.x, lc.y))
+	var canopy := Polygon2D.new()
+	canopy.name = "Canopy"
+	canopy.color = Color(0.12, 0.36, 0.18, 0.92)
+	canopy.polygon = _project_poly_local(cell, canopy_corners)
+	forest.add_child(canopy)
+	var trunk_half := config.cell_size * 0.05
+	var trunk_corners: Array = []
+	for lc2 in [
+		Vector2(-trunk_half, half * 0.2),
+		Vector2(trunk_half, half * 0.2),
+		Vector2(trunk_half, half * 0.75),
+		Vector2(-trunk_half, half * 0.75),
+	]:
+		trunk_corners.append(_cell_ground_corner(cell, lc2.x, lc2.y))
+	var trunk := Polygon2D.new()
+	trunk.name = "Trunk"
+	trunk.color = Color(0.35, 0.22, 0.12, 0.95)
+	trunk.polygon = _project_poly_local(cell, _quad_from_first4(trunk_corners))
+	forest.add_child(trunk)
 
 
 func _quad_from_first4(points: Array) -> Array:

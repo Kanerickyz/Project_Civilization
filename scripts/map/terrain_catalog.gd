@@ -1,6 +1,6 @@
 class_name TerrainCatalog
 extends Resource
-## 地块类型表。顺序即编辑器点格轮换顺序；正式条目见 resources/terrain/terrain_catalog.tres。
+## 地块类型表。正式条目见 resources/terrain/terrain_catalog.tres。
 
 
 const DEFAULT_PATH := "res://resources/terrain/terrain_catalog.tres"
@@ -54,6 +54,21 @@ func resolve_id(terrain_id: StringName) -> StringName:
 func is_passable(terrain_id: StringName) -> bool:
 	var def := get_def(resolve_id(terrain_id))
 	return def == null or def.passable
+
+
+func blocks_attack(terrain_id: StringName) -> bool:
+	var def := get_def(resolve_id(terrain_id))
+	return def != null and def.blocks_attack
+
+
+func clears_burn_on_enter(terrain_id: StringName) -> bool:
+	var def := get_def(resolve_id(terrain_id))
+	return def != null and def.clears_burn_on_enter
+
+
+func burn_immune(terrain_id: StringName) -> bool:
+	var def := get_def(resolve_id(terrain_id))
+	return def != null and def.burn_immune
 
 
 func display_name_for(terrain_id: StringName) -> String:

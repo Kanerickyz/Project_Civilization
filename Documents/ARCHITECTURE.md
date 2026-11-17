@@ -6,7 +6,7 @@ Godot 4.6 · GL Compatibility · 竖屏 UI（393×852 逻辑点；expand 下横�
 
 - **入口**：`scenes/main/main_menu.tscn` → `sandbox.tscn`
 - **回合**：`TurnClock`（`scripts/core/turn_clock.gd`），UI 只调用 `end_turn()`，不自写计数
-- **地图**：2D 斜 45° 投影方格盘、Camera2D 拖拽/滚轮（见 Features/GRID_BOARD）
+- **地图**：2D 斜 45° 投影方格盘、Camera2D 拖拽/滚轮；开局成簇湖/林（见 Features/GRID_BOARD、LAKE_FOREST）
 - **卡牌行动**：玩家三库与底栏手牌（见 Features/CARD_ACTIONS）
 - **开战前部署**：沙盘先进部署，确认后再抽手牌开战（见 Features/DEPLOYMENT）
 - **设置**：`GameSettings` autoload 持久化音量/全屏（主菜单尚无设置 UI）

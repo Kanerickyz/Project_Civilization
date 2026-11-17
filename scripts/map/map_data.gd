@@ -1,6 +1,6 @@
 class_name MapData
 extends RefCounted
-## 可序列化的方格地图：每格存 TerrainCatalog 地块 id（编辑器产出，沙盘开局加载）。
+## 可序列化的方格地图：每格存 TerrainCatalog 地块 id（成簇生成器 / 测试用）。
 
 
 const FORMAT_ID := "tactical_map_v2"
@@ -35,7 +35,7 @@ static func create_filled(map_width: int, map_height: int, fill: StringName = &"
 	return data
 
 
-## 对战沙盘与编辑器新建时的默认 8×8：全草地可走；城墙仅由地图编辑器点格绘制。
+## 默认 8×8 全草地。
 static func create_example_layout() -> MapData:
 	return create_filled(DEFAULT_WIDTH, DEFAULT_HEIGHT)
 

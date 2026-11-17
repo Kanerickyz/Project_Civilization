@@ -31,8 +31,11 @@ static func attackable_cells(
 			continue
 		if not allow_friendly and u.faction == attacker.faction:
 			continue
-		if GridMathScript.chebyshev(attacker.cell, u.cell) <= attacker.def.attack_range:
-			out.append(u.cell)
+		if GridMathScript.chebyshev(attacker.cell, u.cell) > attacker.def.attack_range:
+			continue
+		if not board.has_attack_los(attacker.cell, u.cell):
+			continue
+		out.append(u.cell)
 	return out
 
 
@@ -65,6 +68,9 @@ static func try_basic_attack(
 		return result
 	if GridMathScript.chebyshev(attacker.cell, target.cell) > attacker.def.attack_range:
 		result["log"] = "目标不在攻击范围内"
+		return result
+	if not board.has_attack_los(attacker.cell, target.cell):
+		result["log"] = "树林挡住攻击"
 		return result
 	var dmg := attacker.effective_attack() + maxi(0, bonus_damage)
 	var hurt := board.apply_damage(target, dmg, attacker)

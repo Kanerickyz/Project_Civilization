@@ -6,7 +6,6 @@ extends RefCounted
 const SCENES: PackedStringArray = [
 	"res://scenes/main/main_menu.tscn",
 	"res://scenes/main/sandbox.tscn",
-	"res://scenes/main/map_editor.tscn",
 ]
 
 

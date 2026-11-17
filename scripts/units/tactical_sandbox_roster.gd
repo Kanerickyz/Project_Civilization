@@ -4,7 +4,8 @@ extends RefCounted
 const TacticalBoardScript := preload("res://scripts/units/tactical_board.gd")
 const TacticalUnitInstanceScript := preload("res://scripts/units/tactical_unit_instance.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
-const MapDataScript := preload("res://scripts/map/map_data.gd")
+const ClusterTerrainGeneratorScript := preload("res://scripts/map/cluster_terrain_generator.gd")
+const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
 const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/knight.tres",
@@ -55,33 +56,66 @@ static func build_demo_board(width: int, height: int) -> TacticalBoard:
 	return board
 
 
-## 对战开局：按 config 尺寸布阵，并装入 terrain_map_path 指向的地块布局。
-static func build_board_for_config(config: BoardConfig) -> TacticalBoard:
+## 对战开局：按 config 尺寸布阵，内部 seed 成簇铺湖/林（不保护部署区）。
+static func build_board_for_config(config: BoardConfig, seed_value: int = -1) -> TacticalBoard:
 	var board := build_demo_board(config.grid_width, config.grid_height)
-	board.set_terrain(load_battle_map(config))
+	var gen: Dictionary = ClusterTerrainGeneratorScript.generate(
+		config.grid_width, config.grid_height, seed_value
+	)
+	var map: MapData = gen["map"] as MapData
+	board.set_terrain(map)
+	_relocate_units_off_impassable(board)
 	return board
 
 
-## 读 config.terrain_map_path；路径为空、缺失、解析失败或尺寸不符时返回全默认地块。
-static func load_battle_map(config: BoardConfig) -> MapData:
-	var fallback := MapDataScript.create_filled(config.grid_width, config.grid_height)
-	var path := config.terrain_map_path
-	if path.is_empty():
-		return fallback
-	if not FileAccess.file_exists(path):
-		push_warning("TacticalSandboxRoster: terrain map missing %s, using default terrain" % path)
-		return fallback
-	var loaded := MapDataScript.load_json_from_path(path)
-	if loaded == null:
-		push_warning("TacticalSandboxRoster: terrain map unreadable %s, using default terrain" % path)
-		return fallback
-	if loaded.width != config.grid_width or loaded.height != config.grid_height:
-		push_warning(
-			"TacticalSandboxRoster: terrain map %dx%d != board %dx%d, using default terrain"
-			% [loaded.width, loaded.height, config.grid_width, config.grid_height]
-		)
-		return fallback
-	return loaded
+## 若初始落点不可通行（林/墙），挪到同侧最近可通行空格。
+static func _relocate_units_off_impassable(board: TacticalBoard) -> void:
+	for u in board.units:
+		if u == null or not u.is_alive():
+			continue
+		if board.is_passable(u.cell) and board.unit_at(u.cell) == u:
+			continue
+		var dest := _nearest_passable_empty(board, u)
+		if dest.x >= 0:
+			u.cell = dest
+
+
+static func _nearest_passable_empty(board: TacticalBoard, unit: TacticalUnitInstance) -> Vector2i:
+	var best := Vector2i(-1, -1)
+	var best_d := 999999
+	var prefer_left := unit.faction == TacticalFactionScript.Id.PLAYER
+	for gx in range(board.grid_width):
+		for gy in range(board.grid_height):
+			var cell := Vector2i(gx, gy)
+			if not board.is_passable(cell):
+				continue
+			var occ := board.unit_at(cell)
+			if occ != null and occ != unit:
+				continue
+			if prefer_left and cell.x >= int(board.grid_width / 2):
+				continue
+			if not prefer_left and cell.x < int(board.grid_width / 2):
+				continue
+			var d := GridMathScript.chebyshev(unit.cell, cell)
+			if d < best_d:
+				best_d = d
+				best = cell
+	if best.x >= 0:
+		return best
+	# 同侧无空位时放开半盘限制。
+	for gx in range(board.grid_width):
+		for gy in range(board.grid_height):
+			var cell2 := Vector2i(gx, gy)
+			if not board.is_passable(cell2):
+				continue
+			var occ2 := board.unit_at(cell2)
+			if occ2 != null and occ2 != unit:
+				continue
+			var d2 := GridMathScript.chebyshev(unit.cell, cell2)
+			if d2 < best_d:
+				best_d = d2
+				best = cell2
+	return best
 
 
 static func _load_defs(paths: Array[String]) -> Array[TacticalUnitDef]:
