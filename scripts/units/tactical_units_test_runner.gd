@@ -65,6 +65,12 @@ func _test_roster_loads() -> bool:
 			if u.def.max_hp != 10 or u.hp != 10:
 				push_error("TacticalUnits: rider should have 10 hp, got max=%d hp=%d" % [u.def.max_hp, u.hp])
 				return false
+			if u.def.move_range != 2 or u.def.attack_range != 1:
+				push_error(
+					"TacticalUnits: rider should be move2/atk1, got move=%d atk=%d"
+					% [u.def.move_range, u.def.attack_range]
+				)
+				return false
 			riders += 1
 		elif u.def.id == "boomling":
 			boomling += 1
