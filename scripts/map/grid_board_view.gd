@@ -94,7 +94,7 @@ func setup(p_config: BoardConfig) -> void:
 	_ensure_viewport_tree()
 	_ensure_long_press_timer()
 	_apply_look()
-	_zoom = clampf(config.camera_zoom_default, config.camera_zoom_min, config.camera_zoom_max)
+	_zoom = clampf(config.camera_zoom_default, _effective_zoom_min(), config.camera_zoom_max)
 	_needs_center = true
 	_rebuild_board()
 	_try_center_on_board()
@@ -245,6 +245,9 @@ func _on_resized() -> void:
 		return
 	if _needs_center:
 		_try_center_on_board()
+	# 竖/横切换后「看全盘」所需下限会变；夹回有效区间以免卡在旧下限之上。
+	_zoom = clampf(_zoom, _effective_zoom_min(), config.camera_zoom_max)
+	_clamp_target()
 	_apply_camera()
 
 
@@ -1071,7 +1074,7 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _set_zoom(value: float) -> void:
-	_zoom = clampf(value, config.camera_zoom_min, config.camera_zoom_max)
+	_zoom = clampf(value, _effective_zoom_min(), config.camera_zoom_max)
 	_clamp_target()
 	_apply_camera()
 
@@ -1083,13 +1086,56 @@ func _pan_by_screen_delta(delta: Vector2) -> void:
 
 
 func compute_pan_world_delta(delta: Vector2) -> Vector3:
-	var sens := config.camera_pan_sensitivity / maxf(_zoom, 0.05)
+	## Camera2D.zoom 已把屏幕像素换成世界单位；再除 _zoom 或沿用 0.02 会让竖屏拖拽几乎不动。
 	var cam_z := _camera.zoom.y if _camera != null and _camera.zoom.y > 0.0 else 1.0
-	var scaled := delta / cam_z
+	var scaled := delta / maxf(cam_z, 0.001) * config.camera_pan_sensitivity
 	var yaw := deg_to_rad(config.camera_yaw_deg)
 	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
 	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
-	return -right * scaled.x * sens - forward * scaled.y * sens
+	return -right * scaled.x - forward * scaled.y
+
+
+## 棋盘四角在斜投影下的半宽/半高（世界 2D）。
+func _board_projected_half_extents() -> Vector2:
+	if config == null:
+		return Vector2.ONE
+	var half_x := float(config.grid_width) * config.cell_size * 0.5
+	var half_z := float(config.grid_height) * config.cell_size * 0.5
+	var min_x := INF
+	var max_x := -INF
+	var min_y := INF
+	var max_y := -INF
+	for x in [-half_x, half_x]:
+		for z in [-half_z, half_z]:
+			var p := _oblique_project(Vector3(x, config.tile_height, z))
+			min_x = minf(min_x, p.x)
+			max_x = maxf(max_x, p.x)
+			min_y = minf(min_y, p.y)
+			max_y = maxf(max_y, p.y)
+	return Vector2(maxf(max_x - min_x, 0.1) * 0.5, maxf(max_y - min_y, 0.1) * 0.5)
+
+
+## 当前视口刚好装下整盘（含边距）所需的 _zoom；更小 = 更远。
+func _zoom_to_fit_board() -> float:
+	if config == null:
+		return 0.35
+	var vs := _viewport.size if _viewport != null else Vector2i(393, 574)
+	if vs.x <= 1 or vs.y <= 1:
+		return config.camera_zoom_min
+	var half := _board_projected_half_extents()
+	var pad := config.cell_size * 0.75
+	var fit := maxf(minf(float(vs.x), float(vs.y)), 1.0)
+	var ortho := maxf(config.camera_ortho_size, 0.1)
+	var cam_x := float(vs.x) / maxf(2.0 * (half.x + pad), 0.1)
+	var cam_y := float(vs.y) / maxf(2.0 * (half.y + pad), 0.1)
+	return (minf(cam_x, cam_y) * ortho) / fit
+
+
+func _effective_zoom_min() -> float:
+	if config == null:
+		return 0.35
+	# 配置下限与「看全盘」取更小，保证竖屏滚轮/捏合能缩到整张地图。
+	return minf(config.camera_zoom_min, _zoom_to_fit_board())
 
 
 func _handle_screen_touch(st: InputEventScreenTouch) -> void:

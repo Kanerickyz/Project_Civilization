@@ -19,6 +19,12 @@ func _initialize() -> void:
 	if not _test_pan_vertical_intuitive():
 		quit(1)
 		return
+	if not await _test_pan_magnitude_usable():
+		quit(1)
+		return
+	if not await _test_portrait_zoom_fits_board():
+		quit(1)
+		return
 	if not _test_view_builds():
 		quit(1)
 		return
@@ -435,6 +441,63 @@ func _test_pan_vertical_intuitive() -> bool:
 	var delta := view.compute_pan_world_delta(Vector2(0.0, -24.0))
 	if delta.dot(forward) <= 0.0:
 		push_error("GridBoardView: upward drag should pan along +forward (grab-the-map feel)")
+		return false
+	return true
+
+
+func _test_pan_magnitude_usable() -> bool:
+	## 竖屏短边适配后 Camera2D.zoom 很大；旧 0.02 灵敏度会使百像素拖拽几乎不动。
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 8
+	cfg.grid_height = 8
+	cfg.camera_ortho_size = 5.4
+	cfg.camera_pan_sensitivity = 1.0
+	var host := Control.new()
+	host.size = Vector2(393, 574)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	await process_frame
+	await process_frame
+	view._apply_camera()
+	var delta := view.compute_pan_world_delta(Vector2(100.0, 0.0))
+	var moved := Vector2(delta.x, delta.z).length()
+	if moved < 0.5:
+		push_error("GridBoardView: 100px pan should move >=0.5 world units (got %s)" % moved)
+		return false
+	return true
+
+
+func _test_portrait_zoom_fits_board() -> bool:
+	## 393×574 棋盘区须能缩到装下 8×8 斜投影 AABB。
+	var cfg: BoardConfig = BoardConfigScript.new()
+	cfg.grid_width = 8
+	cfg.grid_height = 8
+	cfg.cell_size = 1.0
+	cfg.camera_ortho_size = 5.4
+	cfg.camera_zoom_min = 0.65 ## 故意偏高：有效下限应落到 fit zoom
+	var host := Control.new()
+	host.size = Vector2(393, 574)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	await process_frame
+	await process_frame
+	view._apply_camera()
+	var z_min := view._effective_zoom_min()
+	if z_min >= 0.65:
+		push_error("GridBoardView: effective zoom min should drop below product floor to fit board (got %s)" % z_min)
+		return false
+	view._set_zoom(z_min)
+	var half := view._board_projected_half_extents()
+	var cam_z: float = view._camera.zoom.y
+	var vs: Vector2i = view._viewport.size
+	var vis_w := float(vs.x) / cam_z
+	var vis_h := float(vs.y) / cam_z
+	if vis_w + 0.05 < 2.0 * (half.x + 0.75) or vis_h + 0.05 < 2.0 * (half.y + 0.75):
+		push_error("GridBoardView: min zoom should reveal full board (vis=%sx%s need~%sx%s)" % [vis_w, vis_h, 2.0 * (half.x + 0.75), 2.0 * (half.y + 0.75)])
 		return false
 	return true
 
