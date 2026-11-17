@@ -6,7 +6,7 @@ extends Resource
 @export var max_hp: int = 1
 @export var attack: int = 1
 @export var move_range: int = 1
-## 本行动段移动力池；0 表示与 move_range 相同。
+## 对手 AI 本行动段移动力池；0 表示与 move_range 相同。玩家不使用移力池。
 @export var move_budget: int = 0
 @export var attack_range: int = 1
 @export var texture_blue: Texture2D

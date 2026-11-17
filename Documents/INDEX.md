@@ -14,7 +14,7 @@
 | [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) | **回合钟**（已实现） |
 | [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **2D 斜 45°** · Sprite2D 单位 |
 | [Features/MAP_EDITOR.md](./Features/MAP_EDITOR.md) | **地图编辑器 v1** · 8×8 · 草地/直城墙 · JSON v2 存读 |
-| [Features/UNITS.md](./Features/UNITS.md) | **战术单位** · 移力池 · 触发被动 |
+| [Features/UNITS.md](./Features/UNITS.md) | **战术单位** · 移动距离 / 对手移力池 · 触发被动 |
 | [Features/COMBAT.md](./Features/COMBAT.md) | **普攻 / 胜负 / 对手 AI** |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
 
@@ -70,6 +70,6 @@
 |------|------|------|
 | 回合钟 | 当前 | 玩家/对手交替 |
 | 方格盘 | 当前 | 2D 斜 45° 投影、Camera2D 拖拽缩放、Sprite2D 单位 |
-| 单位移动 | 当前 | 移力池；玩家须打出移动卡 |
+| 单位移动 | 当前 | 玩家靠移动卡（无移力池）；对手用移力池 |
 | 战斗 | 当前 | 普攻与胜负；玩家须打出攻击卡 |
 | 卡牌行动 | 当前 | 玩家攻+移+主动技；友方可被普攻；STS 抽弃；底栏手牌 |

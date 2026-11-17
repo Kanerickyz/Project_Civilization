@@ -149,20 +149,20 @@ func resolve_wardrum_redraw() -> int:
 	return draw_up_to(draw_count)
 
 
-## 打出移动卡并选定己方单位：授权本段移动一次，并将剩余移力重置为满池。
+## 打出移动卡并选定己方单位：授权本段移动一次（路径步数 ≤ move_range；无移力池）。
 func authorize_move(unit: TacticalUnitInstance) -> bool:
 	if unit == null or not unit.is_alive():
 		return false
 	if unit.faction != TacticalFactionScript.Id.PLAYER:
 		return false
 	move_authorized[unit] = true
-	unit.remaining_move_budget = unit.def.action_move_budget()
+	unit.remaining_move_budget = maxi(1, unit.def.move_range)
 	unit.moved_this_side_turn = false
 	changed.emit()
 	return true
 
 
-## 一次成功移动后消耗授权：清授权并将剩余移力置 0（一张移动卡只走一次）。
+## 一次成功移动后消耗授权：清授权并清空本次移动额度（一张移动卡只走一次）。
 func consume_move_authorization(unit: TacticalUnitInstance) -> void:
 	if unit == null:
 		return
