@@ -476,6 +476,12 @@ func _refresh_all() -> void:
 			attack_cells = _board.attack_range_cells(_focus_unit)
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
+		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）。
+		if TacticalEnemyAiScript.uses_behavior_sm(_selected_unit):
+			move_cells = _board.preview_reachable_move_cells(
+				_selected_unit, TacticalEnemyAiScript.MOVE_STEP_CAP
+			)
+			attack_cells = _board.attack_range_cells(_selected_unit)
 	_board_view.sync_tactical_units(
 		_board.living_units(),
 		sel_cell,
@@ -848,7 +854,10 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 	# 无待结算卡：仅查看单位。
 	if clicked != null:
 		_selected_unit = clicked
-		_last_log = "查看 %s · 移/攻请拖卡到单位" % clicked.def.display_name
+		if TacticalEnemyAiScript.uses_behavior_sm(clicked):
+			_last_log = "查看 %s · 绿=可移动 · 红=可攻击" % clicked.def.display_name
+		else:
+			_last_log = "查看 %s · 移/攻请拖卡到单位" % clicked.def.display_name
 		_refresh_all()
 		return
 	if not _board.is_passable(cell):
@@ -1106,6 +1115,19 @@ func capture_select_player_unit(unit_id: String) -> void:
 			_selected_unit = u
 			_refresh_all()
 			return
+
+
+## GUI 验收：选中敌方狼骑兵并刷新行动格 overlay。
+func capture_select_opponent_rider() -> bool:
+	for u in _board.living_units():
+		if TacticalEnemyAiScript.uses_behavior_sm(u):
+			_focus_unit = null
+			_pending_kind = PendingKind.NONE
+			_selected_unit = u
+			_last_log = "查看 %s · 绿=可移动 · 红=可攻击" % u.def.display_name
+			_refresh_all()
+			return true
+	return false
 
 
 ## GUI 验收：弹出指定单位信息卡（模拟长按）。

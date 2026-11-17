@@ -4,6 +4,7 @@ const TacticalSandboxRosterScript := preload("res://scripts/units/tactical_sandb
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TurnClockScript := preload("res://scripts/core/turn_clock.gd")
 
 
@@ -15,6 +16,9 @@ func _initialize() -> void:
 		quit(1)
 		return
 	if not _test_reachable_and_attack_overlay_cells():
+		quit(1)
+		return
+	if not _test_wolf_action_preview_overlay_cells():
 		quit(1)
 		return
 	if not _test_victory_detection():
@@ -111,6 +115,42 @@ func _test_reachable_and_attack_overlay_cells() -> bool:
 	if not atk.is_empty() and not (atk[0] is Vector2i):
 		push_error("GameLoop: attack cells type")
 		return false
+	return true
+
+
+func _test_wolf_action_preview_overlay_cells() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rider: TacticalUnitInstance = null
+	for u in board.living_units():
+		if TacticalEnemyAiScript.uses_behavior_sm(u):
+			rider = u
+			break
+	if rider == null:
+		push_error("GameLoop: missing wolf rider for action preview")
+		return false
+	# 玩家回合查看时移力可能已耗尽，预览仍应按行动预算封顶展示。
+	rider.remaining_move_budget = 0
+	var moves := board.preview_reachable_move_cells(
+		rider, TacticalEnemyAiScript.MOVE_STEP_CAP
+	)
+	if moves.is_empty():
+		push_error("GameLoop: wolf preview should show move cells with depleted budget")
+		return false
+	if rider.remaining_move_budget != 0:
+		push_error("GameLoop: wolf preview must not mutate remaining_move_budget")
+		return false
+	for c in moves:
+		if GridMathScript.chebyshev(rider.cell, c) > TacticalEnemyAiScript.MOVE_STEP_CAP:
+			push_error("GameLoop: wolf preview move beyond MOVE_STEP_CAP")
+			return false
+	var atk := board.attack_range_cells(rider)
+	if atk.is_empty():
+		push_error("GameLoop: wolf preview should show attack footprint")
+		return false
+	for c in atk:
+		if GridMathScript.chebyshev(rider.cell, c) > rider.def.attack_range:
+			push_error("GameLoop: wolf attack cell out of range")
+			return false
 	return true
 
 
