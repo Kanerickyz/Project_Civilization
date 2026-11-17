@@ -280,8 +280,9 @@ func _mark_ignited_aoe(origin: Vector2i, radius: int) -> void:
 
 
 ## 每方行动段开始：对所有燃烧单位先造成=层数伤害，再减 1 层。
-func process_burn_ticks() -> Array[String]:
-	var logs: Array[String] = []
+## 返回事件列表（unit/cell/damage/killed/ok/log），供 UI 飘字；同 tick 内只扫开场 survivors，死亡新燃不重结。
+func process_burn_ticks() -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
 	var victims: Array[TacticalUnitInstance] = []
 	for u in living_units():
 		if u.burn_stacks > 0:
@@ -294,25 +295,32 @@ func process_burn_ticks() -> Array[String]:
 			u.burn_stacks = 0
 			continue
 		var stacks := u.burn_stacks
+		var cell := u.cell
 		var hurt := apply_damage(u, stacks, null)
 		if hurt.get("ok", false):
-			logs.append(
-				"%s 燃烧 %d：受到 %d 伤害%s"
+			var killed: bool = bool(hurt.get("killed", false))
+			events.append({
+				"unit": u,
+				"cell": cell,
+				"damage": stacks,
+				"killed": killed,
+				"ok": true,
+				"log": "%s 燃烧 %d：受到 %d 伤害%s"
 				% [
 					u.def.display_name,
 					stacks,
 					stacks,
-					"（阵亡）" if hurt.get("killed", false) else "",
-				]
-			)
+					"（阵亡）" if killed else "",
+				],
+			})
 		if u.is_alive():
 			u.burn_stacks = maxi(0, u.burn_stacks - 1)
 	# AoE 点燃视觉在结算后收束：仅保留仍燃烧单位脚下格（由 ignited_cells_for_view 拼）。
 	var had_ignited := not _ignited_aoe_cells.is_empty()
 	_ignited_aoe_cells.clear()
-	if logs.size() > 0 or had_ignited:
+	if events.size() > 0 or had_ignited:
 		changed.emit()
-	return logs
+	return events
 
 
 func _apply_terrain_enter_effects(unit: TacticalUnitInstance) -> void:
