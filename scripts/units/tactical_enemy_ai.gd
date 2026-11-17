@@ -6,12 +6,14 @@ const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
 ## 敌方狼骑兵行为状态机：攻击 → 移动 →（回血|加攻 随机）循环；各单位独立相位。
+## 「可攻击」一律走 TacticalCombat.attackable_cells（rider.attack_range=1 近战邻格 + LOS）。
 
 enum Intent { ATTACK, MOVE, HEAL, BUFF_ATK }
 
 const RIDER_ID := "rider"
 const HEAL_AMOUNT := 2
 const BUFF_ATK_AMOUNT := 2
+## 移动意图单次最多靠近格数（≠ 攻击距离；攻击距离见 rider.tres attack_range=1）。
 const MOVE_STEP_CAP := 2
 const _UNREACHABLE_BASE := 10000
 

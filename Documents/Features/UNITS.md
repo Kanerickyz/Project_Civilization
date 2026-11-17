@@ -11,12 +11,12 @@
 | 大剑 | `mini_pekka` | 1 | — | 1 | 慢速重击 |
 | 鼓手 | `wardrum` | 2 | — | 1 | 支援机动 |
 | 爆爆 | `boomling` | 1 | — | 2 | 生命 6、攻击 2；燃烧 |
-| 狼骑兵 | `rider` | 2 | 2 | 1 | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
+| 狼骑兵 | `rider` | 2 | 2 | **1**（近战邻格） | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
 - **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **2**。
 - **玩家无移力池**：移动只靠打出移动卡授权；**一张移动卡只走一次**（成功落子后清授权）。见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 - **对手移力池** = `move_budget`（为 0 时等同 `move_range`）：对手 AI 在池内可逐步移动。
-- **攻击距离** = `attack_range`（切比雪夫）。游侠为 **3**。
+- **攻击距离** = `attack_range`（切比雪夫）。游侠为 **3**；狼骑兵为 **1**（近战邻格，含斜向）。
 - 玩家移/攻须把卡**拖到**己方单位。选定后：**绿** overlay = `move_range` 内可达空格；**红** overlay = 攻击距离 footprint。**玩家**普攻/加强攻可选红圈内**友方**为目标；**对手 AI** 仍只打敌方。
 
 ## 触发式战术能力

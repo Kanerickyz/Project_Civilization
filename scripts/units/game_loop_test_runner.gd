@@ -32,6 +32,9 @@ func _initialize() -> void:
 	if not _test_wolf_intent_heal_skip_when_full():
 		quit(1)
 		return
+	if not _test_wolf_melee_range_one():
+		quit(1)
+		return
 	print("GAME_LOOP_OK")
 	quit(0)
 
@@ -214,5 +217,50 @@ func _test_wolf_intent_heal_skip_when_full() -> bool:
 		return false
 	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
 		push_error("GameLoop: after skipped-heal attack should advance to move")
+		return false
+	return true
+
+
+## 狼骑兵攻击距离固定 1：距 2 不可攻；邻格可攻（意图「可攻击」与 combat 一致）。
+func _test_wolf_melee_range_one() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	if foe.def.attack_range != 1:
+		push_error("GameLoop: rider attack_range must be 1, got %d" % foe.def.attack_range)
+		return false
+
+	# 距 2：不可普攻，意图攻击应跳过（满血时落到移动或支援）。
+	player.cell = foe.cell + Vector2i(2, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	var far_cells := TacticalCombatScript.attackable_cells(board, foe)
+	if not far_cells.is_empty():
+		push_error("GameLoop: rider must not attack at chebyshev 2")
+		return false
+	var far_events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	for ev in far_events:
+		if ev.get("kind", "") == "attack":
+			push_error("GameLoop: attack intent must not hit at range 2")
+			return false
+
+	# 邻格（距 1）：可攻。
+	player.cell = foe.cell + Vector2i(1, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	var near_cells := TacticalCombatScript.attackable_cells(board, foe)
+	if near_cells.is_empty() or not near_cells.has(player.cell):
+		push_error("GameLoop: rider should attack adjacent cell")
+		return false
+	var near_events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	if near_events.is_empty() or near_events[0].get("kind", "") != "attack":
+		push_error("GameLoop: attack intent should fire at range 1")
 		return false
 	return true
