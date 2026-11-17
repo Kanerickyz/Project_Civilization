@@ -27,7 +27,7 @@ func _initialize() -> void:
 	if not _test_end_turn_discards_hand():
 		quit(1)
 		return
-	if not _test_move_card_resets_budget():
+	if not _test_move_card_grants_move_range():
 		quit(1)
 		return
 	if not _test_move_card_one_step_only():
@@ -258,7 +258,7 @@ func _test_end_turn_discards_hand() -> bool:
 	return true
 
 
-func _test_move_card_resets_budget() -> bool:
+func _test_move_card_grants_move_range() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 23
@@ -270,27 +270,35 @@ func _test_move_card_resets_budget() -> bool:
 			unit = u
 			break
 	if unit == null:
-		push_error("CardActions: need archer for budget reset test")
-		return false
-	if not deck.authorize_move(unit):
-		push_error("CardActions: first authorize_move failed")
+		push_error("CardActions: need archer for move-range grant test")
 		return false
 	unit.remaining_move_budget = 0
 	if not board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: exhausted budget should block reachability")
+		push_error("CardActions: no allowance should block reachability")
 		return false
 	if not deck.authorize_move(unit):
-		push_error("CardActions: second authorize_move failed")
+		push_error("CardActions: authorize_move failed")
 		return false
-	var full := unit.def.action_move_budget()
-	if unit.remaining_move_budget != full:
+	var want := maxi(1, unit.def.move_range)
+	if unit.remaining_move_budget != want:
 		push_error(
-			"CardActions: second move card should reset budget to %d, got %d"
-			% [full, unit.remaining_move_budget]
+			"CardActions: move card should grant move_range %d, got %d"
+			% [want, unit.remaining_move_budget]
 		)
 		return false
 	if board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: after reset should have reachable cells")
+		push_error("CardActions: after authorize should have reachable cells")
+		return false
+	# 玩家无移力池：额度按 move_range，不按 action_move_budget / 满池重置语义。
+	unit.remaining_move_budget = 0
+	if not deck.authorize_move(unit):
+		push_error("CardActions: second authorize_move failed")
+		return false
+	if unit.remaining_move_budget != want:
+		push_error(
+			"CardActions: re-authorize should grant move_range %d, got %d"
+			% [want, unit.remaining_move_budget]
+		)
 		return false
 	return true
 
@@ -307,8 +315,8 @@ func _test_move_card_one_step_only() -> bool:
 	if unit == null:
 		push_error("CardActions: need archer for one-step move test")
 		return false
-	if unit.def.action_move_budget() != 2:
-		push_error("CardActions: archer move distance should be 2")
+	if unit.def.move_range != 2:
+		push_error("CardActions: archer move_range should be 2")
 		return false
 	if not deck.authorize_move(unit):
 		push_error("CardActions: authorize_move failed")
@@ -324,7 +332,7 @@ func _test_move_card_one_step_only() -> bool:
 		push_error("CardActions: move auth must clear after one step")
 		return false
 	if unit.remaining_move_budget != 0:
-		push_error("CardActions: remaining budget must be 0 after consume")
+		push_error("CardActions: move allowance must be 0 after consume")
 		return false
 	if not board.reachable_move_cells(unit).is_empty():
 		push_error("CardActions: no further moves without a new card")

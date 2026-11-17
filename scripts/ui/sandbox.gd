@@ -59,6 +59,7 @@ func _ready() -> void:
 	# HUD 建好后再听牌库变化，避免 _ready 早期 changed 打到空 Label。
 	_deck.changed.connect(_on_deck_changed)
 	_fire_battle_start_triggers()
+	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_deck.begin_player_turn()
 	_refresh_all()
@@ -389,16 +390,20 @@ func _refresh_unit_panel() -> void:
 	var skill_line := ab.display_name if ab != null else "—"
 	var skill_rules := ab.rules_hint if ab != null else ""
 	var move_auth := "已授权" if _deck.is_move_authorized(u) else "需移动卡"
+	var move_line: String
+	if u.faction == TacticalFactionScript.Id.PLAYER:
+		move_line = "移动距离 %d" % u.def.move_range
+	else:
+		move_line = "移力 %d/%d" % [u.remaining_move_budget, u.def.action_move_budget()]
 	_unit_panel.text = (
-		"%s · %s\nHP %d/%d · 攻 %d · 移力 %d/%d · 射程 %d\n移动：%s\n%s\n%s"
+		"%s · %s\nHP %d/%d · 攻 %d · %s · 射程 %d\n移动：%s\n%s\n%s"
 		% [
 			u.def.display_name,
 			TacticalFactionScript.label(u.faction),
 			u.hp,
 			u.effective_max_hp(),
 			u.effective_attack(),
-			u.remaining_move_budget,
-			u.def.action_move_budget(),
+			move_line,
 			u.def.attack_range,
 			move_auth,
 			skill_line,
