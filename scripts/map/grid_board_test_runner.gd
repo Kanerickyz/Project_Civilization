@@ -91,14 +91,37 @@ func _test_unit_scale_vs_cell() -> bool:
 		return false
 	var spr: Sprite2D = view._unit_sprites[unit] as Sprite2D
 	var expected_h := cfg.unit_world_height
-	var tex_h := float(def.texture_blue.get_height())
-	var expected_scale := expected_h / tex_h
+	var metrics: Dictionary = view._texture_content_metrics(def.texture_blue)
+	var content_h: float = metrics.content_h
+	var vis := def.visual_scale if def.visual_scale > 0.0 else 1.0
+	var expected_scale := (expected_h / content_h) * vis if content_h > 0.0 else 1.0
 	if absf(spr.scale.y - expected_scale) > 0.0001:
 		push_error("GridBoardView: unit scale.y %.5f != expected %.5f" % [spr.scale.y, expected_scale])
+		return false
+	if absf(spr.offset.y - float(metrics.offset_y)) > GridBoardViewScript.UNIT_IDLE_BOB_PX + 0.5:
+		push_error("GridBoardView: foot offset should match content bottom")
 		return false
 	if expected_h > cfg.cell_size * cfg.tile_inset:
 		push_error("GridBoardView: unit_world_height should fit inside cell inset")
 		return false
+	# 鼓手贴图有顶部留白：内容高缩放应明显大于按整图高度缩放。
+	var drum_path := "res://resources/units/wardrum.tres"
+	if ResourceLoader.exists(drum_path):
+		var drum_def: TacticalUnitDef = load(drum_path) as TacticalUnitDef
+		if drum_def != null and drum_def.texture_blue != null:
+			var drum: TacticalUnitInstance = UnitInstScript.new(
+				drum_def, FactionScript.Id.PLAYER, Vector2i(2, 2)
+			)
+			view.sync_tactical_units([drum], Vector2i(-1, -1), [], [])
+			var drum_spr: Sprite2D = view._unit_sprites[drum] as Sprite2D
+			var tex_h := float(drum_def.texture_blue.get_height())
+			var canvas_scale := expected_h / tex_h if tex_h > 0.0 else 1.0
+			if drum_spr.scale.y <= canvas_scale * 1.2:
+				push_error(
+					"GridBoardView: wardrum should scale by content height (got %.5f vs canvas %.5f)"
+					% [drum_spr.scale.y, canvas_scale]
+				)
+				return false
 	return true
 
 
@@ -145,8 +168,8 @@ func _test_board_look_and_unit_blob() -> bool:
 	if spr.position.length() > 0.02:
 		push_error("GridBoardView: feet node should sit on the cell center, got %s" % spr.position)
 		return false
-	var tex_h := float(spr.texture.get_height())
-	var base_y := -tex_h * 0.5
+	var metrics: Dictionary = view._texture_content_metrics(spr.texture)
+	var base_y: float = metrics.offset_y
 	# 待机浮动只改 offset.y，允许在基线上下各 UNIT_IDLE_BOB_PX。
 	if absf(spr.offset.y - base_y) > GridBoardViewScript.UNIT_IDLE_BOB_PX + 0.5:
 		push_error("GridBoardView: sprite offset should stay near foot baseline (idle bob)")
