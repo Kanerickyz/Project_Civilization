@@ -132,6 +132,7 @@ func _test_opponent_ai_runs() -> bool:
 
 
 func _test_attack_flag_resets_with_side_turn() -> bool:
+	# 对手 AI 的 attacked_this_side_turn 在段重置后可再攻；玩家无该预算。
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var player: TacticalUnitInstance = null
 	var foe: TacticalUnitInstance = null
@@ -142,18 +143,18 @@ func _test_attack_flag_resets_with_side_turn() -> bool:
 			foe = u
 	if player == null or foe == null:
 		return false
-	foe.cell = player.cell + Vector2i(1, 0)
+	player.cell = foe.cell + Vector2i(1, 0)
 	var res := TacticalCombatScript.try_basic_attack(
-		board, player, foe.cell, TacticalFactionScript.Id.PLAYER
+		board, foe, player.cell, TacticalFactionScript.Id.OPPONENT
 	)
-	if not res["ok"]:
-		push_error("GameLoop: attack setup failed")
+	if not res["ok"] or not foe.attacked_this_side_turn:
+		push_error("GameLoop: opponent attack setup failed")
 		return false
-	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
 	var res2 := TacticalCombatScript.try_basic_attack(
-		board, player, foe.cell, TacticalFactionScript.Id.PLAYER
+		board, foe, player.cell, TacticalFactionScript.Id.OPPONENT
 	)
 	if not res2["ok"]:
-		push_error("GameLoop: should attack on new side turn after reset")
+		push_error("GameLoop: opponent should attack on new side turn after reset")
 		return false
 	return true

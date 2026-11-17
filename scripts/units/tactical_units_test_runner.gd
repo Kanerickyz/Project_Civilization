@@ -197,26 +197,42 @@ func _test_pekka_no_passive() -> bool:
 
 
 func _test_basic_attack_flag() -> bool:
+	# 玩家无段内攻次标记；对手 AI 仍每段最多 1 攻。
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var knight := _player_unit(board, "knight")
 	var foe := _opponent_unit(board, "rider")
 	if knight == null or foe == null:
 		return false
 	foe.cell = knight.cell + Vector2i(0, 1)
+	foe.hp = 99
 	var res := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
 	)
 	if not res["ok"]:
-		push_error("TacticalUnits: basic attack failed")
+		push_error("TacticalUnits: player basic attack should succeed")
 		return false
-	if not knight.attacked_this_side_turn:
-		push_error("TacticalUnits: attack should set flag")
+	if knight.attacked_this_side_turn:
+		push_error("TacticalUnits: player attack must not set attacked_this_side_turn")
 		return false
 	var again := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
 	)
-	if again["ok"]:
-		push_error("TacticalUnits: should not attack twice per side turn")
+	if not again["ok"]:
+		push_error("TacticalUnits: player may attack again without side-turn flag")
+		return false
+	var ally := knight
+	ally.cell = foe.cell + Vector2i(0, 1)
+	var opp1 := TacticalCombatScript.try_basic_attack(
+		board, foe, ally.cell, TacticalFactionScript.Id.OPPONENT
+	)
+	if not opp1["ok"] or not foe.attacked_this_side_turn:
+		push_error("TacticalUnits: opponent attack should set flag")
+		return false
+	var opp2 := TacticalCombatScript.try_basic_attack(
+		board, foe, ally.cell, TacticalFactionScript.Id.OPPONENT
+	)
+	if opp2["ok"]:
+		push_error("TacticalUnits: opponent should not attack twice per side turn")
 		return false
 	return true
 
@@ -227,19 +243,19 @@ func _test_side_turn_resets_attack() -> bool:
 	var foe := _opponent_unit(board, "rider")
 	if knight == null or foe == null:
 		return false
-	foe.cell = knight.cell + Vector2i(0, 1)
+	knight.cell = foe.cell + Vector2i(0, 1)
 	var res := TacticalCombatScript.try_basic_attack(
-		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+		board, foe, knight.cell, TacticalFactionScript.Id.OPPONENT
 	)
-	if not res["ok"] or not knight.attacked_this_side_turn:
-		push_error("TacticalUnits: first attack should succeed and set flag")
+	if not res["ok"] or not foe.attacked_this_side_turn:
+		push_error("TacticalUnits: opponent first attack should succeed and set flag")
 		return false
-	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
-	if knight.attacked_this_side_turn:
-		push_error("TacticalUnits: side turn reset should clear attack flag")
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	if foe.attacked_this_side_turn:
+		push_error("TacticalUnits: side turn reset should clear opponent attack flag")
 		return false
-	if not TacticalCombatScript.can_basic_attack(knight, TacticalFactionScript.Id.PLAYER):
-		push_error("TacticalUnits: should attack again after side turn reset")
+	if not TacticalCombatScript.can_basic_attack(foe, TacticalFactionScript.Id.OPPONENT):
+		push_error("TacticalUnits: opponent should attack again after side turn reset")
 		return false
 	return true
 

@@ -325,7 +325,10 @@ func _on_deck_changed() -> void:
 
 func _clear_pending_target(keep_move_focus: bool = true) -> void:
 	_pending_kind = PendingKind.NONE
-	_deck.pending_attack_bonus = 0
+	if _focus_unit != null and _deck.is_attack_authorized(_focus_unit):
+		_deck.consume_attack_authorization(_focus_unit)
+	else:
+		_deck.pending_attack_bonus = 0
 	if not keep_move_focus:
 		_focus_unit = null
 	elif _focus_unit != null and _deck.is_move_authorized(_focus_unit):
@@ -535,15 +538,15 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_pending_kind = PendingKind.MOVE
 		_last_log = "移动：%s · 点绿格（本卡仅一次）" % target.def.display_name
 	elif card.is_attack_aim():
-		_deck.prepare_attack(target, card.attack_bonus_damage)
+		_deck.authorize_attack(target, card.attack_bonus_damage)
 		_pending_kind = PendingKind.ATTACK
 		if card.kind == TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK:
-			_last_log = "加强攻击：%s · 额外+%d · 点红圈内单位（含友方）" % [
+			_last_log = "加强攻击：%s · 额外+%d · 点红圈内单位（含友方；本卡一次）" % [
 				target.def.display_name,
 				card.attack_bonus_damage,
 			]
 		else:
-			_last_log = "攻击者：%s · 点红圈内单位（含友方）" % target.def.display_name
+			_last_log = "攻击者：%s · 点红圈内单位（含友方；本卡一次）" % target.def.display_name
 	else:
 		_last_log = "未知卡类型"
 		_pending_kind = PendingKind.NONE
@@ -633,6 +636,11 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 
 	# 攻击瞄准：攻击者已由拖卡选定；可点红圈内任意其他单位（含友方）。
 	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
+		if not _deck.is_attack_authorized(_focus_unit):
+			_last_log = "无攻击授权 · 请再拖一张攻击卡"
+			_clear_pending_target(false)
+			_refresh_all()
+			return
 		if clicked != null and clicked != _focus_unit:
 			var in_range := (
 				GridMathScript.chebyshev(_focus_unit.cell, clicked.cell)
@@ -660,7 +668,12 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	if _input_locked or _focus_unit == null:
 		return
 	var attacker := _focus_unit
-	var bonus := _deck.consume_pending_attack_bonus()
+	if not _deck.is_attack_authorized(attacker):
+		_last_log = "无攻击授权"
+		_clear_pending_target(false)
+		_refresh_all()
+		return
+	var bonus := _deck.pending_attack_bonus
 	var atk := TacticalCombatScript.try_basic_attack(
 		_board,
 		attacker,
@@ -671,10 +684,10 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	)
 	_last_log = atk["log"]
 	if not atk["ok"]:
-		# 失败时退回 bonus，避免白丢加强攻。
-		_deck.pending_attack_bonus = bonus
 		_refresh_all()
 		return
+	# 成功后消耗本卡授权（玩家无 attacked_this_side_turn 预算）。
+	_deck.consume_attack_authorization(attacker)
 	_input_locked = true
 	_refresh_action_buttons()
 	var tw := _board_view.play_unit_attack(attacker, target_cell)
@@ -914,7 +927,7 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 		_focus_unit = null
 		_deck.resolve_wardrum_redraw()
 	elif card.is_attack_aim():
-		_deck.prepare_attack(unit, card.attack_bonus_damage)
+		_deck.authorize_attack(unit, card.attack_bonus_damage)
 		_pending_kind = PendingKind.ATTACK
 	else:
 		return false
