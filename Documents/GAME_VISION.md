@@ -21,6 +21,7 @@
 | 「结束行动」 | 回合钟，见 [Features/TURN_CLOCK.md](./Features/TURN_CLOCK.md) |
 | 方格上移动、普攻与胜负 | 见 [Features/UNITS.md](./Features/UNITS.md)、[Features/COMBAT.md](./Features/COMBAT.md) |
 | 底栏手牌表达移/攻 | 见 [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) |
+| 开战前部署己方占位 | 见 [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) |
 
 没有城市或科技。行动可用卡表达（仅玩家移/攻卡首版）。
 

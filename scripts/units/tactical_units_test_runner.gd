@@ -43,6 +43,9 @@ func _initialize() -> void:
 	if not _test_archer_move_distance_two():
 		quit(1)
 		return
+	if not _test_deploy_place_and_swap():
+		quit(1)
+		return
 	print("TACTICAL_UNITS_OK")
 	quit(0)
 
@@ -345,5 +348,50 @@ func _test_archer_move_distance_two() -> bool:
 		mid = archer.cell + Vector2i(0, 2)
 	if not board.try_move(archer, mid):
 		push_error("TacticalUnits: archer should move distance 2")
+		return false
+	return true
+
+
+func _test_deploy_place_and_swap() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(8, 8)
+	if board.is_player_deploy_cell(Vector2i(4, 0)):
+		push_error("TacticalUnits: right-half cell must not be player deploy zone")
+		return false
+	if not board.is_player_deploy_cell(Vector2i(0, 0)):
+		push_error("TacticalUnits: left-half passable cell should be deploy zone")
+		return false
+	var players: Array[TacticalUnitInstance] = []
+	var opponent: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER:
+			players.append(u)
+		elif opponent == null:
+			opponent = u
+	if players.size() < 2 or opponent == null:
+		push_error("TacticalUnits: deploy test needs >=2 players and 1 opponent")
+		return false
+	var a := players[0]
+	var b := players[1]
+	var dest := Vector2i(0, 1)
+	if board.unit_at(dest) != null:
+		dest = Vector2i(0, 0)
+		if board.unit_at(dest) != null:
+			dest = Vector2i(0, 3)
+	if not board.try_deploy_place(a, dest):
+		push_error("TacticalUnits: deploy place to empty zone failed")
+		return false
+	if a.cell != dest:
+		push_error("TacticalUnits: deploy place did not move unit")
+		return false
+	if board.try_deploy_place(a, opponent.cell):
+		push_error("TacticalUnits: must not deploy onto opponent")
+		return false
+	var a_cell := a.cell
+	var b_cell := b.cell
+	if not board.try_deploy_place(a, b_cell):
+		push_error("TacticalUnits: deploy swap with ally failed")
+		return false
+	if a.cell != b_cell or b.cell != a_cell:
+		push_error("TacticalUnits: deploy swap cells wrong")
 		return false
 	return true

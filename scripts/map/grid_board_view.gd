@@ -7,6 +7,8 @@ signal cell_clicked(cell: Vector2i)
 ## 长按单位约 0.38s（对照 autochess LONG_PRESS_MS）；松手发 unit_info_closed。
 signal unit_long_pressed(unit: TacticalUnitInstance, anchor_global: Vector2)
 signal unit_info_closed
+## 部署阶段：拖起己方单位后松手落格（cell 越界则为无效，由沙盘校验）。
+signal unit_deploy_dropped(unit: TacticalUnitInstance, cell: Vector2i)
 
 var config: BoardConfig
 
@@ -105,6 +107,10 @@ var _long_press_timer: Timer
 var _press_unit: TacticalUnitInstance = null
 var _info_shown: bool = false
 var _suppress_click: bool = false
+## 开战前部署：按住己方单位拖到落点；空地仍可平移镜头。
+var _deploy_mode: bool = false
+var _deploy_valid_cells: Dictionary = {} # Vector2i -> true
+var _deploy_drag_unit: TacticalUnitInstance = null
 
 const UNIT_IDLE_BOB_PX := 3.0
 const UNIT_IDLE_HALF_SEC := 0.95
@@ -129,6 +135,30 @@ func setup(p_config: BoardConfig) -> void:
 	_rebuild_board()
 	_try_center_on_board()
 	_apply_camera()
+
+
+## 部署模式：仅己方单位可拖；valid_cells 为合法落点（用于悬停色）。
+func set_deploy_mode(enabled: bool, valid_cells: Array = []) -> void:
+	_deploy_mode = enabled
+	_deploy_valid_cells.clear()
+	for c in valid_cells:
+		if c is Vector2i:
+			_deploy_valid_cells[c as Vector2i] = true
+	if not enabled:
+		_clear_deploy_drag()
+		clear_card_drag_hover()
+
+
+func is_deploy_mode() -> bool:
+	return _deploy_mode
+
+
+func _clear_deploy_drag() -> void:
+	if _deploy_drag_unit != null and _unit_sprites.has(_deploy_drag_unit):
+		_snap_unit_to_cell_center(_deploy_drag_unit)
+		if _deploy_drag_unit.is_alive():
+			_ensure_unit_idle(_deploy_drag_unit)
+	_deploy_drag_unit = null
 
 
 func _ensure_long_press_timer() -> void:
@@ -306,6 +336,7 @@ func _rebuild_board() -> void:
 	_drag_select_valid = false
 	_overlay_drag_hover = Vector2i(-1, -1)
 	_overlay_drag_hover_kind = 0
+	_clear_deploy_drag()
 	for key in _unit_sprites.keys():
 		_kill_unit_idle(key as TacticalUnitInstance)
 		_kill_unit_select_tween(key as TacticalUnitInstance)
@@ -1604,9 +1635,36 @@ func _begin_press(local_pos: Vector2) -> void:
 	_press_pos = local_pos
 	_suppress_click = false
 	_press_unit = _unit_under_local(local_pos)
+	_deploy_drag_unit = null
 	_cancel_long_press()
 	if _press_unit != null and _long_press_timer != null:
 		_long_press_timer.start()
+
+
+func _is_deploy_draggable(unit: TacticalUnitInstance) -> bool:
+	return (
+		_deploy_mode
+		and unit != null
+		and unit.is_alive()
+		and unit.faction == TacticalFactionScript.Id.PLAYER
+	)
+
+
+func _deploy_drop_valid_at(cell: Vector2i) -> bool:
+	if not _deploy_valid_cells.has(cell):
+		return false
+	var occupant := _unit_under_cell(cell)
+	if occupant == null or occupant == _deploy_drag_unit:
+		return true
+	return occupant.faction == TacticalFactionScript.Id.PLAYER
+
+
+func _unit_under_cell(cell: Vector2i) -> TacticalUnitInstance:
+	for key in _unit_sprites.keys():
+		var u := key as TacticalUnitInstance
+		if u != null and u.is_alive() and u.cell == cell:
+			return u
+	return null
 
 
 func _continue_press_motion(local_pos: Vector2) -> void:
@@ -1615,9 +1673,23 @@ func _continue_press_motion(local_pos: Vector2) -> void:
 	var dist := _press_pos.distance_to(local_pos)
 	if not _drag_moved and dist >= DRAG_THRESHOLD_PX:
 		_drag_moved = true
+		# 部署：越过阈值后改为拖单位，不再平移镜头。
+		if _is_deploy_draggable(_press_unit):
+			_deploy_drag_unit = _press_unit
+			_cancel_long_press()
+			_pause_unit_idle(_deploy_drag_unit)
 	if dist >= LONG_PRESS_SLOP_PX:
 		_cancel_long_press()
-		_press_unit = null
+		if _deploy_drag_unit == null:
+			_press_unit = null
+	if _deploy_drag_unit != null:
+		var cell_v: Variant = _pick_cell(local_pos)
+		if cell_v == null:
+			clear_card_drag_hover()
+		else:
+			var cell: Vector2i = cell_v
+			set_card_drag_hover(cell, _deploy_drag_unit, _deploy_drop_valid_at(cell))
+		return
 	if _drag_moved and not _info_shown:
 		_pan_by_screen_delta(delta)
 
@@ -1630,6 +1702,18 @@ func _end_press(local_pos: Vector2) -> void:
 		_suppress_click = true
 		unit_info_closed.emit()
 		_press_unit = null
+		_clear_deploy_drag()
+		clear_card_drag_hover()
+		return
+	if _deploy_drag_unit != null:
+		var dropped := _deploy_drag_unit
+		var cell_v: Variant = _pick_cell(local_pos)
+		clear_card_drag_hover()
+		_clear_deploy_drag()
+		_press_unit = null
+		_suppress_click = false
+		if cell_v != null:
+			unit_deploy_dropped.emit(dropped, cell_v as Vector2i)
 		return
 	if not _drag_moved and not _suppress_click:
 		_handle_click(local_pos)

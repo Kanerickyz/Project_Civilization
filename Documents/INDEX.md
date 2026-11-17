@@ -18,6 +18,7 @@
 | [Features/COMBAT.md](./Features/COMBAT.md) | **普攻 / 胜负 / 对手 AI** |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
 | [Features/BURN_STATUS.md](./Features/BURN_STATUS.md) | **燃烧状态** · 爆爆燃爆 / 死亡点燃 |
+| [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 拖己方到左半盘 · 确认开战 |
 
 ## 仓库里有什么
 
@@ -74,3 +75,4 @@
 | 单位移动 | 当前 | 玩家靠移动卡（无移力池）；对手用移力池 |
 | 战斗 | 当前 | 普攻与胜负；玩家须打出攻击卡 |
 | 卡牌行动 | 当前 | 玩家攻+移+主动技；友方可被普攻；STS 抽弃；底栏手牌 |
+| 开战前部署 | 当前 | 沙盘先进部署；拖己方到左半盘；确认后开战 |
