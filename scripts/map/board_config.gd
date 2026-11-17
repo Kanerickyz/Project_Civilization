@@ -8,7 +8,7 @@ extends Resource
 @export var cell_size: float = 1.0
 @export var tile_height: float = 0.14
 @export var tile_inset: float = 0.98
-## 对战开局地块布局（tactical_map JSON，尺寸须与 grid_width/height 一致）；空 = 全默认地块。
+## 已废弃：对战开局改为内部 seed 成簇生成湖/林（见 ClusterTerrainGenerator）。保留字段以免旧 .tres 报错。
 @export_file("*.json") var terrain_map_path: String = ""
 @export var color_light: Color = Color("3d4a58")
 @export var color_dark: Color = Color("2a3440")

@@ -63,6 +63,18 @@ func is_passable(cell: Vector2i) -> bool:
 	return _catalog.is_passable(terrain_at(cell))
 
 
+func is_burn_immune_cell(cell: Vector2i) -> bool:
+	return _catalog.burn_immune(terrain_at(cell))
+
+
+## 攻击视线：中间格若有挡攻地块（树林）则 false。邻格恒 true。
+func has_attack_los(from: Vector2i, to: Vector2i) -> bool:
+	for mid in GridMathScript.cells_between(from, to):
+		if _catalog.blocks_attack(terrain_at(mid)):
+			return false
+	return true
+
+
 ## 8 邻接、绕开不可通行格、禁止斜穿墙角的路径步数；单位不阻挡路径中间。不可达返回 -1。
 func path_distance(from: Vector2i, to: Vector2i, max_cost: int = -1) -> int:
 	return GridPathfindingScript.path_distance(from, to, is_passable, max_cost)
@@ -156,6 +168,8 @@ func attack_range_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 				continue
 			if cell == unit.cell:
 				continue
+			if not has_attack_los(unit.cell, cell):
+				continue
 			out.append(cell)
 	return out
 
@@ -207,7 +221,7 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 
 
 ## 对 origin 切比雪夫 ≤ radius 的存活单位施加燃烧（可排除 exclude）。返回受影响人数。
-## 同时标记范围内全部格子为点燃（视觉；空格不叠玩法层数）。
+## 同时标记范围内全部格子为点燃（视觉；空格不叠玩法层数）。湖格与其上单位免疫。
 func apply_burn_aoe(
 	origin: Vector2i,
 	stacks: int,
@@ -221,6 +235,8 @@ func apply_burn_aoe(
 		if u == exclude:
 			continue
 		if GridMathScript.chebyshev(origin, u.cell) > radius:
+			continue
+		if is_burn_immune_cell(u.cell):
 			continue
 		u.add_burn_stacks(stacks)
 		n += 1
@@ -240,6 +256,8 @@ func ignited_cells_for_view() -> Array[Vector2i]:
 	for u in living_units():
 		if u.burn_stacks <= 0:
 			continue
+		if is_burn_immune_cell(u.cell):
+			continue
 		if seen.has(u.cell):
 			continue
 		seen[u.cell] = true
@@ -256,6 +274,8 @@ func _mark_ignited_aoe(origin: Vector2i, radius: int) -> void:
 				continue
 			if GridMathScript.chebyshev(origin, cell) > r:
 				continue
+			if is_burn_immune_cell(cell):
+				continue
 			_ignited_aoe_cells[cell] = true
 
 
@@ -268,6 +288,10 @@ func process_burn_ticks() -> Array[String]:
 			victims.append(u)
 	for u in victims:
 		if not u.is_alive() or u.burn_stacks <= 0:
+			continue
+		# 湖上单位不结算燃烧伤害（进湖已清燃；此处兜底）。
+		if is_burn_immune_cell(u.cell):
+			u.burn_stacks = 0
 			continue
 		var stacks := u.burn_stacks
 		var hurt := apply_damage(u, stacks, null)
@@ -291,6 +315,14 @@ func process_burn_ticks() -> Array[String]:
 	return logs
 
 
+func _apply_terrain_enter_effects(unit: TacticalUnitInstance) -> void:
+	if unit == null or not unit.is_alive():
+		return
+	if _catalog.clears_burn_on_enter(terrain_at(unit.cell)):
+		if unit.burn_stacks > 0:
+			unit.burn_stacks = 0
+
+
 func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	if unit.remaining_move_budget <= 0:
 		return false
@@ -305,6 +337,7 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	unit.remaining_move_budget -= step
 	if unit.remaining_move_budget <= 0:
 		unit.moved_this_side_turn = true
+	_apply_terrain_enter_effects(unit)
 	TacticalAbilitySystem.process_unit_move_end(self, unit)
 	changed.emit()
 	return true
@@ -351,10 +384,13 @@ func try_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	var occupant := unit_at(dest)
 	if occupant == null:
 		unit.cell = dest
+		_apply_terrain_enter_effects(unit)
 	else:
 		var from := unit.cell
 		unit.cell = dest
 		occupant.cell = from
+		_apply_terrain_enter_effects(unit)
+		_apply_terrain_enter_effects(occupant)
 	changed.emit()
 	return true
 
