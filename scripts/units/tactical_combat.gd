@@ -6,11 +6,14 @@ const GridMathScript := preload("res://scripts/units/grid_math.gd")
 ## 普攻与伤害；不替代主动技系统。
 
 
+## 玩家无段内攻击次数上限（由攻击卡授权）；对手 AI 仍用 attacked_this_side_turn。
 static func can_basic_attack(attacker: TacticalUnitInstance, active_faction: TacticalFaction.Id) -> bool:
 	if attacker == null or not attacker.is_alive():
 		return false
 	if attacker.faction != active_faction:
 		return false
+	if attacker.faction == TacticalFaction.Id.PLAYER:
+		return true
 	return not attacker.attacked_this_side_turn
 
 
@@ -60,7 +63,9 @@ static func try_basic_attack(
 	result["target"] = target
 	result["damage"] = dmg
 	result["killed"] = hurt.get("killed", false)
-	attacker.attacked_this_side_turn = true
+	# 仅对手 AI 记「本段已攻」；玩家次数完全由攻击卡驱动。
+	if attacker.faction != TacticalFaction.Id.PLAYER:
+		attacker.attacked_this_side_turn = true
 	result["ok"] = hurt.get("ok", false)
 	var extra: String = hurt.get("log", "")
 	var tag := "加强攻" if bonus_damage > 0 else "普攻"

@@ -36,7 +36,7 @@ func _initialize() -> void:
 	if not _test_move_card_one_step_only():
 		quit(1)
 		return
-	if not _test_attack_card_clears_flag_for_second_hit():
+	if not _test_attack_card_authorizes_repeat_hits():
 		quit(1)
 		return
 	if not _test_ally_can_be_attacked():
@@ -396,7 +396,8 @@ func _test_move_card_one_step_only() -> bool:
 	return true
 
 
-func _test_attack_card_clears_flag_for_second_hit() -> bool:
+func _test_attack_card_authorizes_repeat_hits() -> bool:
+	# 玩家无 attacked_this_side_turn 预算；多次攻击靠多次攻击卡授权。
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 29
@@ -414,30 +415,36 @@ func _test_attack_card_clears_flag_for_second_hit() -> bool:
 		return false
 	foe.cell = knight.cell + Vector2i(0, 1)
 	foe.hp = 99
+	if not deck.authorize_attack(knight):
+		push_error("CardActions: first authorize_attack failed")
+		return false
+	if not deck.is_attack_authorized(knight):
+		push_error("CardActions: knight should be attack-authorized")
+		return false
 	var first := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
 	)
-	if not first["ok"] or not knight.attacked_this_side_turn:
-		push_error("CardActions: first attack should succeed and set flag")
-		return false
-	var blocked := TacticalCombatScript.try_basic_attack(
-		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
-	)
-	if blocked["ok"]:
-		push_error("CardActions: without card, second attack must fail (AI path)")
-		return false
-	if not deck.prepare_attack(knight):
-		push_error("CardActions: prepare_attack failed")
+	if not first["ok"]:
+		push_error("CardActions: first authorized attack should succeed")
 		return false
 	if knight.attacked_this_side_turn:
-		push_error("CardActions: prepare_attack should clear attacked flag")
+		push_error("CardActions: player must not set attacked_this_side_turn")
+		return false
+	deck.consume_attack_authorization(knight)
+	if deck.is_attack_authorized(knight):
+		push_error("CardActions: attack auth must clear after one hit")
+		return false
+	# 再打一张攻击卡可再攻。
+	if not deck.authorize_attack(knight):
+		push_error("CardActions: second authorize_attack failed")
 		return false
 	var second := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
 	)
 	if not second["ok"]:
-		push_error("CardActions: after attack card, second hit should succeed")
+		push_error("CardActions: after second attack card, hit should succeed")
 		return false
+	deck.consume_attack_authorization(knight)
 	return true
 
 
@@ -464,11 +471,6 @@ func _test_ally_can_be_attacked() -> bool:
 		push_error("CardActions: ally should be attackable for player")
 		return false
 	var blocked := TacticalCombatScript.try_basic_attack(
-		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, false
-	)
-	# already attacked, or if we reset flag:
-	knight.attacked_this_side_turn = false
-	blocked = TacticalCombatScript.try_basic_attack(
 		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, false
 	)
 	if blocked["ok"]:
