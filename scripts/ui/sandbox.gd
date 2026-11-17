@@ -414,9 +414,11 @@ func _refresh_unit_panel() -> void:
 		move_line = "移动距离 %d" % u.def.move_range
 	else:
 		move_line = "移力 %d/%d" % [u.remaining_move_budget, u.def.action_move_budget()]
-	var burn_extra := ""
+	var status_extra := ""
+	if u.armor > 0:
+		status_extra += "\n护甲 %d" % u.armor
 	if u.burn_stacks > 0:
-		burn_extra = "\n燃烧 %d 层" % u.burn_stacks
+		status_extra += "\n燃烧 %d 层" % u.burn_stacks
 	_unit_panel.text = (
 		"%s · %s\nHP %d/%d · 攻 %d · %s · 射程 %d\n移动：%s%s\n%s\n%s"
 		% [
@@ -428,7 +430,7 @@ func _refresh_unit_panel() -> void:
 			move_line,
 			u.def.attack_range,
 			move_auth,
-			burn_extra,
+			status_extra,
 			skill_line,
 			skill_rules,
 		]
@@ -556,6 +558,15 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
 		_last_log = "移动：%s · 点绿格（本卡仅一次）" % target.def.display_name
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_ARMOR:
+		var grant := maxi(1, card.armor_grant)
+		target.add_armor(grant)
+		_pending_kind = PendingKind.NONE
+		_last_log = "护甲：%s +%d（现 %d）· 伤害先打护甲，溢出不穿血" % [
+			target.def.display_name,
+			grant,
+			target.armor,
+		]
 	elif card.is_attack_aim():
 		_deck.authorize_attack(target, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK
@@ -914,7 +925,7 @@ func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
-## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack
+## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want := TacticalActionCardScript.Kind.MOVE
 	match kind_name:
@@ -926,6 +937,8 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			want = TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK
 		"skill_burn_attack":
 			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
+		"skill_armor":
+			want = TacticalActionCardScript.Kind.SKILL_ARMOR
 		_:
 			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
@@ -958,6 +971,9 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 		_pending_kind = PendingKind.NONE
 		_focus_unit = null
 		_deck.resolve_wardrum_redraw()
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_ARMOR:
+		unit.add_armor(maxi(1, card.armor_grant))
+		_pending_kind = PendingKind.NONE
 	elif card.is_attack_aim():
 		_deck.authorize_attack(unit, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK

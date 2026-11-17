@@ -906,13 +906,23 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 		return
 	var bar := _hp_bars[unit] as Label
 	var spr := _unit_sprites[unit] as Sprite2D
-	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）。
-	bar.text = "%d/%d 攻%d" % [unit.hp, unit.effective_max_hp(), unit.effective_attack()]
+	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）；有护甲时附「甲N」。
+	if unit.armor > 0:
+		bar.text = "%d/%d 攻%d 甲%d" % [
+			unit.hp,
+			unit.effective_max_hp(),
+			unit.effective_attack(),
+			unit.armor,
+		]
+	else:
+		bar.text = "%d/%d 攻%d" % [unit.hp, unit.effective_max_hp(), unit.effective_attack()]
 	# 节点在脚点；读数放在头顶（整段身高之上）。
 	var head_off := Vector2(0.0, -config.unit_world_height * 1.12)
 	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
 	if unit.hp <= unit.effective_max_hp() / 3:
 		bar.modulate = Color("ff6666")
+	elif unit.armor > 0:
+		bar.modulate = Color("9ad0ff")
 	elif unit.atk_bonus > 0:
 		bar.modulate = Color("ffe08a")
 	else:

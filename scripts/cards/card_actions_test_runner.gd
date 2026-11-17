@@ -57,6 +57,9 @@ func _initialize() -> void:
 	if not _test_strong_attack_droppable_on_any_ally():
 		quit(1)
 		return
+	if not _test_armor_skill_grants_on_ally():
+		quit(1)
+		return
 	if not _test_ephemeral_attack_not_in_piles():
 		quit(1)
 		return
@@ -107,8 +110,11 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_DRAW) != 1:
 		push_error("CardActions: one wardrum skill expected")
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 2:
-		push_error("CardActions: knight+pekka strong attack expected")
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 1:
+		push_error("CardActions: one pekka strong attack expected")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != 1:
+		push_error("CardActions: one knight armor skill expected")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_BURN_ATTACK) != 1:
 		push_error("CardActions: one boomling burn skill expected")
@@ -122,6 +128,12 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 			and c.bound_unit_id != ""
 		):
 			push_error("CardActions: strong attack must be unbound")
+			return false
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_ARMOR
+			and (c.bound_unit_id != "" or c.armor_grant != 2)
+		):
+			push_error("CardActions: armor must be unbound with grant 2")
 			return false
 		if (
 			c.kind == TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
@@ -224,17 +236,17 @@ func _test_player_death_removes_move_attack_and_skill() -> bool:
 	if victim == null:
 		return false
 	var before_total := deck.total_cards()
-	var before_strong := deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK)
+	var before_armor := deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR)
 	var removed := deck.on_player_unit_died(victim)
-	# 移+攻+盾卫贡献的通用加强攻
+	# 移+攻+盾卫贡献的通用护甲
 	if removed != 3:
 		push_error("CardActions: knight death should remove 3, got %d" % removed)
 		return false
 	if deck.total_cards() != before_total - 3:
 		push_error("CardActions: total after death mismatch")
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != before_strong - 1:
-		push_error("CardActions: strong attack skill should drop by 1")
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != before_armor - 1:
+		push_error("CardActions: armor skill should drop by 1")
 		return false
 	return true
 
@@ -650,6 +662,34 @@ func _test_strong_attack_droppable_on_any_ally() -> bool:
 			return false
 	if not saw_player:
 		push_error("CardActions: need player units for strong attack drop test")
+		return false
+	return true
+
+
+func _test_armor_skill_grants_on_ally() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var card := TacticalActionCardScript.make_skill_armor()
+	if card.kind != TacticalActionCardScript.Kind.SKILL_ARMOR or card.armor_grant != 2:
+		push_error("CardActions: armor factory should grant 2")
+		return false
+	var ally: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
+			ally = u
+			break
+	if ally == null:
+		push_error("CardActions: need archer for armor grant")
+		return false
+	if not card.can_drop_on(ally):
+		push_error("CardActions: armor must drop on any ally")
+		return false
+	ally.add_armor(card.armor_grant)
+	if ally.armor != 2:
+		push_error("CardActions: armor grant should leave 2")
+		return false
+	ally.add_armor(card.armor_grant)
+	if ally.armor != 4:
+		push_error("CardActions: armor should stack to 4")
 		return false
 	return true
 

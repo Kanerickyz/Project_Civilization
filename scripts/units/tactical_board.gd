@@ -161,12 +161,37 @@ func attack_range_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 
 
 func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUnitInstance = null) -> Dictionary:
-	var result := {"ok": false, "log": "", "killed": false}
+	var result := {
+		"ok": false,
+		"log": "",
+		"killed": false,
+		"armor_absorbed": 0,
+		"hp_damage": 0,
+	}
 	if target == null or not target.is_alive() or amount <= 0:
 		result["log"] = "无效伤害"
 		return result
-	target.hp -= amount
-	var hurt_logs := TacticalAbilitySystem.process_unit_hurt(self, target, amount)
+	var armor_absorbed := 0
+	var hp_damage := 0
+	# 有护甲时整段伤害打在护甲上：护甲归零后溢出不穿血。
+	if target.armor > 0:
+		if amount > target.armor:
+			armor_absorbed = target.armor
+			target.armor = 0
+		else:
+			armor_absorbed = amount
+			target.armor -= amount
+	else:
+		hp_damage = amount
+		target.hp -= amount
+	result["armor_absorbed"] = armor_absorbed
+	result["hp_damage"] = hp_damage
+	var hurt_logs: Array[String] = []
+	if armor_absorbed > 0:
+		hurt_logs.append("护甲吸收 %d" % armor_absorbed)
+	# 「受伤」被动仅在实际扣血时触发。
+	if hp_damage > 0:
+		hurt_logs.append_array(TacticalAbilitySystem.process_unit_hurt(self, target, hp_damage))
 	if not target.is_alive():
 		result["killed"] = true
 		# 先死亡触发（爆燃等），再记击杀者被动；死亡单位仍可读 cell。

@@ -10,6 +10,8 @@ const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_c
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
 const SKILL_STRONG_BONUS := 2
+## 盾卫护甲卡默认加甲量（可改此常量调数）。
+const SKILL_ARMOR_GRANT := 2
 
 var draw_count: int = 5
 var draw_pile: Array[TacticalActionCard] = []
@@ -301,6 +303,9 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	elif skill_kind == int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK):
 		# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
 		removed += _remove_one_skill_kind(skill_kind)
+	elif skill_kind == int(TacticalActionCard.Kind.SKILL_ARMOR):
+		# 护甲卡已解绑：按 kind 减 1（盾卫阵亡仍 cull 一张）。
+		removed += _remove_one_skill_kind(skill_kind)
 	var cleared_auth := false
 	if move_authorized.has(unit):
 		move_authorized.erase(unit)
@@ -334,8 +339,11 @@ static func _skill_card_for_unit_id(unit_id: String) -> TacticalActionCard:
 	match unit_id:
 		"wardrum":
 			return TacticalActionCardScript.make_skill_draw("wardrum")
-		"knight", "mini_pekka":
-			# 盾卫/大剑各贡献 1 张通用加强攻（不绑角色）。
+		"knight":
+			# 盾卫贡献 1 张通用护甲（不绑角色）。
+			return TacticalActionCardScript.make_skill_armor(SKILL_ARMOR_GRANT)
+		"mini_pekka":
+			# 大剑贡献 1 张通用加强攻（不绑角色）。
 			return TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS)
 		"boomling":
 			return TacticalActionCardScript.make_skill_burn_attack("boomling", SKILL_BURN_STACKS)
@@ -347,7 +355,9 @@ static func _skill_kind_for_unit_id(unit_id: String) -> int:
 	match unit_id:
 		"wardrum":
 			return int(TacticalActionCard.Kind.SKILL_DRAW)
-		"knight", "mini_pekka":
+		"knight":
+			return int(TacticalActionCard.Kind.SKILL_ARMOR)
+		"mini_pekka":
 			return int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK)
 		"boomling":
 			return int(TacticalActionCard.Kind.SKILL_BURN_ATTACK)
