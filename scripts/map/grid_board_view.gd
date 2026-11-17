@@ -1040,15 +1040,27 @@ func _ensure_intent_icon(unit: TacticalUnitInstance) -> void:
 	if _intent_icons.has(unit):
 		_update_intent_icon(unit)
 		return
-	var icon := Label.new()
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon.add_theme_font_override("font", UI_FONT)
-	icon.add_theme_font_size_override("font_size", 12)
-	icon.add_theme_color_override("font_outline_color", Color("0a1018"))
-	icon.add_theme_constant_override("outline_size", 4)
-	_labels_root.add_child(icon)
-	_intent_icons[unit] = icon
+	# Web 无系统字体：◆ 不在 Noto/Droid 字形表，改用旋转方块作菱形 + 中文 Label。
+	var root := Control.new()
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var gem := ColorRect.new()
+	gem.name = "Gem"
+	gem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gem.size = Vector2(8, 8)
+	gem.pivot_offset = Vector2(4, 4)
+	gem.rotation_degrees = 45.0
+	root.add_child(gem)
+	var text := Label.new()
+	text.name = "Text"
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	text.add_theme_font_override("font", UI_FONT)
+	text.add_theme_font_size_override("font_size", 12)
+	text.add_theme_color_override("font_outline_color", Color("0a1018"))
+	text.add_theme_constant_override("outline_size", 4)
+	root.add_child(text)
+	_labels_root.add_child(root)
+	_intent_icons[unit] = root
 	_update_intent_icon(unit)
 
 
@@ -1062,35 +1074,50 @@ func _update_intent_icon(unit: TacticalUnitInstance) -> void:
 	if not _intent_icons.has(unit):
 		_ensure_intent_icon(unit)
 		return
-	var icon := _intent_icons[unit] as Label
+	var root := _intent_icons[unit] as Control
 	if not unit.is_alive():
-		icon.visible = false
+		root.visible = false
 		return
-	icon.visible = true
+	root.visible = true
+	var gem := root.get_node("Gem") as ColorRect
+	var text := root.get_node("Text") as Label
 	# 占位意图角标：攻/移/血/加，颜色区分；不挡中央血攻读数。
+	var tint := Color("e8f0ff")
 	match unit.next_intent:
 		TacticalEnemyAiScript.Intent.ATTACK:
-			icon.text = "◆攻"
-			icon.add_theme_color_override("font_color", Color("ff8a7a"))
+			text.text = "攻"
+			tint = Color("ff8a7a")
 		TacticalEnemyAiScript.Intent.MOVE:
-			icon.text = "◆移"
-			icon.add_theme_color_override("font_color", Color("7ad0ff"))
+			text.text = "移"
+			tint = Color("7ad0ff")
 		TacticalEnemyAiScript.Intent.HEAL:
-			icon.text = "◆血"
-			icon.add_theme_color_override("font_color", Color("7dff9a"))
+			text.text = "血"
+			tint = Color("7dff9a")
 		TacticalEnemyAiScript.Intent.BUFF_ATK:
-			icon.text = "◆加"
-			icon.add_theme_color_override("font_color", Color("ffe08a"))
+			text.text = "加"
+			tint = Color("ffe08a")
 		_:
-			icon.text = "◆?"
-			icon.add_theme_color_override("font_color", Color("e8f0ff"))
+			text.text = "?"
+			tint = Color("e8f0ff")
+	text.add_theme_color_override("font_color", tint)
+	gem.color = tint
+	text.reset_size()
+	# 菱形外接约 11px；文字紧挨右侧。
+	var gem_span := 11.0
+	var gap := 2.0
+	gem.position = Vector2(1.5, (maxf(text.size.y, gem_span) - 8.0) * 0.5)
+	text.position = Vector2(gem_span + gap, 0.0)
+	root.size = Vector2(
+		gem_span + gap + text.size.x,
+		maxf(text.size.y, gem_span)
+	)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var side_off := Vector2(
 		-config.unit_world_height * 0.62,
 		-config.unit_world_height * 1.05
 	)
-	_position_world_on_label(icon, _unit_world_position(spr) + side_off)
-	_clamp_label_in_viewport(icon)
+	_position_world_on_label(root, _unit_world_position(spr) + side_off)
+	_clamp_label_in_viewport(root)
 
 
 func _position_world_on_label(lbl: Control, world: Vector2) -> void:
