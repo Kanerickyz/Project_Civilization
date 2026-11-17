@@ -21,6 +21,9 @@ func _initialize() -> void:
 	if not _test_player_death_removes_move_attack_and_skill():
 		quit(1)
 		return
+	if not _test_wardrum_death_removes_skill_draw_from_hand():
+		quit(1)
+		return
 	if not _test_enemy_death_does_not_touch_deck():
 		quit(1)
 		return
@@ -209,6 +212,47 @@ func _test_player_death_removes_move_attack_and_skill() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != before_strong - 1:
 		push_error("CardActions: strong attack skill should drop by 1")
 		return false
+	return true
+
+
+func _test_wardrum_death_removes_skill_draw_from_hand() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	# 把鸣鼓换手固定放进手牌，模拟「鼓手死后技能卡仍留手」回归。
+	deck.hand.clear()
+	deck.draw_pile.clear()
+	deck.discard_pile.clear()
+	deck.hand.append(TacticalActionCardScript.make_move())
+	deck.hand.append(TacticalActionCardScript.make_attack())
+	deck.hand.append(TacticalActionCardScript.make_skill_draw("wardrum"))
+	deck.draw_pile.append(TacticalActionCardScript.make_move())
+	deck.draw_pile.append(TacticalActionCardScript.make_attack())
+	var victim: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "wardrum":
+			victim = u
+			break
+	if victim == null:
+		push_error("CardActions: wardrum missing on demo board")
+		return false
+	var before := deck.total_cards()
+	var removed := deck.on_player_unit_died(victim)
+	if removed != 3:
+		push_error("CardActions: wardrum death should remove 3, got %d" % removed)
+		return false
+	if deck.total_cards() != before - 3:
+		push_error("CardActions: wardrum death total mismatch")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_DRAW) != 0:
+		push_error("CardActions: wardrum skill must leave all piles")
+		return false
+	for c in deck.hand:
+		if c.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+			push_error("CardActions: wardrum skill still in hand after death")
+			return false
 	return true
 
 
