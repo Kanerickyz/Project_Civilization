@@ -52,6 +52,10 @@ const OVERLAY_COLORS := {
 	"s": Color(0.35, 0.56, 0.83, 0.5),
 	"m": Color(0.42, 1.0, 0.72, 0.58),
 	"a": Color(0.82, 0.28, 0.31, 0.5),
+	## 拖牌悬停：可落 vs 不可落（范围外/错误目标仍标出当前格）。
+	"h": Color(1.0, 0.88, 0.28, 0.42),
+	"hv": Color(0.38, 0.95, 0.55, 0.55),
+	"hx": Color(0.78, 0.32, 0.36, 0.42),
 }
 const GRASS_CHECKER_LIGHT := Color("B4A158")
 const GRASS_CHECKER_DARK := Color("8F884C")
@@ -64,6 +68,10 @@ var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _overlay_selected: Vector2i = Vector2i(-1, -1)
 var _overlay_move: Dictionary = {}
 var _overlay_attack: Dictionary = {}
+## 拖牌悬停当前格；(-1,-1) 表示无。
+var _overlay_drag_hover: Vector2i = Vector2i(-1, -1)
+## 0=空白/中性，1=可落单位，-1=不可落单位。
+var _overlay_drag_hover_kind: int = 0
 
 var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
@@ -74,6 +82,11 @@ var _blob_texture: Texture2D
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
 var _unit_idle_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
+## 拖牌悬停选中只改 scale，不碰 offset/position/modulate（避 idle bob / hit flash）。
+var _unit_select_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+var _unit_base_scales: Dictionary = {} # TacticalUnitInstance -> Vector2
+var _drag_select_unit: TacticalUnitInstance = null
+var _drag_select_valid: bool = false
 var _long_press_timer: Timer
 var _press_unit: TacticalUnitInstance = null
 var _info_shown: bool = false
@@ -81,6 +94,9 @@ var _suppress_click: bool = false
 
 const UNIT_IDLE_BOB_PX := 3.0
 const UNIT_IDLE_HALF_SEC := 0.95
+const UNIT_SELECT_SCALE_VALID := 1.14
+const UNIT_SELECT_SCALE_INVALID := 1.08
+const UNIT_SELECT_HALF_SEC := 0.22
 
 var _touch_drag_index: int = -1
 var _active_touches: Dictionary = {}
@@ -272,8 +288,13 @@ func _rebuild_board() -> void:
 	var moving_units: Array = _unit_move_tweens.keys()
 	for key in moving_units:
 		_kill_unit_move_tween(key as TacticalUnitInstance)
+	_drag_select_unit = null
+	_drag_select_valid = false
+	_overlay_drag_hover = Vector2i(-1, -1)
+	_overlay_drag_hover_kind = 0
 	for key in _unit_sprites.keys():
 		_kill_unit_idle(key as TacticalUnitInstance)
+		_kill_unit_select_tween(key as TacticalUnitInstance)
 		(_unit_sprites[key] as Node).queue_free()
 	for child in _tiles_root.get_children():
 		child.queue_free()
@@ -287,7 +308,9 @@ func _rebuild_board() -> void:
 	_last_unit_cells.clear()
 	_unit_move_tweens.clear()
 	_unit_idle_tweens.clear()
+	_unit_select_tweens.clear()
 	_unit_base_offsets.clear()
+	_unit_base_scales.clear()
 
 	var cell_size := config.cell_size
 	for gx in range(config.grid_width):
@@ -489,9 +512,14 @@ func attack_tween_duration_sec() -> float:
 
 
 func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
+	if _drag_select_unit == unit:
+		_drag_select_unit = null
+		_drag_select_valid = false
 	_kill_unit_move_tween(unit)
 	_kill_unit_idle(unit)
+	_kill_unit_select_tween(unit)
 	_unit_base_offsets.erase(unit)
+	_unit_base_scales.erase(unit)
 	if _unit_sprites.has(unit):
 		var spr: Sprite2D = _unit_sprites[unit] as Sprite2D
 		spr.queue_free()
@@ -530,6 +558,11 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	if config == null or not _unit_sprites.has(unit):
 		return null
 	_pause_unit_idle(unit)
+	# 受击用 position/modulate；先停选中 scale，避免叠脉冲。
+	if _drag_select_unit == unit:
+		_clear_drag_select_unit()
+	else:
+		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var home := _unit_combat_home(unit, spr)
 	spr.position = home
@@ -556,6 +589,10 @@ func play_unit_death(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
 		return
 	_kill_unit_idle(unit)
+	if _drag_select_unit == unit:
+		_clear_drag_select_unit()
+	else:
+		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var tw := create_tween()
 	tw.set_parallel(true)
@@ -596,12 +633,13 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 		tex = unit.def.texture_red
 	var unit_h: float = config.unit_world_height
 	var tex_h := float(tex.get_height())
-	if tex_h > 0.0:
-		var s := unit_h / tex_h
-		spr.scale = Vector2(s, s)
+	var base_scale := Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
 	spr.texture = tex
 	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
-	spr.scale = Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
+	_unit_base_scales[unit] = base_scale
+	# 拖牌选中脉冲中勿重置 scale，否则每帧 sync 会掐断 tween。
+	if not _unit_select_tweens.has(unit):
+		spr.scale = base_scale
 	# 节点原点 = 脚点。贴图上移半高，脚落在格心，身体在脚点上方。
 	spr.centered = true
 	var base_offset := Vector2(0.0, -tex_h * 0.5)
@@ -805,9 +843,108 @@ func _apply_overlay(cell: Vector2i) -> void:
 		tag = "a"
 	elif _overlay_move.has(cell):
 		tag = "m"
+	elif cell == _overlay_drag_hover:
+		if _overlay_drag_hover_kind > 0:
+			tag = "hv"
+		elif _overlay_drag_hover_kind < 0:
+			tag = "hx"
+		else:
+			tag = "h"
 	ov.visible = tag != ""
 	if tag != "":
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
+
+
+## 拖牌悬停：cell 为 null 时清空；unit 非空则播选中 scale 脉冲。
+## valid_drop：可落己方合法目标=true；悬停单位但不可落=false；空白格传 false 且 unit=null。
+func set_card_drag_hover(cell: Variant, unit: TacticalUnitInstance, valid_drop: bool) -> void:
+	var prev_hover := _overlay_drag_hover
+	if cell is Vector2i:
+		_overlay_drag_hover = cell as Vector2i
+		if unit != null and unit.is_alive():
+			_overlay_drag_hover_kind = 1 if valid_drop else -1
+		else:
+			_overlay_drag_hover_kind = 0
+	else:
+		_overlay_drag_hover = Vector2i(-1, -1)
+		_overlay_drag_hover_kind = 0
+	if prev_hover != _overlay_drag_hover:
+		if prev_hover.x >= 0:
+			_apply_overlay(prev_hover)
+		if _overlay_drag_hover.x >= 0:
+			_apply_overlay(_overlay_drag_hover)
+	elif _overlay_drag_hover.x >= 0:
+		_apply_overlay(_overlay_drag_hover)
+	_set_drag_select_unit(unit if unit != null and unit.is_alive() else null, valid_drop)
+
+
+func clear_card_drag_hover() -> void:
+	set_card_drag_hover(null, null, false)
+
+
+func _set_drag_select_unit(unit: TacticalUnitInstance, valid_drop: bool) -> void:
+	if unit == _drag_select_unit:
+		if unit == null or valid_drop == _drag_select_valid:
+			return
+		# 同单位仅在可落态变化时换脉冲幅度。
+		_drag_select_valid = valid_drop
+		_start_unit_select_tween(unit, valid_drop)
+		return
+	_clear_drag_select_unit()
+	_drag_select_unit = unit
+	_drag_select_valid = valid_drop
+	if unit == null:
+		return
+	_start_unit_select_tween(unit, valid_drop)
+
+
+func _clear_drag_select_unit() -> void:
+	if _drag_select_unit == null:
+		return
+	var u := _drag_select_unit
+	_drag_select_unit = null
+	_drag_select_valid = false
+	_kill_unit_select_tween(u)
+
+
+func _kill_unit_select_tween(unit: TacticalUnitInstance) -> void:
+	if not _unit_select_tweens.has(unit):
+		_restore_unit_base_scale(unit)
+		return
+	var tw: Tween = _unit_select_tweens[unit] as Tween
+	_unit_select_tweens.erase(unit)
+	if tw != null and is_instance_valid(tw):
+		tw.kill()
+	_restore_unit_base_scale(unit)
+
+
+func _restore_unit_base_scale(unit: TacticalUnitInstance) -> void:
+	if not _unit_sprites.has(unit):
+		return
+	var spr := _unit_sprites[unit] as Sprite2D
+	if _unit_base_scales.has(unit):
+		spr.scale = _unit_base_scales[unit] as Vector2
+
+
+func _start_unit_select_tween(unit: TacticalUnitInstance, valid_drop: bool) -> void:
+	if not _unit_sprites.has(unit):
+		return
+	_kill_unit_select_tween(unit)
+	var spr := _unit_sprites[unit] as Sprite2D
+	var base: Vector2 = _unit_base_scales.get(unit, spr.scale) as Vector2
+	_unit_base_scales[unit] = base
+	var mul := UNIT_SELECT_SCALE_VALID if valid_drop else UNIT_SELECT_SCALE_INVALID
+	var peak := base * mul
+	spr.scale = base
+	var tw: Tween = spr.create_tween() if spr.is_inside_tree() else create_tween()
+	tw.set_loops()
+	tw.tween_property(spr, "scale", peak, UNIT_SELECT_HALF_SEC).set_trans(Tween.TRANS_SINE).set_ease(
+		Tween.EASE_IN_OUT
+	)
+	tw.tween_property(spr, "scale", base, UNIT_SELECT_HALF_SEC).set_trans(Tween.TRANS_SINE).set_ease(
+		Tween.EASE_IN_OUT
+	)
+	_unit_select_tweens[unit] = tw
 
 
 func _draw_depth_for_cell(cell: Vector2i) -> int:

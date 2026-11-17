@@ -5,6 +5,8 @@ extends Control
 
 
 signal card_dropped(index: int, global_pos: Vector2)
+## 拖拽跟手时持续发出，供棋盘悬停格/单位选中反馈（松手后由沙盘清空）。
+signal card_drag_moved(index: int, global_pos: Vector2)
 
 const CARD_W := 72.0
 const CARD_H := 100.0
@@ -391,6 +393,7 @@ func _start_drag(index: int, global_pos: Vector2) -> void:
 	card.rotation_degrees = 0.0
 	card.scale = Vector2(DRAG_SCALE, DRAG_SCALE)
 	_relayout(true)
+	card_drag_moved.emit(index, global_pos)
 
 
 func _follow_drag(global_pos: Vector2) -> void:
@@ -400,6 +403,7 @@ func _follow_drag(global_pos: Vector2) -> void:
 	# 轻微跟手平滑
 	var target := global_pos - _drag_offset
 	card.global_position = card.global_position.lerp(target, 0.55)
+	card_drag_moved.emit(_drag_index, global_pos)
 
 
 func _on_press_released(global_pos: Vector2) -> void:

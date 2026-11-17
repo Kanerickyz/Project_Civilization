@@ -176,6 +176,7 @@ func _build() -> void:
 	_hand_fan.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hand_fan.custom_minimum_size = Vector2(0, 118)
 	_hand_fan.card_dropped.connect(_on_hand_card_dropped)
+	_hand_fan.card_drag_moved.connect(_on_hand_card_drag_moved)
 	bottom_col.add_child(_hand_fan)
 
 	var actions := HBoxContainer.new()
@@ -439,8 +440,39 @@ func _show_turn_banner() -> void:
 	tw.chain().tween_property(_turn_banner_panel, "modulate:a", 0.0, 0.55).set_delay(0.75)
 
 
+## 拖牌跟手：高亮当前格；悬停单位播选中脉冲（可落/不可落不同态）。
+func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
+	if _board_view == null:
+		return
+	if _input_locked or _game_over or not _clock.player_active:
+		_board_view.clear_card_drag_hover()
+		return
+	if index < 0 or index >= _deck.hand.size():
+		_board_view.clear_card_drag_hover()
+		return
+	var peek: TacticalActionCard = _deck.hand[index]
+	var cell_v: Variant = _board_view.pick_cell_at_global(global_pos)
+	if cell_v == null:
+		_board_view.clear_card_drag_hover()
+		return
+	var cell: Vector2i = cell_v
+	var unit := _board.unit_at(cell)
+	var hover_unit: TacticalUnitInstance = null
+	var valid := false
+	if unit != null and unit.is_alive():
+		hover_unit = unit
+		valid = (
+			unit.faction == TacticalFactionScript.Id.PLAYER
+			and peek != null
+			and peek.can_drop_on(unit)
+		)
+	_board_view.set_card_drag_hover(cell, hover_unit, valid)
+
+
 ## 拖到己方单位才使用；无效目标回手（不进弃牌）。
 func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
+	if _board_view != null:
+		_board_view.clear_card_drag_hover()
 	if _input_locked or _game_over or not _clock.player_active:
 		_hand_fan.notify_drop_resolved(false)
 		return
@@ -797,6 +829,21 @@ func capture_show_unit_info(unit_id: String, prefer_player: bool = true) -> bool
 	if unit == null or _board_view == null:
 		return false
 	_on_unit_long_pressed(unit, _board_view.unit_head_global_position(unit))
+	return true
+
+
+## GUI 证据：模拟拖牌悬停在指定己方单位上（高亮格 + 选中脉冲）。
+func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
+	if _board_view == null or _board == null:
+		return false
+	var unit: TacticalUnitInstance = null
+	for u in _board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == unit_id:
+			unit = u
+			break
+	if unit == null:
+		return false
+	_board_view.set_card_drag_hover(unit.cell, unit, valid_drop)
 	return true
 
 
