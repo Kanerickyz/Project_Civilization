@@ -145,6 +145,7 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 	var burn_logs := _board.process_burn_ticks()
 	if burn_logs.size() > 0:
 		_last_log = burn_logs[burn_logs.size() - 1]
+		# 燃烧可本 tick 新杀；on_player_unit_died 幂等，旧尸体再扫也不减 MOVE。
 		for u in _board.units:
 			if not u.is_alive():
 				_purge_dead_unit_cards(u)

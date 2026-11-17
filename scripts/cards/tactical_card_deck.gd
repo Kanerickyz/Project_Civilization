@@ -286,11 +286,15 @@ static func _entry_burn(entry: Variant) -> int:
 
 
 ## 己方阵亡：减通用移/攻各 1；绑角色主动技按 owner 减 1；通用加强攻按贡献者减 1；清移/攻授权。
+## 幂等：同一尸体只 cull 一次（燃烧段开始会扫全部尸体，不可重复减 MOVE）。
 func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	if unit == null:
 		return 0
 	if unit.faction != TacticalFactionScript.Id.PLAYER:
 		return 0
+	if unit.death_cards_culled:
+		return 0
+	unit.death_cards_culled = true
 	var removed := 0
 	removed += _remove_one_kind(TacticalActionCard.Kind.MOVE)
 	removed += _remove_one_kind(TacticalActionCard.Kind.ATTACK)

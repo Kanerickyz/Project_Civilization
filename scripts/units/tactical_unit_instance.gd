@@ -16,6 +16,8 @@ var deploy_trigger_fired: bool = false
 var burn_stacks: int = 0
 ## 护甲：伤害先打护甲；溢出不穿血（见 apply_damage）。
 var armor: int = 0
+## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减 MOVE/攻）。
+var death_cards_culled: bool = false
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:
