@@ -31,6 +31,8 @@ const SKILL_BURN_STACKS := 3
 
 var _rng: RandomNumberGenerator
 var _draw_pile_shuffled: bool = false
+## 本玩家行动段内打出的鸣鼓换手：留在弃牌，洗牌时不回库；下一段开始前解除。
+var _same_turn_locked_discards: Array[TacticalActionCard] = []
 
 
 func _init(p_rng: RandomNumberGenerator = null) -> void:
@@ -60,6 +62,7 @@ func clear() -> void:
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
 	_draw_pile_shuffled = false
+	_same_turn_locked_discards.clear()
 	changed.emit()
 
 
@@ -90,6 +93,8 @@ func build_from_living_player_units(board: TacticalBoard) -> void:
 
 
 func begin_player_turn() -> void:
+	# 上一段锁定的鸣鼓换手可按 STS 正常参与本段洗牌。
+	_same_turn_locked_discards.clear()
 	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
@@ -103,6 +108,7 @@ func end_player_turn() -> void:
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
+	# 锁定保留到下一段 begin，避免段末到抽牌之间被其它路径洗回。
 
 
 func discard_hand() -> void:
@@ -138,7 +144,7 @@ func draw_up_to(count: int) -> int:
 	return drawn
 
 
-## 打出：非临时卡进弃；临时卡销毁。
+## 打出：非临时卡进弃；临时卡销毁。鸣鼓换手本段锁定在弃牌，不参与洗回。
 func play_hand_index(index: int) -> TacticalActionCard:
 	if index < 0 or index >= hand.size():
 		return null
@@ -146,6 +152,8 @@ func play_hand_index(index: int) -> TacticalActionCard:
 	hand.remove_at(index)
 	if not card.ephemeral:
 		discard_pile.append(card)
+		if card.kind == TacticalActionCard.Kind.SKILL_DRAW:
+			_same_turn_locked_discards.append(card)
 	changed.emit()
 	return card
 
@@ -448,11 +456,32 @@ func _count_kind_in(pile: Array[TacticalActionCard], kind: TacticalActionCard.Ki
 func _reshuffle_discard_into_draw() -> bool:
 	if discard_pile.is_empty():
 		return false
+	var moving: Array[TacticalActionCard] = []
+	var kept: Array[TacticalActionCard] = []
 	for card in discard_pile:
-		draw_pile.append(card)
+		if _is_same_turn_locked_discard(card):
+			kept.append(card)
+		else:
+			moving.append(card)
+	# 仅剩本段锁定弃牌时无法洗回，避免鸣鼓换手当回合回库。
+	if moving.is_empty():
+		return false
 	discard_pile.clear()
+	for card in kept:
+		discard_pile.append(card)
+	for card in moving:
+		draw_pile.append(card)
 	_shuffle_array(draw_pile)
 	return true
+
+
+func _is_same_turn_locked_discard(card: TacticalActionCard) -> bool:
+	if card == null:
+		return false
+	for locked in _same_turn_locked_discards:
+		if locked == card:
+			return true
+	return false
 
 
 func _shuffle_array(arr: Array[TacticalActionCard]) -> void:

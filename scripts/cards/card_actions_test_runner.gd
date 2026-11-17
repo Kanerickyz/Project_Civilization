@@ -621,23 +621,74 @@ func _test_wardrum_skill_redraw() -> bool:
 	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
 	deck.build_from_living_player_units(board)
 	deck.begin_player_turn()
-	# 塞一张技卡到手牌并打出换手。
+	# 塞一张技卡到手牌并打出换手；清空牌库迫使弃牌洗回。
 	deck.hand.clear()
+	deck.draw_pile.clear()
+	deck.discard_pile.clear()
 	deck.hand.append(TacticalActionCardScript.make_move())
 	deck.hand.append(TacticalActionCardScript.make_attack())
+	deck.hand.append(TacticalActionCardScript.make_move())
+	deck.hand.append(TacticalActionCardScript.make_attack())
+	deck.hand.append(TacticalActionCardScript.make_move())
 	deck.hand.append(TacticalActionCardScript.make_skill_draw("wardrum"))
-	var skill_idx := 2
+	# 弃牌里再放若干可洗回的永久卡，确保重抽有牌可抽。
+	for _i in 4:
+		deck.discard_pile.append(TacticalActionCardScript.make_move())
+		deck.discard_pile.append(TacticalActionCardScript.make_attack())
+	var skill_idx := deck.hand.size() - 1
 	var skill := deck.play_hand_index(skill_idx)
 	if skill == null or skill.kind != TacticalActionCardScript.Kind.SKILL_DRAW:
 		push_error("CardActions: play skill_draw failed")
 		return false
-	# 打出后手牌剩 2，换手应弃掉再抽最多 5。
+	# 打出后手牌剩 5，换手应弃掉再抽最多 5；鸣鼓换手须留在弃牌。
 	var drawn := deck.resolve_wardrum_redraw()
 	if deck.hand.size() != drawn:
 		push_error("CardActions: redraw hand size mismatch")
 		return false
 	if drawn <= 0:
 		push_error("CardActions: redraw should draw cards")
+		return false
+	var skill_in_discard := false
+	for c in deck.discard_pile:
+		if c == skill:
+			skill_in_discard = true
+			break
+	if not skill_in_discard:
+		push_error("CardActions: wardrum skill must stay in discard after redraw")
+		return false
+	for c in deck.hand:
+		if c.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+			push_error("CardActions: wardrum skill must not return to hand same turn")
+			return false
+	for c in deck.draw_pile:
+		if c.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+			push_error("CardActions: wardrum skill must not reshuffle into draw same turn")
+			return false
+	# 下一段开始应解除锁定；强制空库洗弃时技能须能进牌库/手牌。
+	deck.end_player_turn()
+	deck.draw_pile.clear()
+	# 把非技能弃牌也清掉，只留锁定过的技能 + 若干饲料，验证解锁后可洗回。
+	var feed: Array[TacticalActionCard] = []
+	for c in deck.discard_pile:
+		if c != skill:
+			feed.append(c)
+	deck.discard_pile.clear()
+	deck.discard_pile.append(skill)
+	for c in feed:
+		deck.discard_pile.append(c)
+	if deck.discard_pile.size() < 2:
+		for _j in 3:
+			deck.discard_pile.append(TacticalActionCardScript.make_move())
+	deck.begin_player_turn()
+	var unlocked_into_draw_or_hand := false
+	for c in deck.hand:
+		if c == skill:
+			unlocked_into_draw_or_hand = true
+	for c in deck.draw_pile:
+		if c == skill:
+			unlocked_into_draw_or_hand = true
+	if not unlocked_into_draw_or_hand:
+		push_error("CardActions: wardrum skill must be reshufflable next turn")
 		return false
 	return true
 
