@@ -14,6 +14,7 @@ const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd"
 const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 const ActionHandFanScript := preload("res://scripts/ui/action_hand_fan.gd")
+const TacticalUnitInfoCardScript := preload("res://scripts/ui/tactical_unit_info_card.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
 enum PendingKind { NONE, MOVE, ATTACK }
@@ -42,6 +43,7 @@ var _game_over_title: Label
 var _top_bar: MarginContainer
 var _side_panel: PanelContainer
 var _bottom_bar: MarginContainer
+var _unit_info_card: TacticalUnitInfoCard
 
 
 func _ready() -> void:
@@ -99,6 +101,12 @@ func _build() -> void:
 	_board_view.setup(_board_config)
 	_board_view.set_terrain_cells(_board.terrain_cells())
 	_board_view.cell_clicked.connect(_on_cell_clicked)
+	_board_view.unit_long_pressed.connect(_on_unit_long_pressed)
+	_board_view.unit_info_closed.connect(_hide_unit_info_card)
+
+	_unit_info_card = TacticalUnitInfoCardScript.new()
+	_unit_info_card.name = "UnitInfoCard"
+	add_child(_unit_info_card)
 
 	_top_bar = MarginContainer.new()
 	_top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -358,7 +366,7 @@ func _compose_hint() -> String:
 		return "攻击中：%s · 点红圈内敌人" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
-	return "长按看详情 · 拖到己方单位使用 · 库 %d · 弃 %d" % [
+	return "长按单位看信息卡 · 长按卡牌看详情 · 拖到己方单位使用 · 库 %d · 弃 %d" % [
 		_deck.draw_pile.size(),
 		_deck.discard_pile.size(),
 	]
@@ -495,11 +503,33 @@ func _on_cancel_target_pressed() -> void:
 	_refresh_all()
 
 
+func _on_unit_long_pressed(unit: TacticalUnitInstance, anchor_global: Vector2) -> void:
+	if unit == null or _unit_info_card == null:
+		return
+	if _hand_fan != null and _hand_fan.is_busy():
+		return
+	_selected_unit = unit
+	# 信息卡挂在沙盘本地坐标。
+	var local_bounds := Rect2(Vector2.ZERO, size)
+	_unit_info_card.show_for_unit(unit, anchor_global, local_bounds)
+	_last_log = "信息卡：%s（松手关闭）" % unit.def.display_name
+	_refresh_all()
+	# 刷新后保持信息卡在最前。
+	if _unit_info_card.get_parent() == self:
+		move_child(_unit_info_card, get_child_count() - 1)
+
+
+func _hide_unit_info_card() -> void:
+	if _unit_info_card != null:
+		_unit_info_card.hide_info()
+
+
 func _on_cell_clicked(cell: Vector2i) -> void:
 	if _input_locked or _game_over or not _clock.player_active:
 		return
 	if _hand_fan != null and _hand_fan.is_busy():
 		return
+	_hide_unit_info_card()
 
 	var clicked := _board.unit_at(cell)
 
@@ -740,6 +770,29 @@ func capture_select_player_unit(unit_id: String) -> void:
 			_selected_unit = u
 			_refresh_all()
 			return
+
+
+## GUI 验收：弹出指定单位信息卡（模拟长按）。
+func capture_show_unit_info(unit_id: String, prefer_player: bool = true) -> bool:
+	var unit: TacticalUnitInstance = null
+	for u in _board.living_units():
+		if u.def.id != unit_id:
+			continue
+		if prefer_player and u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if not prefer_player and u.faction != TacticalFactionScript.Id.OPPONENT:
+			continue
+		unit = u
+		break
+	if unit == null:
+		for u in _board.living_units():
+			if u.def.id == unit_id:
+				unit = u
+				break
+	if unit == null or _board_view == null:
+		return false
+	_on_unit_long_pressed(unit, _board_view.unit_head_global_position(unit))
+	return true
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。

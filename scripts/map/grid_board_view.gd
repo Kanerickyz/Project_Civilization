@@ -4,6 +4,9 @@ extends Control
 
 
 signal cell_clicked(cell: Vector2i)
+## 长按单位约 0.38s（对照 autochess LONG_PRESS_MS）；松手发 unit_info_closed。
+signal unit_long_pressed(unit: TacticalUnitInstance, anchor_global: Vector2)
+signal unit_info_closed
 
 var config: BoardConfig
 
@@ -31,6 +34,8 @@ var _press_pos: Vector2 = Vector2.ZERO
 var _needs_center: bool = true
 
 const DRAG_THRESHOLD_PX := 6.0
+const LONG_PRESS_SEC := 0.38
+const LONG_PRESS_SLOP_PX := 10.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
 const UI_FONT := preload("res://resources/ui/ui_font.tres")
@@ -69,6 +74,10 @@ var _blob_texture: Texture2D
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
 var _unit_idle_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
+var _long_press_timer: Timer
+var _press_unit: TacticalUnitInstance = null
+var _info_shown: bool = false
+var _suppress_click: bool = false
 
 const UNIT_IDLE_BOB_PX := 3.0
 const UNIT_IDLE_HALF_SEC := 0.95
@@ -83,12 +92,23 @@ func setup(p_config: BoardConfig) -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_ensure_viewport_tree()
+	_ensure_long_press_timer()
 	_apply_look()
 	_zoom = clampf(config.camera_zoom_default, config.camera_zoom_min, config.camera_zoom_max)
 	_needs_center = true
 	_rebuild_board()
 	_try_center_on_board()
 	_apply_camera()
+
+
+func _ensure_long_press_timer() -> void:
+	if _long_press_timer != null:
+		return
+	_long_press_timer = Timer.new()
+	_long_press_timer.one_shot = true
+	_long_press_timer.wait_time = LONG_PRESS_SEC
+	_long_press_timer.timeout.connect(_on_long_press_timeout)
+	add_child(_long_press_timer)
 
 
 func set_terrain_catalog(catalog: TerrainCatalog) -> void:
@@ -1039,25 +1059,15 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_dragging = true
-				_drag_moved = false
-				_drag_last = mb.position
-				_press_pos = mb.position
+				_begin_press(mb.position)
 			else:
-				_dragging = false
-				if not _drag_moved:
-					_handle_click(mb.position)
-				accept_event()
+				_end_press(mb.position)
+			accept_event()
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
 		if _dragging and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
-			var delta := mm.position - _drag_last
-			_drag_last = mm.position
-			if not _drag_moved and _press_pos.distance_to(mm.position) >= DRAG_THRESHOLD_PX:
-				_drag_moved = true
-			if _drag_moved:
-				_pan_by_screen_delta(delta)
-				accept_event()
+			_continue_press_motion(mm.position)
+			accept_event()
 
 
 func _set_zoom(value: float) -> void:
@@ -1087,20 +1097,16 @@ func _handle_screen_touch(st: InputEventScreenTouch) -> void:
 		_active_touches[st.index] = st.position
 		if _active_touches.size() == 1:
 			_touch_drag_index = st.index
-			_dragging = true
-			_drag_moved = false
-			_drag_last = st.position
-			_press_pos = st.position
+			_begin_press(st.position)
 		elif _active_touches.size() >= 2:
+			_cancel_long_press()
 			_dragging = false
 			_touch_drag_index = -1
 			_pinch_last_distance = _pinch_distance()
 	else:
 		_active_touches.erase(st.index)
 		if st.index == _touch_drag_index:
-			if not _drag_moved and _active_touches.is_empty():
-				_handle_click(st.position)
-			_dragging = false
+			_end_press(st.position)
 			_touch_drag_index = -1
 		if _active_touches.size() < 2:
 			_pinch_last_distance = 0.0
@@ -1111,6 +1117,7 @@ func _handle_screen_touch(st: InputEventScreenTouch) -> void:
 			_drag_last = _active_touches[remaining]
 			_press_pos = _drag_last
 			_drag_moved = true
+			_cancel_long_press()
 	accept_event()
 
 
@@ -1118,18 +1125,103 @@ func _handle_screen_drag(sd: InputEventScreenDrag) -> void:
 	if _active_touches.has(sd.index):
 		_active_touches[sd.index] = sd.position
 	if _active_touches.size() >= 2:
+		_cancel_long_press()
 		_apply_pinch_zoom()
 		accept_event()
 		return
 	if not _dragging or sd.index != _touch_drag_index:
 		return
-	var delta := sd.position - _drag_last
-	_drag_last = sd.position
-	if not _drag_moved and _press_pos.distance_to(sd.position) >= DRAG_THRESHOLD_PX:
-		_drag_moved = true
-	if _drag_moved:
-		_pan_by_screen_delta(delta)
+	_continue_press_motion(sd.position)
 	accept_event()
+
+
+func _begin_press(local_pos: Vector2) -> void:
+	_dragging = true
+	_drag_moved = false
+	_drag_last = local_pos
+	_press_pos = local_pos
+	_suppress_click = false
+	_press_unit = _unit_under_local(local_pos)
+	_cancel_long_press()
+	if _press_unit != null and _long_press_timer != null:
+		_long_press_timer.start()
+
+
+func _continue_press_motion(local_pos: Vector2) -> void:
+	var delta := local_pos - _drag_last
+	_drag_last = local_pos
+	var dist := _press_pos.distance_to(local_pos)
+	if not _drag_moved and dist >= DRAG_THRESHOLD_PX:
+		_drag_moved = true
+	if dist >= LONG_PRESS_SLOP_PX:
+		_cancel_long_press()
+		_press_unit = null
+	if _drag_moved and not _info_shown:
+		_pan_by_screen_delta(delta)
+
+
+func _end_press(local_pos: Vector2) -> void:
+	_dragging = false
+	_cancel_long_press()
+	if _info_shown:
+		_info_shown = false
+		_suppress_click = true
+		unit_info_closed.emit()
+		_press_unit = null
+		return
+	if not _drag_moved and not _suppress_click:
+		_handle_click(local_pos)
+	_press_unit = null
+	_suppress_click = false
+
+
+func _cancel_long_press() -> void:
+	if _long_press_timer != null:
+		_long_press_timer.stop()
+
+
+func _on_long_press_timeout() -> void:
+	if _press_unit == null or not _press_unit.is_alive():
+		return
+	if _drag_moved:
+		return
+	_info_shown = true
+	_suppress_click = true
+	unit_long_pressed.emit(_press_unit, unit_head_global_position(_press_unit))
+
+
+func _unit_under_local(local_pos: Vector2) -> TacticalUnitInstance:
+	var cell: Variant = _pick_cell(local_pos)
+	if cell == null:
+		return null
+	var c := cell as Vector2i
+	for key in _unit_sprites.keys():
+		var u := key as TacticalUnitInstance
+		if u != null and u.is_alive() and u.cell == c:
+			return u
+	return null
+
+
+## 单位头顶锚点（全局屏幕坐标），供信息卡定位。
+func unit_head_global_position(unit: TacticalUnitInstance) -> Vector2:
+	if unit == null or not _unit_sprites.has(unit) or _camera == null:
+		return get_global_rect().get_center()
+	var spr := _unit_sprites[unit] as Sprite2D
+	var world := _unit_world_position(spr) + Vector2(0.0, -config.unit_world_height * 1.05)
+	var canvas := _camera.get_canvas_transform()
+	var vp_pos := canvas * world
+	if _viewport_container == null or _viewport == null:
+		return get_global_transform_with_canvas() * vp_pos
+	var vs := _viewport.size
+	var cs := _viewport_container.size
+	if vs.x <= 0 or vs.y <= 0 or cs.x <= 0.0 or cs.y <= 0.0:
+		return _viewport_container.get_global_transform_with_canvas() * vp_pos
+	var local_in_view := Vector2(vp_pos.x * cs.x / float(vs.x), vp_pos.y * cs.y / float(vs.y))
+	return _viewport_container.get_global_transform_with_canvas() * local_in_view
+
+
+func is_unit_info_open() -> bool:
+	return _info_shown
 
 
 func _pinch_distance() -> float:

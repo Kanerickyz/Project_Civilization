@@ -30,7 +30,7 @@
 
 ## 规则（与 TurnClock）
 
-- 沙盘预置 4 蓝（盾卫/游侠/大剑/鼓手）+ 5 红（均为狼骑兵 `rider`）；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
+- 沙盘预置 4 蓝（盾卫/游侠/大剑/鼓手）+ 5 红（均为狼骑兵 `rider`）；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
 - **玩家行动段**抽手牌；打出移动/攻击/主动技卡后再点目标；点「结束行动」先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。
 - 回到某方行动段时重置该方**移力池**、**攻击标记**；回到玩家段再抽牌。
 - **未做**：商店、招募、CombatEventBus、召唤。
