@@ -15,6 +15,8 @@ var player_deck: TacticalCardDeck = null
 ## Vector2i -> StringName（TerrainCatalog id）；缺省格为默认地块。
 var _terrain: Dictionary = {}
 var _catalog: TerrainCatalog = TerrainCatalog.load_default()
+## 视觉：最近一次燃爆/爆燃 AoE 涉及的格子（含空格）；段开始燃烧结算后清除。
+var _ignited_aoe_cells: Dictionary = {}
 
 
 func setup(p_width: int, p_height: int) -> void:
@@ -22,6 +24,7 @@ func setup(p_width: int, p_height: int) -> void:
 	grid_height = p_height
 	units.clear()
 	_terrain.clear()
+	_ignited_aoe_cells.clear()
 
 
 func set_terrain_cells(cells: Dictionary) -> void:
@@ -179,6 +182,7 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 
 
 ## 对 origin 切比雪夫 ≤ radius 的存活单位施加燃烧（可排除 exclude）。返回受影响人数。
+## 同时标记范围内全部格子为点燃（视觉；空格不叠玩法层数）。
 func apply_burn_aoe(
 	origin: Vector2i,
 	stacks: int,
@@ -195,9 +199,39 @@ func apply_burn_aoe(
 			continue
 		u.add_burn_stacks(stacks)
 		n += 1
-	if n > 0:
-		changed.emit()
+	_mark_ignited_aoe(origin, radius)
+	changed.emit()
 	return n
+
+
+## 供棋盘视图：AoE 点燃残留 ∪ 当前仍有燃烧层数的单位所在格。
+func ignited_cells_for_view() -> Array[Vector2i]:
+	var seen: Dictionary = {}
+	var out: Array[Vector2i] = []
+	for key in _ignited_aoe_cells.keys():
+		if key is Vector2i and not seen.has(key):
+			seen[key] = true
+			out.append(key as Vector2i)
+	for u in living_units():
+		if u.burn_stacks <= 0:
+			continue
+		if seen.has(u.cell):
+			continue
+		seen[u.cell] = true
+		out.append(u.cell)
+	return out
+
+
+func _mark_ignited_aoe(origin: Vector2i, radius: int) -> void:
+	var r := maxi(0, radius)
+	for dx in range(-r, r + 1):
+		for dy in range(-r, r + 1):
+			var cell := origin + Vector2i(dx, dy)
+			if not GridMathScript.in_bounds(cell, grid_width, grid_height):
+				continue
+			if GridMathScript.chebyshev(origin, cell) > r:
+				continue
+			_ignited_aoe_cells[cell] = true
 
 
 ## 每方行动段开始：对所有燃烧单位先造成=层数伤害，再减 1 层。
@@ -224,7 +258,10 @@ func process_burn_ticks() -> Array[String]:
 			)
 		if u.is_alive():
 			u.burn_stacks = maxi(0, u.burn_stacks - 1)
-	if logs.size() > 0:
+	# AoE 点燃视觉在结算后收束：仅保留仍燃烧单位脚下格（由 ignited_cells_for_view 拼）。
+	var had_ignited := not _ignited_aoe_cells.is_empty()
+	_ignited_aoe_cells.clear()
+	if logs.size() > 0 or had_ignited:
 		changed.emit()
 	return logs
 

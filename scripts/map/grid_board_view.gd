@@ -57,7 +57,14 @@ const OVERLAY_COLORS := {
 	"h": Color(1.0, 0.88, 0.28, 0.42),
 	"hv": Color(0.38, 0.95, 0.55, 0.55),
 	"hx": Color(0.78, 0.32, 0.36, 0.42),
+	## 点燃地块（可与选中/移动/攻击叠显：独立 marker，本色仅作参考）。
+	"b": Color(1.0, 0.42, 0.12, 0.38),
 }
+const BURN_MARKER_COLOR := Color(1.0, 0.45, 0.1, 0.72)
+const BURN_MARKER_CORE := Color(1.0, 0.85, 0.35, 0.9)
+const BURN_BADGE_COLOR := Color("ff7a2e")
+const BURN_MARKER_Z := 3
+const BURN_MARKER_PULSE_SEC := 0.55
 const GRASS_CHECKER_LIGHT := Color("B4A158")
 const GRASS_CHECKER_DARK := Color("8F884C")
 const WALL_STONE_LIGHT := Color("9c958c")
@@ -78,6 +85,10 @@ var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label（常驻 HP + 攻）
+var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Label（燃N）
+var _burn_markers: Dictionary = {} # Vector2i -> Node2D（点燃地块标记）
+var _overlay_burn: Dictionary = {} # Vector2i -> true
+var _burn_pulse_tween: Tween
 var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
@@ -305,7 +316,18 @@ func _rebuild_board() -> void:
 	_overlay_nodes.clear()
 	_unit_sprites.clear()
 	_unit_blobs.clear()
+	for key in _hp_bars.keys():
+		var hp_lbl: Label = _hp_bars[key] as Label
+		if hp_lbl != null and is_instance_valid(hp_lbl):
+			hp_lbl.queue_free()
 	_hp_bars.clear()
+	for key in _burn_badges.keys():
+		var burn_lbl: Label = _burn_badges[key] as Label
+		if burn_lbl != null and is_instance_valid(burn_lbl):
+			burn_lbl.queue_free()
+	_burn_badges.clear()
+	_clear_burn_markers()
+	_overlay_burn.clear()
 	_last_unit_cells.clear()
 	_unit_move_tweens.clear()
 	_unit_idle_tweens.clear()
@@ -350,7 +372,8 @@ func sync_tactical_units(
 	units: Array,
 	selected_cell: Vector2i,
 	move_cells: Array,
-	attack_cells: Array
+	attack_cells: Array,
+	ignited_cells: Array = []
 ) -> void:
 	if config == null or _units_root == null:
 		return
@@ -363,6 +386,11 @@ func sync_tactical_units(
 	for c in attack_cells:
 		if c is Vector2i:
 			_overlay_attack[c] = true
+	_overlay_burn.clear()
+	for c in ignited_cells:
+		if c is Vector2i:
+			_overlay_burn[c] = true
+	_sync_burn_markers()
 	var alive: Dictionary = {}
 	for u in units:
 		if u is TacticalUnitInstance and (u as TacticalUnitInstance).is_alive():
@@ -381,6 +409,7 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	# 逻辑格已变且正在播移动 Tween 时，勿再 sync（否则会 kill tween 并瞬移到终点）。
 	if _unit_move_tweens.has(unit):
 		_update_hp_bar(unit)
+		_update_burn_badge(unit)
 		return
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
@@ -536,6 +565,10 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 		var bar: Label = _hp_bars[unit] as Label
 		bar.queue_free()
 		_hp_bars.erase(unit)
+	if _burn_badges.has(unit):
+		var badge: Label = _burn_badges[unit] as Label
+		badge.queue_free()
+		_burn_badges.erase(unit)
 	_last_unit_cells.erase(unit)
 
 
@@ -791,6 +824,7 @@ func _process(_delta: float) -> void:
 	for unit in _hp_bars:
 		if _unit_sprites.has(unit):
 			_update_hp_bar(unit as TacticalUnitInstance)
+			_update_burn_badge(unit as TacticalUnitInstance)
 	for unit in _unit_blobs:
 		var spr := _unit_sprites.get(unit) as Sprite2D
 		if spr == null:
@@ -819,6 +853,25 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		_labels_root.add_child(bar)
 		_hp_bars[unit] = bar
 	_update_hp_bar(unit)
+	_ensure_burn_badge(unit)
+
+
+func _ensure_burn_badge(unit: TacticalUnitInstance) -> void:
+	if _burn_badges.has(unit):
+		_update_burn_badge(unit)
+		return
+	var badge := Label.new()
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.add_theme_font_override("font", UI_FONT)
+	badge.add_theme_font_size_override("font_size", 12)
+	badge.add_theme_color_override("font_color", BURN_BADGE_COLOR)
+	badge.add_theme_color_override("font_outline_color", Color("2a0c04"))
+	badge.add_theme_constant_override("outline_size", 4)
+	badge.visible = false
+	_labels_root.add_child(badge)
+	_burn_badges[unit] = badge
+	_update_burn_badge(unit)
 
 
 func _update_hp_bar(unit: TacticalUnitInstance) -> void:
@@ -837,6 +890,22 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 		bar.modulate = Color("ffe08a")
 	else:
 		bar.modulate = Color("e8f0ff")
+
+
+func _update_burn_badge(unit: TacticalUnitInstance) -> void:
+	if not _burn_badges.has(unit) or not _unit_sprites.has(unit):
+		return
+	var badge := _burn_badges[unit] as Label
+	if unit.burn_stacks <= 0 or not unit.is_alive():
+		badge.visible = false
+		return
+	badge.visible = true
+	# ◆ 作火焰形占位图标 + 层数数字（纯 2D Label，无 Light2D）。
+	badge.text = "◆燃%d" % unit.burn_stacks
+	var spr := _unit_sprites[unit] as Sprite2D
+	var side_off := Vector2(config.unit_world_height * 0.55, -config.unit_world_height * 0.55)
+	_position_world_on_label(badge, _unit_world_position(spr) + side_off)
+	_clamp_label_in_viewport(badge)
 
 
 func _position_world_on_label(lbl: Control, world: Vector2) -> void:
@@ -928,6 +997,104 @@ func _apply_overlay(cell: Vector2i) -> void:
 	ov.visible = tag != ""
 	if tag != "":
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
+
+
+func _clear_burn_markers() -> void:
+	if _burn_pulse_tween != null and is_instance_valid(_burn_pulse_tween):
+		_burn_pulse_tween.kill()
+	_burn_pulse_tween = null
+	for key in _burn_markers.keys():
+		var node: Node = _burn_markers[key] as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+	_burn_markers.clear()
+
+
+func _sync_burn_markers() -> void:
+	if config == null or _tiles_root == null:
+		return
+	var keep: Dictionary = {}
+	for cell in _overlay_burn.keys():
+		if cell is Vector2i:
+			keep[cell] = true
+			_ensure_burn_marker(cell as Vector2i)
+	var stale: Array = []
+	for key in _burn_markers.keys():
+		if not keep.has(key):
+			stale.append(key)
+	for key in stale:
+		var node: Node = _burn_markers[key] as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+		_burn_markers.erase(key)
+	_ensure_burn_pulse()
+
+
+func _ensure_burn_marker(cell: Vector2i) -> void:
+	if _burn_markers.has(cell):
+		var existing := _burn_markers[cell] as Node2D
+		if existing != null and is_instance_valid(existing):
+			existing.position = _cell_to_world(cell, config.cell_size)
+			return
+	var root := Node2D.new()
+	root.name = "Burn_%d_%d" % [cell.x, cell.y]
+	root.z_index = BURN_MARKER_Z
+	root.position = _cell_to_world(cell, config.cell_size)
+	var half := config.cell_size * 0.28
+	var glow := Polygon2D.new()
+	glow.name = "Glow"
+	glow.color = BURN_MARKER_COLOR
+	glow.polygon = PackedVector2Array([
+		Vector2(0.0, -half * 1.15),
+		Vector2(half * 0.85, 0.0),
+		Vector2(0.0, half * 0.75),
+		Vector2(-half * 0.85, 0.0),
+	])
+	root.add_child(glow)
+	var core := Polygon2D.new()
+	core.name = "Core"
+	core.color = BURN_MARKER_CORE
+	var ch := half * 0.42
+	core.polygon = PackedVector2Array([
+		Vector2(0.0, -ch * 1.2),
+		Vector2(ch * 0.7, 0.05),
+		Vector2(0.0, ch * 0.55),
+		Vector2(-ch * 0.7, 0.05),
+	])
+	root.add_child(core)
+	_tiles_root.add_child(root)
+	_burn_markers[cell] = root
+
+
+func _ensure_burn_pulse() -> void:
+	if _burn_markers.is_empty():
+		if _burn_pulse_tween != null and is_instance_valid(_burn_pulse_tween):
+			_burn_pulse_tween.kill()
+		_burn_pulse_tween = null
+		return
+	# Headless / 未入树时只留静态标记，不建脉冲 Tween。
+	if not is_inside_tree():
+		return
+	if _burn_pulse_tween != null and is_instance_valid(_burn_pulse_tween) and _burn_pulse_tween.is_running():
+		return
+	if _burn_pulse_tween != null and is_instance_valid(_burn_pulse_tween):
+		_burn_pulse_tween.kill()
+	_burn_pulse_tween = create_tween()
+	_burn_pulse_tween.set_loops()
+	_burn_pulse_tween.tween_method(_apply_burn_pulse_alpha, 0.55, 1.0, BURN_MARKER_PULSE_SEC).set_trans(
+		Tween.TRANS_SINE
+	).set_ease(Tween.EASE_IN_OUT)
+	_burn_pulse_tween.tween_method(_apply_burn_pulse_alpha, 1.0, 0.55, BURN_MARKER_PULSE_SEC).set_trans(
+		Tween.TRANS_SINE
+	).set_ease(Tween.EASE_IN_OUT)
+
+
+func _apply_burn_pulse_alpha(alpha: float) -> void:
+	for key in _burn_markers.keys():
+		var node := _burn_markers[key] as Node2D
+		if node == null or not is_instance_valid(node):
+			continue
+		node.modulate = Color(1.0, 1.0, 1.0, alpha)
 
 
 ## 拖牌悬停：cell 为 null 时清空；unit 非空则播选中 scale 脉冲。
