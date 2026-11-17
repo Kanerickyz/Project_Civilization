@@ -13,7 +13,7 @@ const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/wardrum.tres",
 ]
 
-## 敌方四狼骑兵（autochess id `rider` / 剪纸 unit_rider）。
+## 敌方五狼骑兵（autochess id `rider` / 剪纸 unit_rider）。
 const OPPONENT_UNIT_PATH := "res://resources/units/rider.tres"
 
 const PLAYER_CELLS: Array[Vector2i] = [
@@ -27,7 +27,8 @@ const OPPONENT_CELLS: Array[Vector2i] = [
 	Vector2i(6, 2),
 	Vector2i(6, 4),
 	Vector2i(6, 6),
-	Vector2i(5, 4),
+	Vector2i(5, 2),
+	Vector2i(5, 6),
 ]
 
 

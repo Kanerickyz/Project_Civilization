@@ -43,8 +43,8 @@ func _initialize() -> void:
 
 func _test_roster_loads() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	if board.living_units().size() != 8:
-		push_error("TacticalUnits: expected 8 units, got %d" % board.living_units().size())
+	if board.living_units().size() != 9:
+		push_error("TacticalUnits: expected 9 units, got %d" % board.living_units().size())
 		return false
 	var riders := 0
 	for u in board.living_units():
@@ -53,8 +53,8 @@ func _test_roster_loads() -> bool:
 				push_error("TacticalUnits: opponent should be rider, got %s" % u.def.id)
 				return false
 			riders += 1
-	if riders != 4:
-		push_error("TacticalUnits: expected 4 wolf cavalry, got %d" % riders)
+	if riders != 5:
+		push_error("TacticalUnits: expected 5 wolf cavalry, got %d" % riders)
 		return false
 	return true
 
