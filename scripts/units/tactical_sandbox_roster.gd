@@ -14,7 +14,7 @@ const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/boomling.tres",
 ]
 
-## 敌方五狼骑兵（autochess id `rider` / 剪纸 unit_rider）。
+## 敌方六狼骑兵（autochess id `rider` / 剪纸 unit_rider；各 max_hp=10）。
 const OPPONENT_UNIT_PATH := "res://resources/units/rider.tres"
 
 const PLAYER_CELLS: Array[Vector2i] = [
@@ -30,6 +30,7 @@ const OPPONENT_CELLS: Array[Vector2i] = [
 	Vector2i(6, 4),
 	Vector2i(6, 6),
 	Vector2i(5, 2),
+	Vector2i(5, 4),
 	Vector2i(5, 6),
 ]
 
