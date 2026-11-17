@@ -42,7 +42,13 @@ func _initialize() -> void:
 	if not _test_wardrum_skill_redraw():
 		quit(1)
 		return
+	if not _test_wardrum_skill_plays_on_board():
+		quit(1)
+		return
 	if not _test_strong_attack_bonus():
+		quit(1)
+		return
+	if not _test_strong_attack_droppable_on_any_ally():
 		quit(1)
 		return
 	if not _test_ephemeral_attack_not_in_piles():
@@ -101,6 +107,12 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	for c in deck.draw_pile:
 		if c.ephemeral:
 			push_error("CardActions: build must not include ephemeral")
+			return false
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK
+			and c.bound_unit_id != ""
+		):
+			push_error("CardActions: strong attack must be unbound")
 			return false
 	return true
 
@@ -199,7 +211,7 @@ func _test_player_death_removes_move_attack_and_skill() -> bool:
 	var before_total := deck.total_cards()
 	var before_strong := deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK)
 	var removed := deck.on_player_unit_died(victim)
-	# 移+攻+盾卫加强攻
+	# 移+攻+盾卫贡献的通用加强攻
 	if removed != 3:
 		push_error("CardActions: knight death should remove 3, got %d" % removed)
 		return false
@@ -449,6 +461,26 @@ func _test_wardrum_skill_redraw() -> bool:
 	return true
 
 
+func _test_wardrum_skill_plays_on_board() -> bool:
+	var card := TacticalActionCardScript.make_skill_draw("wardrum")
+	if not card.plays_on_board():
+		push_error("CardActions: wardrum skill must play on board")
+		return false
+	var strong := TacticalActionCardScript.make_skill_strong_attack(2)
+	if strong.plays_on_board():
+		push_error("CardActions: strong attack must still require a unit drop")
+		return false
+	var move := TacticalActionCardScript.make_move()
+	if move.plays_on_board():
+		push_error("CardActions: move must not play on empty board")
+		return false
+	# 归属仍绑鼓手，供死亡 cull。
+	if card.bound_unit_id != "wardrum":
+		push_error("CardActions: wardrum skill cull owner must stay wardrum")
+		return false
+	return true
+
+
 func _test_strong_attack_bonus() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var knight: TacticalUnitInstance = null
@@ -468,6 +500,32 @@ func _test_strong_attack_bonus() -> bool:
 	)
 	if not res["ok"] or int(res["damage"]) != base + 2:
 		push_error("CardActions: strong attack should deal base+2")
+		return false
+	return true
+
+
+func _test_strong_attack_droppable_on_any_ally() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var card := TacticalActionCardScript.make_skill_strong_attack(2)
+	if card.bound_unit_id != "":
+		push_error("CardActions: strong attack factory must leave bound empty")
+		return false
+	var saw_player := false
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			if card.can_drop_on(u):
+				push_error("CardActions: strong attack must not drop on foe")
+				return false
+			continue
+		saw_player = true
+		if not card.can_drop_on(u):
+			push_error(
+				"CardActions: strong attack must drop on any ally, failed on %s"
+				% u.def.id
+			)
+			return false
+	if not saw_player:
+		push_error("CardActions: need player units for strong attack drop test")
 		return false
 	return true
 

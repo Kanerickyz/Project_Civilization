@@ -11,7 +11,7 @@ enum Kind {
 }
 
 var kind: Kind = Kind.MOVE
-## 绑角色 id（空=任意己方）；主动技与强攻卡使用。
+## 绑角色 id（空=不绑）；鸣鼓换手用于死亡 cull 归属；加强攻为空。
 var bound_unit_id: String = ""
 ## 强攻卡额外伤害。
 var attack_bonus_damage: int = 0
@@ -47,6 +47,11 @@ func is_active_skill() -> bool:
 	return kind == Kind.SKILL_DRAW or kind == Kind.SKILL_STRONG_ATTACK
 
 
+## 松手在棋盘有效格即可打出（不要求落在单位上）。
+func plays_on_board() -> bool:
+	return kind == Kind.SKILL_DRAW
+
+
 func kind_label() -> String:
 	match kind:
 		Kind.ATTACK:
@@ -70,14 +75,17 @@ func rules_detail() -> String:
 		Kind.ATTACK:
 			return "拖到己方单位：选定攻击者，再点红圈内单位（含友方）普攻。可打多张再攻。"
 		Kind.SKILL_DRAW:
-			return "拖到鼓手：手牌全部进弃，再抽 5 张。"
+			return "拖到棋盘任意有效格松手：手牌全部进弃，再抽 5 张。"
 		Kind.SKILL_STRONG_ATTACK:
-			return "拖到对应角色：选定攻击者，再点红圈内单位；本次攻击额外 +%d 伤害。" % attack_bonus_damage
+			return "拖到任意己方单位：选定攻击者，再点红圈内单位；本次攻击额外 +%d 伤害。" % attack_bonus_damage
 		_:
 			return ""
 
 
 func can_drop_on(unit: TacticalUnitInstance) -> bool:
+	if plays_on_board():
+		# 棋盘打出；落在单位上也算有效区内。
+		return unit != null and unit.is_alive()
 	if unit == null or not unit.is_alive():
 		return false
 	if unit.faction != TacticalFaction.Id.PLAYER:
@@ -95,9 +103,11 @@ static func make_attack(ephemeral_card: bool = false) -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.ATTACK, "", 0, ephemeral_card)
 
 
-static func make_skill_draw(bound_id: String) -> TacticalActionCard:
+## bound_id 仅作死亡 cull 归属；打出不要求拖到该角色。
+static func make_skill_draw(bound_id: String = "wardrum") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_DRAW, bound_id)
 
 
-static func make_skill_strong_attack(bound_id: String, bonus: int = 2) -> TacticalActionCard:
-	return TacticalActionCard.new(Kind.SKILL_STRONG_ATTACK, bound_id, bonus)
+## 通用加强攻击：不绑角色，可拖到任意己方单位。
+static func make_skill_strong_attack(bonus: int = 2) -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_STRONG_ATTACK, "", bonus)

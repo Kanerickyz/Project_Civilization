@@ -183,11 +183,9 @@ func _skills_bbcode(unit: TacticalUnitInstance) -> String:
 func _active_skill_line(unit_id: String) -> String:
 	match unit_id:
 		"wardrum":
-			return "[b]主动技 · 鸣鼓换手[/b]\n拖到鼓手：弃光手牌再抽 5。"
-		"knight":
-			return "[b]主动技 · 加强攻击[/b]\n拖到盾卫：本次攻击额外 +2 伤害。"
-		"mini_pekka":
-			return "[b]主动技 · 加强攻击[/b]\n拖到大剑：本次攻击额外 +2 伤害。"
+			return "[b]主动技 · 鸣鼓换手[/b]\n拖到棋盘任意有效格：弃光手牌再抽 5。"
+		"knight", "mini_pekka":
+			return "[b]主动技 · 加强攻击[/b]\n通用卡：拖到任意己方；本次攻击额外 +2 伤害。"
 		_:
 			return ""
 

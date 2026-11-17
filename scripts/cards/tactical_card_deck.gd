@@ -197,7 +197,7 @@ func is_move_authorized(unit: TacticalUnitInstance) -> bool:
 	return bool(move_authorized.get(unit, false))
 
 
-## 己方阵亡：减通用移/攻各 1，并减该角色主动技 1（有则）；清移动授权。
+## 己方阵亡：减通用移/攻各 1；绑角色主动技按 owner 减 1；通用加强攻按贡献者减 1；清移动授权。
 func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	if unit == null:
 		return 0
@@ -206,9 +206,13 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	var removed := 0
 	removed += _remove_one_kind(TacticalActionCard.Kind.MOVE)
 	removed += _remove_one_kind(TacticalActionCard.Kind.ATTACK)
-	var skill_kind := _skill_kind_for_unit_id(unit.def.id if unit.def != null else "")
-	if skill_kind >= 0:
-		removed += _remove_one_bound_skill(skill_kind, unit.def.id)
+	var unit_id := unit.def.id if unit.def != null else ""
+	var skill_kind := _skill_kind_for_unit_id(unit_id)
+	if skill_kind == int(TacticalActionCard.Kind.SKILL_DRAW):
+		removed += _remove_one_bound_skill(skill_kind, unit_id)
+	elif skill_kind == int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK):
+		# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
+		removed += _remove_one_skill_kind(skill_kind)
 	if move_authorized.has(unit):
 		move_authorized.erase(unit)
 	if removed > 0:
@@ -236,12 +240,9 @@ static func _skill_card_for_unit_id(unit_id: String) -> TacticalActionCard:
 	match unit_id:
 		"wardrum":
 			return TacticalActionCardScript.make_skill_draw("wardrum")
-		"knight":
-			return TacticalActionCardScript.make_skill_strong_attack("knight", SKILL_STRONG_BONUS)
-		"mini_pekka":
-			return TacticalActionCardScript.make_skill_strong_attack(
-				"mini_pekka", SKILL_STRONG_BONUS
-			)
+		"knight", "mini_pekka":
+			# 盾卫/大剑各贡献 1 张通用加强攻（不绑角色）。
+			return TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS)
 		_:
 			return null
 
@@ -275,6 +276,27 @@ func _remove_one_bound_skill(kind_i: int, bound_id: String) -> int:
 	if _remove_bound_from(discard_pile, kind, bound_id):
 		return 1
 	return 0
+
+
+## 按 kind 减 1 张主动技（不看 bound；用于通用加强攻 cull）。
+func _remove_one_skill_kind(kind_i: int) -> int:
+	var kind := kind_i as TacticalActionCard.Kind
+	if _remove_skill_kind_from(hand, kind):
+		return 1
+	if _remove_skill_kind_from(draw_pile, kind):
+		return 1
+	if _remove_skill_kind_from(discard_pile, kind):
+		return 1
+	return 0
+
+
+func _remove_skill_kind_from(pile: Array[TacticalActionCard], kind: TacticalActionCard.Kind) -> bool:
+	for i in range(pile.size() - 1, -1, -1):
+		var c: TacticalActionCard = pile[i]
+		if c.kind == kind:
+			pile.remove_at(i)
+			return true
+	return false
 
 
 func _remove_one_kind_from(pile: Array[TacticalActionCard], kind: TacticalActionCard.Kind) -> bool:

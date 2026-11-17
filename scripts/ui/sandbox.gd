@@ -459,7 +459,12 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 	var unit := _board.unit_at(cell)
 	var hover_unit: TacticalUnitInstance = null
 	var valid := false
-	if unit != null and unit.is_alive():
+	if peek != null and peek.plays_on_board():
+		# 鸣鼓换手：棋盘任意有效格可落。
+		valid = true
+		if unit != null and unit.is_alive():
+			hover_unit = unit
+	elif unit != null and unit.is_alive():
 		hover_unit = unit
 		valid = (
 			unit.faction == TacticalFactionScript.Id.PLAYER
@@ -469,7 +474,7 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 	_board_view.set_card_drag_hover(cell, hover_unit, valid)
 
 
-## 拖到己方单位才使用；无效目标回手（不进弃牌）。
+## 单位目标卡拖到己方单位；棋盘打出卡松手在有效格即可。无效回手。
 func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if _board_view != null:
 		_board_view.clear_card_drag_hover()
@@ -479,20 +484,38 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if index < 0 or index >= _deck.hand.size():
 		_hand_fan.notify_drop_resolved(false)
 		return
+	var peek: TacticalActionCard = _deck.hand[index]
 	var cell_v: Variant = _board_view.pick_cell_at_global(global_pos)
 	if cell_v == null:
-		_last_log = "未落到单位上 · 卡已回手"
+		_last_log = (
+			"未落到棋盘上 · 卡已回手"
+			if peek != null and peek.plays_on_board()
+			else "未落到单位上 · 卡已回手"
+		)
 		_hand_fan.notify_drop_resolved(false)
 		_refresh_all()
 		return
 	var cell: Vector2i = cell_v
+	# 鸣鼓换手：棋盘有效格即可打出。
+	if peek != null and peek.plays_on_board():
+		_hand_fan.notify_drop_resolved(true)
+		var board_card := _deck.play_hand_index(index)
+		if board_card == null or not board_card.is_valid():
+			_last_log = "无法使用该卡"
+			_refresh_all()
+			return
+		_pending_kind = PendingKind.NONE
+		_focus_unit = null
+		var drawn := _deck.resolve_wardrum_redraw()
+		_last_log = "鸣鼓换手：弃手后抽 %d 张" % drawn
+		_refresh_all()
+		return
 	var target := _board.unit_at(cell)
 	if target == null or target.faction != TacticalFactionScript.Id.PLAYER:
 		_last_log = "需拖到己方单位 · 卡已回手"
 		_hand_fan.notify_drop_resolved(false)
 		_refresh_all()
 		return
-	var peek: TacticalActionCard = _deck.hand[index]
 	if peek != null and not peek.can_drop_on(target):
 		_last_log = "该卡须拖到对应角色 · 卡已回手"
 		_hand_fan.notify_drop_resolved(false)
@@ -511,11 +534,6 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
 		_last_log = "移动：%s · 点绿格（本卡仅一次）" % target.def.display_name
-	elif card.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
-		_pending_kind = PendingKind.NONE
-		_focus_unit = null
-		var drawn := _deck.resolve_wardrum_redraw()
-		_last_log = "鸣鼓换手：弃手后抽 %d 张" % drawn
 	elif card.is_attack_aim():
 		_deck.prepare_attack(target, card.attack_bonus_damage)
 		_pending_kind = PendingKind.ATTACK
@@ -876,7 +894,7 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 	if unit == null:
 		return false
 	var peek: TacticalActionCard = _deck.hand[idx]
-	if not peek.can_drop_on(unit):
+	if not peek.plays_on_board() and not peek.can_drop_on(unit):
 		return false
 	var card := _deck.play_hand_index(idx)
 	if card == null:
