@@ -401,7 +401,7 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 ## 受击/冲刺位移相对 cell_size 的上限（世界单位；旧 +4.0 在 cell_size=1 时飞出数格）。
 const UNIT_HIT_SHAKE_FRAC := 0.08
 const UNIT_ATTACK_LUNGE_FRAC := 0.28
-## 受击纯白闪：shader flash_amount=1 把不透明像素拉到 RGB 纯白（非 modulate 灰白过曝）。
+## 受击纯白闪：仅命中瞬间挂 flash shader；平时 material=null，走默认 Sprite2D 着色（避免常驻 shader 压暗）。
 const UNIT_HIT_FLASH_HOLD_SEC := 0.08
 const UNIT_HIT_FLASH_FADE_SEC := 0.22
 const DAMAGE_POPUP_FONT_SIZE := 28
@@ -590,8 +590,8 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	var shake := unit_hit_shake_px()
 	var rest := _look().unit_modulate
 	spr.modulate = rest
-	var mat := _ensure_unit_flash_material(spr)
-	# 瞬间完全纯白 → 短停 → 淡回贴图色；位移限制在格内并结束时强制回格心。
+	var mat := _begin_unit_flash(spr)
+	# 瞬间完全纯白 → 短停 → 淡回；结束后卸 material，恢复默认 Sprite2D 亮度。
 	mat.set_shader_parameter("flash_amount", 1.0)
 	var tw := create_tween()
 	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.05).set_trans(Tween.TRANS_SINE)
@@ -604,7 +604,7 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 		if not is_instance_valid(spr) or not _unit_sprites.has(unit):
 			return
 		spr.modulate = rest
-		_set_unit_flash_amount(spr, 0.0)
+		_end_unit_flash(spr)
 		_snap_unit_to_cell_center(unit)
 		if unit.is_alive():
 			_ensure_unit_idle(unit)
@@ -612,22 +612,23 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	return tw
 
 
-func _ensure_unit_flash_material(spr: Sprite2D) -> ShaderMaterial:
+func _begin_unit_flash(spr: Sprite2D) -> ShaderMaterial:
 	var mat := spr.material as ShaderMaterial
-	if mat != null and mat.shader == HIT_FLASH_SHADER:
-		return mat
-	mat = ShaderMaterial.new()
-	mat.shader = HIT_FLASH_SHADER
+	if mat == null or mat.shader != HIT_FLASH_SHADER:
+		mat = ShaderMaterial.new()
+		mat.shader = HIT_FLASH_SHADER
+		spr.material = mat
 	mat.set_shader_parameter("flash_amount", 0.0)
-	spr.material = mat
 	return mat
 
 
-func _set_unit_flash_amount(spr: Sprite2D, amount: float) -> void:
-	var mat := spr.material as ShaderMaterial
-	if mat == null or mat.shader != HIT_FLASH_SHADER:
+func _end_unit_flash(spr: Sprite2D) -> void:
+	if spr == null or not is_instance_valid(spr):
 		return
-	mat.set_shader_parameter("flash_amount", amount)
+	# 卸掉自定义 material：纯 2D 默认路径，避免 flash=0 时自定义 fragment 在 Compatibility 下偏暗。
+	var mat := spr.material as ShaderMaterial
+	if mat != null and mat.shader == HIT_FLASH_SHADER:
+		spr.material = null
 
 
 func _apply_hit_flash_amount(amount: float, mat: ShaderMaterial) -> void:
@@ -654,6 +655,7 @@ func play_unit_death(unit: TacticalUnitInstance) -> void:
 	else:
 		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
+	_end_unit_flash(spr)
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), 0.32)
@@ -696,8 +698,6 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	var base_scale := Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
 	spr.texture = tex
 	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
-	_ensure_unit_flash_material(spr)
-	_set_unit_flash_amount(spr, 0.0)
 	_unit_base_scales[unit] = base_scale
 	# 拖牌选中脉冲中勿重置 scale，否则每帧 sync 会掐断 tween。
 	if not _unit_select_tweens.has(unit):
