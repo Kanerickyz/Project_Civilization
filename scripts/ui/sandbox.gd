@@ -368,7 +368,11 @@ func _refresh_all() -> void:
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
 	_board_view.sync_tactical_units(
-		_board.living_units(), sel_cell, move_cells, attack_cells
+		_board.living_units(),
+		sel_cell,
+		move_cells,
+		attack_cells,
+		_board.ignited_cells_for_view()
 	)
 
 
