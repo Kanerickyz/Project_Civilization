@@ -11,6 +11,8 @@ extends Resource
 @export var attack_range: int = 1
 @export var texture_blue: Texture2D
 @export var texture_red: Texture2D
+## 相对不透明内容高度的视觉倍率；1 = 内容高对齐 `unit_world_height`。用于剪纸角色身型对齐。
+@export var visual_scale: float = 1.0
 @export var triggered_ability: TacticalActiveAbility
 
 

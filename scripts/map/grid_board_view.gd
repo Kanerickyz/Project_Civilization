@@ -97,6 +97,8 @@ var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
 ## 拖牌悬停选中只改 scale，不碰 offset/position/modulate（避 idle bob / hit flash）。
 var _unit_select_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _unit_base_scales: Dictionary = {} # TacticalUnitInstance -> Vector2
+## Texture2D -> {content_h: float, offset_y: float}；按不透明区域算缩放/脚点。
+var _tex_content_cache: Dictionary = {}
 var _drag_select_unit: TacticalUnitInstance = null
 var _drag_select_valid: bool = false
 var _long_press_timer: Timer
@@ -334,6 +336,7 @@ func _rebuild_board() -> void:
 	_unit_select_tweens.clear()
 	_unit_base_offsets.clear()
 	_unit_base_scales.clear()
+	_tex_content_cache.clear()
 
 	var cell_size := config.cell_size
 	for gx in range(config.grid_width):
@@ -727,21 +730,45 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	if unit.faction == TacticalFactionScript.Id.OPPONENT:
 		tex = unit.def.texture_red
 	var unit_h: float = config.unit_world_height
-	var tex_h := float(tex.get_height())
-	var base_scale := Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
+	var metrics := _texture_content_metrics(tex)
+	var content_h: float = metrics.content_h
+	var vis := unit.def.visual_scale if unit.def.visual_scale > 0.0 else 1.0
+	var s := (unit_h / content_h) * vis if content_h > 0.0 else 1.0
+	var base_scale := Vector2(s, s)
 	spr.texture = tex
 	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
 	_unit_base_scales[unit] = base_scale
 	# 拖牌选中脉冲中勿重置 scale，否则每帧 sync 会掐断 tween。
 	if not _unit_select_tweens.has(unit):
 		spr.scale = base_scale
-	# 节点原点 = 脚点。贴图上移半高，脚落在格心，身体在脚点上方。
+	# 节点原点 = 脚点。offset 对齐不透明底边，脚落在格心，身体在脚点上方。
 	spr.centered = true
-	var base_offset := Vector2(0.0, -tex_h * 0.5)
+	var base_offset := Vector2(0.0, metrics.offset_y)
 	_unit_base_offsets[unit] = base_offset
 	if not _unit_idle_tweens.has(unit):
 		spr.offset = base_offset
 	_ensure_hp_bar(unit)
+
+
+## 按贴图不透明区域算内容高度与脚点 offset.y（cached）。
+func _texture_content_metrics(tex: Texture2D) -> Dictionary:
+	if tex == null:
+		return {"content_h": 1.0, "offset_y": 0.0}
+	if _tex_content_cache.has(tex):
+		return _tex_content_cache[tex] as Dictionary
+	var tex_h := float(tex.get_height())
+	var content_h := tex_h
+	var offset_y := -tex_h * 0.5
+	var img: Image = tex.get_image()
+	if img != null:
+		var used: Rect2i = img.get_used_rect()
+		if used.size.y > 0:
+			content_h = float(used.size.y)
+			# centered 时纹理底边在 +tex_h/2；内容底边相对中心再减去顶部空白。
+			offset_y = tex_h * 0.5 - float(used.position.y + used.size.y)
+	var metrics := {"content_h": content_h, "offset_y": offset_y}
+	_tex_content_cache[tex] = metrics
+	return metrics
 
 
 func _kill_unit_idle(unit: TacticalUnitInstance) -> void:
