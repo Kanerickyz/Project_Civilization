@@ -33,6 +33,7 @@ var _needs_center: bool = true
 const DRAG_THRESHOLD_PX := 6.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
+const UI_FONT := preload("res://resources/ui/ui_font.tres")
 const OVERLAY_Z := 4
 const WALL_Z := 2
 const GRASS_Z := 0
@@ -62,7 +63,7 @@ var _overlay_attack: Dictionary = {}
 var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
-var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label
+var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label（常驻 HP + 攻）
 var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
@@ -686,7 +687,10 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		bar = _hp_bars[unit] as Label
 	else:
 		bar = Label.new()
-		bar.add_theme_font_size_override("font_size", 12)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		bar.add_theme_font_override("font", UI_FONT)
+		bar.add_theme_font_size_override("font_size", 11)
 		bar.add_theme_color_override("font_outline_color", Color("0a1018"))
 		bar.add_theme_constant_override("outline_size", 3)
 		_labels_root.add_child(bar)
@@ -699,12 +703,15 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 		return
 	var bar := _hp_bars[unit] as Label
 	var spr := _unit_sprites[unit] as Sprite2D
-	bar.text = "%d/%d" % [unit.hp, unit.effective_max_hp()]
-	# 节点在脚点；HP 放在头顶（整段身高之上）。
-	var head_off := Vector2(0.0, -config.unit_world_height * 1.08)
+	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）。
+	bar.text = "%d/%d 攻%d" % [unit.hp, unit.effective_max_hp(), unit.effective_attack()]
+	# 节点在脚点；读数放在头顶（整段身高之上）。
+	var head_off := Vector2(0.0, -config.unit_world_height * 1.12)
 	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
 	if unit.hp <= unit.effective_max_hp() / 3:
 		bar.modulate = Color("ff6666")
+	elif unit.atk_bonus > 0:
+		bar.modulate = Color("ffe08a")
 	else:
 		bar.modulate = Color("e8f0ff")
 
