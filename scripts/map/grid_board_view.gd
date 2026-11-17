@@ -39,6 +39,7 @@ const DRAG_THRESHOLD_PX := 6.0
 const LONG_PRESS_SEC := 0.38
 const LONG_PRESS_SLOP_PX := 10.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd")
 const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
 const UI_FONT := preload("res://resources/ui/ui_font.tres")
 const HIT_FLASH_SHADER := preload("res://resources/units/shaders/unit_hit_flash.gdshader")
@@ -88,6 +89,7 @@ var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label（常驻 HP + 攻）
 var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Label（燃N）
+var _intent_icons: Dictionary = {} # TacticalUnitInstance -> Label（狼骑下一意图角标）
 var _burn_markers: Dictionary = {} # Vector2i -> Node2D（点燃地块标记）
 var _overlay_burn: Dictionary = {} # Vector2i -> true
 var _burn_pulse_tween: Tween
@@ -387,6 +389,11 @@ func _rebuild_board() -> void:
 		if burn_lbl != null and is_instance_valid(burn_lbl):
 			burn_lbl.queue_free()
 	_burn_badges.clear()
+	for key in _intent_icons.keys():
+		var intent_icon: Control = _intent_icons[key] as Control
+		if intent_icon != null and is_instance_valid(intent_icon):
+			intent_icon.queue_free()
+	_intent_icons.clear()
 	_clear_burn_markers()
 	_overlay_burn.clear()
 	_last_unit_cells.clear()
@@ -478,6 +485,7 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	if _unit_move_tweens.has(unit):
 		_update_hp_bar(unit)
 		_update_burn_badge(unit)
+		_update_intent_icon(unit)
 		return
 	var prev: Variant = _last_unit_cells.get(unit, unit.cell)
 	_last_unit_cells[unit] = unit.cell
@@ -493,6 +501,8 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 		_place_unit_blob(unit)
 		_ensure_unit_idle(unit)
 	_update_hp_bar(unit)
+	_update_burn_badge(unit)
+	_update_intent_icon(unit)
 
 
 ## 受击/冲刺位移相对 cell_size 的上限（世界单位；旧 +4.0 在 cell_size=1 时飞出数格）。
@@ -637,10 +647,18 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 		var badge: Label = _burn_badges[unit] as Label
 		badge.queue_free()
 		_burn_badges.erase(unit)
+	if _intent_icons.has(unit):
+		var intent_icon: Control = _intent_icons[unit] as Control
+		intent_icon.queue_free()
+		_intent_icons.erase(unit)
 	_last_unit_cells.erase(unit)
 
 
 func play_damage_popup(cell: Vector2i, amount: int) -> void:
+	play_float_text(cell, "-%d" % maxi(0, amount), Color("ff5533"))
+
+
+func play_float_text(cell: Vector2i, text: String, color: Color = Color("ff5533")) -> void:
 	if config == null:
 		return
 	# 与常驻 HP 读数同一套世界坐标（格心投影 + 头顶偏移），勿再抬 3D Y / 混像素。
@@ -649,10 +667,10 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	var lbl := Label.new()
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.text = "-%d" % maxi(0, amount)
+	lbl.text = text
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", DAMAGE_POPUP_FONT_SIZE)
-	lbl.add_theme_color_override("font_color", Color("ff5533"))
+	lbl.add_theme_color_override("font_color", color)
 	lbl.add_theme_color_override("font_outline_color", Color("1a0a08"))
 	lbl.add_theme_constant_override("outline_size", 5)
 	lbl.modulate = Color(1.0, 1.0, 1.0, 1.0)
@@ -917,6 +935,7 @@ func _process(_delta: float) -> void:
 		if _unit_sprites.has(unit):
 			_update_hp_bar(unit as TacticalUnitInstance)
 			_update_burn_badge(unit as TacticalUnitInstance)
+			_update_intent_icon(unit as TacticalUnitInstance)
 	for unit in _unit_blobs:
 		var spr := _unit_sprites.get(unit) as Sprite2D
 		if spr == null:
@@ -946,6 +965,7 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		_hp_bars[unit] = bar
 	_update_hp_bar(unit)
 	_ensure_burn_badge(unit)
+	_ensure_intent_icon(unit)
 
 
 func _ensure_burn_badge(unit: TacticalUnitInstance) -> void:
@@ -1008,6 +1028,69 @@ func _update_burn_badge(unit: TacticalUnitInstance) -> void:
 	var side_off := Vector2(config.unit_world_height * 0.55, -config.unit_world_height * 0.55)
 	_position_world_on_label(badge, _unit_world_position(spr) + side_off)
 	_clamp_label_in_viewport(badge)
+
+
+func _ensure_intent_icon(unit: TacticalUnitInstance) -> void:
+	if not TacticalEnemyAiScript.uses_behavior_sm(unit):
+		if _intent_icons.has(unit):
+			var stale: Control = _intent_icons[unit] as Control
+			stale.queue_free()
+			_intent_icons.erase(unit)
+		return
+	if _intent_icons.has(unit):
+		_update_intent_icon(unit)
+		return
+	var icon := Label.new()
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon.add_theme_font_override("font", UI_FONT)
+	icon.add_theme_font_size_override("font_size", 12)
+	icon.add_theme_color_override("font_outline_color", Color("0a1018"))
+	icon.add_theme_constant_override("outline_size", 4)
+	_labels_root.add_child(icon)
+	_intent_icons[unit] = icon
+	_update_intent_icon(unit)
+
+
+func _update_intent_icon(unit: TacticalUnitInstance) -> void:
+	if not _unit_sprites.has(unit):
+		return
+	if not TacticalEnemyAiScript.uses_behavior_sm(unit):
+		if _intent_icons.has(unit):
+			(_intent_icons[unit] as Control).visible = false
+		return
+	if not _intent_icons.has(unit):
+		_ensure_intent_icon(unit)
+		return
+	var icon := _intent_icons[unit] as Label
+	if not unit.is_alive():
+		icon.visible = false
+		return
+	icon.visible = true
+	# 占位意图角标：攻/移/血/加，颜色区分；不挡中央血攻读数。
+	match unit.next_intent:
+		TacticalEnemyAiScript.Intent.ATTACK:
+			icon.text = "◆攻"
+			icon.add_theme_color_override("font_color", Color("ff8a7a"))
+		TacticalEnemyAiScript.Intent.MOVE:
+			icon.text = "◆移"
+			icon.add_theme_color_override("font_color", Color("7ad0ff"))
+		TacticalEnemyAiScript.Intent.HEAL:
+			icon.text = "◆血"
+			icon.add_theme_color_override("font_color", Color("7dff9a"))
+		TacticalEnemyAiScript.Intent.BUFF_ATK:
+			icon.text = "◆加"
+			icon.add_theme_color_override("font_color", Color("ffe08a"))
+		_:
+			icon.text = "◆?"
+			icon.add_theme_color_override("font_color", Color("e8f0ff"))
+	var spr := _unit_sprites[unit] as Sprite2D
+	var side_off := Vector2(
+		-config.unit_world_height * 0.62,
+		-config.unit_world_height * 1.05
+	)
+	_position_world_on_label(icon, _unit_world_position(spr) + side_off)
+	_clamp_label_in_viewport(icon)
 
 
 func _position_world_on_label(lbl: Control, world: Vector2) -> void:

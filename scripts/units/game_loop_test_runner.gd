@@ -26,6 +26,12 @@ func _initialize() -> void:
 	if not _test_attack_flag_resets_with_side_turn():
 		quit(1)
 		return
+	if not _test_wolf_intent_attack_then_advance():
+		quit(1)
+		return
+	if not _test_wolf_intent_heal_skip_when_full():
+		quit(1)
+		return
 	print("GAME_LOOP_OK")
 	quit(0)
 
@@ -156,5 +162,57 @@ func _test_attack_flag_resets_with_side_turn() -> bool:
 	)
 	if not res2["ok"]:
 		push_error("GameLoop: opponent should attack on new side turn after reset")
+		return false
+	return true
+
+
+func _test_wolf_intent_attack_then_advance() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	if foe.next_intent != TacticalEnemyAiScript.Intent.ATTACK:
+		push_error("GameLoop: rider should start with attack intent")
+		return false
+	player.cell = foe.cell + Vector2i(1, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	if events.is_empty() or events[0].get("kind", "") != "attack":
+		push_error("GameLoop: rider should execute attack intent")
+		return false
+	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
+		push_error("GameLoop: after attack intent should advance to move")
+		return false
+	return true
+
+
+func _test_wolf_intent_heal_skip_when_full() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	# 满血回血意图应跳过；邻格可攻时落到攻击并推进。
+	foe.hp = foe.effective_max_hp()
+	foe.next_intent = TacticalEnemyAiScript.Intent.HEAL
+	player.cell = foe.cell + Vector2i(1, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	if events.is_empty() or events[0].get("kind", "") != "attack":
+		push_error("GameLoop: full-hp heal should skip into attack")
+		return false
+	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
+		push_error("GameLoop: after skipped-heal attack should advance to move")
 		return false
 	return true

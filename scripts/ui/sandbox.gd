@@ -997,6 +997,26 @@ func _run_opponent_turn_async() -> void:
 							_pending_kind = PendingKind.NONE
 				_refresh_all()
 				await get_tree().create_timer(0.28).timeout
+			elif kind == "heal":
+				var healer := ev["unit"] as TacticalUnitInstance
+				_last_log = str(ev.get("log", "对手回血"))
+				_board_view.play_float_text(
+					healer.cell, "+%d血" % int(ev.get("amount", 0)), Color("7dff9a")
+				)
+				_refresh_all()
+				await get_tree().create_timer(0.28).timeout
+			elif kind == "buff_atk":
+				var buffer := ev["unit"] as TacticalUnitInstance
+				_last_log = str(ev.get("log", "对手加攻"))
+				_board_view.play_float_text(
+					buffer.cell, "+%d攻" % int(ev.get("amount", 0)), Color("ffe08a")
+				)
+				_refresh_all()
+				await get_tree().create_timer(0.28).timeout
+			elif kind == "idle":
+				_last_log = str(ev.get("log", "对手待机"))
+				_refresh_all()
+				await get_tree().create_timer(0.12).timeout
 			if _check_victory():
 				return
 		await get_tree().create_timer(0.18).timeout

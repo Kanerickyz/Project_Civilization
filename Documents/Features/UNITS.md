@@ -11,7 +11,7 @@
 | 大剑 | `mini_pekka` | 1 | — | 1 | 慢速重击 |
 | 鼓手 | `wardrum` | 2 | — | 1 | 支援机动 |
 | 爆爆 | `boomling` | 1 | — | 2 | 生命 6、攻击 2；燃烧 |
-| 狼骑兵 | `rider` | 2 | 2 | 1 | 敌方编制；生命 10；高速近战（无被动） |
+| 狼骑兵 | `rider` | 2 | 2 | 1 | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
 - **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **2**。
 - **玩家无移力池**：移动只靠打出移动卡授权；**一张移动卡只走一次**（成功落子后清授权）。见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
@@ -33,7 +33,7 @@
 
 ## 规则（与 TurnClock）
 
-- 沙盘预置 5 蓝（盾卫/游侠/大剑/鼓手/爆爆）+ 6 红（均为狼骑兵 `rider`，各 10 血）；贴图用已迁入的 `assets/autochess/.../unit_boomling_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
+- 沙盘预置 5 蓝（盾卫/游侠/大剑/鼓手/爆爆）+ 6 红（均为狼骑兵 `rider`，各 10 血）；贴图用已迁入的 `assets/autochess/.../unit_boomling_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；敌方狼骑兵另有**下一意图**角标（◆攻/移/血/加）；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
 - **开战前部署**：先进部署阶段，拖己方到左半盘合法格；确认后再抽手牌与开战触发（见 [DEPLOYMENT.md](./DEPLOYMENT.md)）。
 - **玩家行动段**抽手牌；打出移动/攻击/主动技卡后再点目标；点「结束行动」先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。
 - 回到玩家段：清空移动/攻击卡授权后抽牌（玩家无段内攻次预算）；回到对手段：重置对手**移力池**与 `attacked_this_side_turn`。

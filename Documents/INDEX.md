@@ -16,6 +16,7 @@
 | [Features/LAKE_FOREST.md](./Features/LAKE_FOREST.md) | **湖泊 / 树林** · 成簇开局 · 湖清燃 · 林挡攻 |
 | [Features/UNITS.md](./Features/UNITS.md) | **战术单位** · 移动距离 / 对手移力池 · 触发被动 |
 | [Features/COMBAT.md](./Features/COMBAT.md) | **普攻 / 胜负 / 对手 AI** |
+| [Features/WOLF_CAVALRY_INTENT.md](./Features/WOLF_CAVALRY_INTENT.md) | **狼骑兵意图状态机** · 攻/移/血|加 · 意图角标 |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
 | [Features/BURN_STATUS.md](./Features/BURN_STATUS.md) | **燃烧状态** · 爆爆燃爆 / 死亡点燃 |
 | [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 拖己方到左半盘 · 确认开战 |
