@@ -156,6 +156,24 @@ func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 	return out
 
 
+## 选中查看用：临时按移力预算算可达格，不改写单位剩余移力。step_cap>0 时再封顶。
+func preview_reachable_move_cells(
+	unit: TacticalUnitInstance, step_cap: int = -1
+) -> Array[Vector2i]:
+	if unit == null or not unit.is_alive():
+		return []
+	var budget := unit.def.action_move_budget()
+	if step_cap > 0:
+		budget = mini(budget, step_cap)
+	if budget <= 0:
+		return []
+	var saved := unit.remaining_move_budget
+	unit.remaining_move_budget = budget
+	var out := reachable_move_cells(unit)
+	unit.remaining_move_budget = saved
+	return out
+
+
 func attack_range_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	if unit == null or not unit.is_alive():
