@@ -21,6 +21,9 @@ func _initialize() -> void:
 	if not _test_player_death_removes_move_attack_and_skill():
 		quit(1)
 		return
+	if not _test_player_death_cull_is_idempotent():
+		quit(1)
+		return
 	if not _test_wardrum_death_removes_skill_draw_from_hand():
 		quit(1)
 		return
@@ -247,6 +250,48 @@ func _test_player_death_removes_move_attack_and_skill() -> bool:
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != before_armor - 1:
 		push_error("CardActions: armor skill should drop by 1")
+		return false
+	return true
+
+
+## 回归 PC-49：燃烧段开始会对尸体重复 purge；第二次不得再减 MOVE/攻。
+func _test_player_death_cull_is_idempotent() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 49
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	var victim: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
+			victim = u
+			break
+	if victim == null:
+		push_error("CardActions: knight missing for idempotent cull")
+		return false
+	var first := deck.on_player_unit_died(victim)
+	if first != 3:
+		push_error("CardActions: first knight cull should remove 3, got %d" % first)
+		return false
+	var move_after := deck.count_kind(TacticalActionCardScript.Kind.MOVE)
+	var attack_after := deck.count_kind(TacticalActionCardScript.Kind.ATTACK)
+	var total_after := deck.total_cards()
+	# 模拟段开始燃烧扫尸体：同一尸体再 purge。
+	var second := deck.on_player_unit_died(victim)
+	if second != 0:
+		push_error("CardActions: repeat cull must be no-op, got %d" % second)
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.MOVE) != move_after:
+		push_error("CardActions: repeat cull must not drop MOVE")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.ATTACK) != attack_after:
+		push_error("CardActions: repeat cull must not drop ATTACK")
+		return false
+	if deck.total_cards() != total_after:
+		push_error("CardActions: repeat cull must not change total")
+		return false
+	if not victim.death_cards_culled:
+		push_error("CardActions: death_cards_culled should stay true")
 		return false
 	return true
 
