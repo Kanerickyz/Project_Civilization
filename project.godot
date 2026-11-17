@@ -11,10 +11,10 @@ config_version=5
 [application]
 
 config/name="战术战棋"
-config/version="0.1.8"
+config/version="0.1.9"
 run/main_scene="res://scenes/main/main_menu.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
-config/icon="res://icon.svg"
+config/icon="res://assets/autochess/branding/game_icon.png"
 
 [autoload]
 

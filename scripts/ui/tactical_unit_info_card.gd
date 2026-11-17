@@ -6,9 +6,12 @@ extends PanelContainer
 
 const UI_FONT := preload("res://resources/ui/ui_font.tres")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const STAT_ATTACK_TEX := preload("res://assets/autochess/sprites/paper_cutout/ui/stat_attack.png")
+const STAT_HP_TEX := preload("res://assets/autochess/sprites/paper_cutout/ui/stat_hp.png")
 
 const CARD_WIDTH := 228.0
 const PORTRAIT_SIZE := Vector2(52.0, 60.0)
+const STAT_ICON_SIZE := Vector2(16.0, 16.0)
 const PAPER := Color(0.97, 0.92, 0.79, 0.98)
 const INK := Color(0.13, 0.10, 0.08, 1.0)
 const INK_SOFT := Color(0.32, 0.27, 0.21, 1.0)
@@ -19,7 +22,9 @@ const POP_IN_SEC := 0.16
 var _portrait: TextureRect
 var _name_label: Label
 var _side_label: Label
-var _stats_label: Label
+var _atk_value: Label
+var _hp_value: Label
+var _range_label: Label
 var _body_label: RichTextLabel
 var _style: StyleBoxFlat
 var _motion: Tween
@@ -77,13 +82,20 @@ func _ready() -> void:
 	_side_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	titles.add_child(_side_label)
 
-	_stats_label = Label.new()
-	_stats_label.add_theme_font_override("font", UI_FONT)
-	_stats_label.add_theme_font_size_override("font_size", 13)
-	_stats_label.add_theme_color_override("font_color", INK)
-	_stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_stats_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	titles.add_child(_stats_label)
+	var stats_row := HBoxContainer.new()
+	stats_row.add_theme_constant_override("separation", 6)
+	stats_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	titles.add_child(stats_row)
+
+	stats_row.add_child(_make_stat_icon(STAT_ATTACK_TEX))
+	_atk_value = _make_stat_value_label()
+	stats_row.add_child(_atk_value)
+	stats_row.add_child(_make_stat_icon(STAT_HP_TEX))
+	_hp_value = _make_stat_value_label()
+	stats_row.add_child(_hp_value)
+	_range_label = _make_stat_value_label()
+	_range_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_row.add_child(_range_label)
 
 	var rule := ColorRect.new()
 	rule.color = Color(INK, 0.35)
@@ -150,15 +162,30 @@ func _apply_unit(unit: TacticalUnitInstance) -> void:
 	var tex: Texture2D = unit.def.texture_blue if is_player else unit.def.texture_red
 	_portrait.texture = tex
 	_portrait.visible = tex != null
-	_stats_label.text = "攻 %d · 血 %d/%d · 移 %d · 射 %d" % [
-		unit.effective_attack(),
-		unit.hp,
-		unit.effective_max_hp(),
-		unit.def.move_range,
-		unit.def.attack_range,
-	]
+	_atk_value.text = str(unit.effective_attack())
+	_hp_value.text = "%d/%d" % [unit.hp, unit.effective_max_hp()]
+	_range_label.text = "移 %d · 射 %d" % [unit.def.move_range, unit.def.attack_range]
 	_body_label.clear()
 	_body_label.append_text(_skills_bbcode(unit))
+
+
+func _make_stat_icon(tex: Texture2D) -> TextureRect:
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = STAT_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = tex
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return icon
+
+
+func _make_stat_value_label() -> Label:
+	var label := Label.new()
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", 13)
+	label.add_theme_color_override("font_color", INK)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return label
 
 
 func _skills_bbcode(unit: TacticalUnitInstance) -> String:

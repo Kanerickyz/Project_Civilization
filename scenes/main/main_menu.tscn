@@ -1,6 +1,8 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_menu"]
+[ext_resource type="Texture2D" path="res://assets/autochess/ui/main_menu/menu_background.jpg" id="2_bg"]
+[ext_resource type="Texture2D" path="res://assets/autochess/ui/main_menu/menu_logo.png" id="3_logo"]
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -11,6 +13,28 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_menu")
 
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Dim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.05, 0.05, 0.08, 0.35)
+
 [node name="Center" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 8
@@ -19,16 +43,24 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -180.0
-offset_top = -140.0
+offset_top = -200.0
 offset_right = 180.0
-offset_bottom = 140.0
+offset_bottom = 180.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 16
 
+[node name="Logo" type="TextureRect" parent="Center"]
+custom_minimum_size = Vector2(0, 96)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("3_logo")
+expand_mode = 1
+stretch_mode = 5
+
 [node name="Title" type="Label" parent="Center"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 36
+theme_override_font_sizes/font_size = 28
 text = "战术战棋"
 horizontal_alignment = 1
 
@@ -63,4 +95,4 @@ offset_top = -36.0
 offset_right = 220.0
 offset_bottom = -12.0
 grow_vertical = 0
-text = "v0.2.0"
+text = "v0.1.9"
