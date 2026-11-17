@@ -149,7 +149,7 @@ func resolve_wardrum_redraw() -> int:
 	return draw_up_to(draw_count)
 
 
-## 打出移动卡并选定己方单位：授权本段移动，并将剩余移力重置为满池。
+## 打出移动卡并选定己方单位：授权本段移动一次，并将剩余移力重置为满池。
 func authorize_move(unit: TacticalUnitInstance) -> bool:
 	if unit == null or not unit.is_alive():
 		return false
@@ -160,6 +160,17 @@ func authorize_move(unit: TacticalUnitInstance) -> bool:
 	unit.moved_this_side_turn = false
 	changed.emit()
 	return true
+
+
+## 一次成功移动后消耗授权：清授权并将剩余移力置 0（一张移动卡只走一次）。
+func consume_move_authorization(unit: TacticalUnitInstance) -> void:
+	if unit == null:
+		return
+	if move_authorized.has(unit):
+		move_authorized.erase(unit)
+	unit.remaining_move_budget = 0
+	unit.moved_this_side_turn = true
+	changed.emit()
 
 
 ## 打出攻击/加强攻击卡：清除已攻标记；加强攻写入 pending_attack_bonus。
