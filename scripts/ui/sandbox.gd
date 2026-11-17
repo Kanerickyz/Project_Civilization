@@ -353,7 +353,7 @@ func _refresh_all() -> void:
 
 func _compose_hint() -> String:
 	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
-		return "移动中：%s · 点绿格（可多步）" % _focus_unit.def.display_name
+		return "移动中：%s · 点绿格（本卡一次）" % _focus_unit.def.display_name
 	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
 		return "攻击中：%s · 点红圈内敌人" % _focus_unit.def.display_name
 	if _last_log != "":
@@ -465,7 +465,7 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
 		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
-		_last_log = "移动：%s · 移力已重置 · 点绿格" % target.def.display_name
+		_last_log = "移动：%s · 点绿格（本卡仅一次）" % target.def.display_name
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
 		_pending_kind = PendingKind.NONE
 		_focus_unit = null
@@ -528,14 +528,13 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_refresh_all()
 			return
 		if _board.try_move(_focus_unit, cell):
-			_last_log = "%s 移动至 (%d,%d) · 剩余移力 %d" % [
+			_deck.consume_move_authorization(_focus_unit)
+			_pending_kind = PendingKind.NONE
+			_last_log = "%s 移动至 (%d,%d) · 本卡已用完" % [
 				_focus_unit.def.display_name,
 				cell.x,
 				cell.y,
-				_focus_unit.remaining_move_budget,
 			]
-			if _focus_unit.remaining_move_budget <= 0:
-				_pending_kind = PendingKind.NONE
 			_refresh_all()
 			_input_locked = true
 			_refresh_action_buttons()

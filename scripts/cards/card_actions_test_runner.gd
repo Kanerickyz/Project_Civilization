@@ -30,6 +30,9 @@ func _initialize() -> void:
 	if not _test_move_card_resets_budget():
 		quit(1)
 		return
+	if not _test_move_card_one_step_only():
+		quit(1)
+		return
 	if not _test_attack_card_clears_flag_for_second_hit():
 		quit(1)
 		return
@@ -288,6 +291,43 @@ func _test_move_card_resets_budget() -> bool:
 		return false
 	if board.reachable_move_cells(unit).is_empty():
 		push_error("CardActions: after reset should have reachable cells")
+		return false
+	return true
+
+
+func _test_move_card_one_step_only() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
+	deck.build_from_living_player_units(board)
+	var unit: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
+			unit = u
+			break
+	if unit == null:
+		push_error("CardActions: need archer for one-step move test")
+		return false
+	if unit.def.action_move_budget() != 2:
+		push_error("CardActions: archer move distance should be 2")
+		return false
+	if not deck.authorize_move(unit):
+		push_error("CardActions: authorize_move failed")
+		return false
+	var dest := unit.cell + Vector2i(1, 0)
+	if board.unit_at(dest) != null:
+		dest = unit.cell + Vector2i(0, 1)
+	if not board.try_move(unit, dest):
+		push_error("CardActions: first move after card should succeed")
+		return false
+	deck.consume_move_authorization(unit)
+	if deck.is_move_authorized(unit):
+		push_error("CardActions: move auth must clear after one step")
+		return false
+	if unit.remaining_move_budget != 0:
+		push_error("CardActions: remaining budget must be 0 after consume")
+		return false
+	if not board.reachable_move_cells(unit).is_empty():
+		push_error("CardActions: no further moves without a new card")
 		return false
 	return true
 

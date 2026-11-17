@@ -34,7 +34,7 @@ func _initialize() -> void:
 	if not _test_side_turn_resets_attack():
 		quit(1)
 		return
-	if not _test_multi_move_budget():
+	if not _test_archer_move_distance_two():
 		quit(1)
 		return
 	print("TACTICAL_UNITS_OK")
@@ -244,26 +244,26 @@ func _test_side_turn_resets_attack() -> bool:
 	return true
 
 
-func _test_multi_move_budget() -> bool:
+func _test_archer_move_distance_two() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var archer := _player_unit(board, "archer")
 	if archer == null:
 		return false
-	var budget := archer.def.action_move_budget()
-	if budget < 2:
-		push_error("TacticalUnits: archer needs move budget for multi-step test")
+	if archer.def.move_range != 2 or archer.def.action_move_budget() != 2:
+		push_error(
+			"TacticalUnits: archer move_range/budget should be 2, got %d/%d"
+			% [archer.def.move_range, archer.def.action_move_budget()]
+		)
 		return false
-	var first_dest := archer.cell + Vector2i(1, 0)
-	if board.unit_at(first_dest) != null:
-		first_dest = archer.cell + Vector2i(0, 1)
-	if not board.try_move(archer, first_dest):
-		push_error("TacticalUnits: first multi-move step failed")
-		return false
-	if archer.remaining_move_budget <= 0:
-		push_error("TacticalUnits: should have budget after one step")
-		return false
-	var moves := board.reachable_move_cells(archer)
-	if moves.is_empty():
-		push_error("TacticalUnits: should still show reachable cells with budget left")
+	var far := archer.cell + Vector2i(3, 0)
+	if board.is_passable(far) and board.unit_at(far) == null:
+		if board.try_move(archer, far):
+			push_error("TacticalUnits: archer must not move 3 with range 2")
+			return false
+	var mid := archer.cell + Vector2i(2, 0)
+	if board.unit_at(mid) != null:
+		mid = archer.cell + Vector2i(0, 2)
+	if not board.try_move(archer, mid):
+		push_error("TacticalUnits: archer should move distance 2")
 		return false
 	return true
