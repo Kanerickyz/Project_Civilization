@@ -400,7 +400,11 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 ## 受击/冲刺位移相对 cell_size 的上限（世界单位；旧 +4.0 在 cell_size=1 时飞出数格）。
 const UNIT_HIT_SHAKE_FRAC := 0.08
 const UNIT_ATTACK_LUNGE_FRAC := 0.28
-const UNIT_HIT_FLASH := Color(1.35, 1.35, 1.35, 1.0)
+## 受击瞬间过曝闪白（GL Compatibility modulate >1 可读）。
+const UNIT_HIT_FLASH := Color(2.6, 2.6, 2.6, 1.0)
+const UNIT_HIT_FLASH_HOLD_SEC := 0.08
+const DAMAGE_POPUP_FONT_SIZE := 28
+const DAMAGE_POPUP_LIFT_PX := 56.0
 
 
 func unit_move_duration_sec() -> float:
@@ -537,20 +541,36 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	if config == null:
 		return
-	var ground := _cell_ground_center(cell, config.cell_size)
-	ground.y = config.tile_height + config.unit_world_height * 0.55
-	var world := _oblique_project(ground)
-	var lift := 0.0
+	# 与常驻 HP 读数同一套世界坐标（格心投影 + 头顶偏移），勿再抬 3D Y / 混像素。
+	var world := _cell_to_world(cell, config.cell_size)
+	var head := Vector2(0.0, -config.unit_world_height * 1.35)
 	var lbl := Label.new()
-	lbl.text = "-%d!" % amount
-	lbl.add_theme_font_size_override("font_size", 18)
-	lbl.modulate = Color("ff6644")
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.text = "-%d" % maxi(0, amount)
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", DAMAGE_POPUP_FONT_SIZE)
+	lbl.add_theme_color_override("font_color", Color("ff5533"))
+	lbl.add_theme_color_override("font_outline_color", Color("1a0a08"))
+	lbl.add_theme_constant_override("outline_size", 5)
+	lbl.modulate = Color(1.0, 1.0, 1.0, 1.0)
+	lbl.scale = Vector2(0.55, 0.55)
 	_labels_root.add_child(lbl)
-	_position_world_on_label(lbl, world + Vector2(0.0, lift - 36.0))
+	lbl.reset_size()
+	lbl.pivot_offset = lbl.size * 0.5
+	_position_world_on_label(lbl, world + head)
+	_clamp_label_in_viewport(lbl)
+	var start_pos := lbl.position
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_method(func(pos: Vector2): _position_world_on_label(lbl, pos), lbl.position, lbl.position + Vector2(0, -36), 0.5).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(lbl, "modulate:a", 0.0, 0.45).set_delay(0.12)
+	# 上浮在屏幕空间（Control.position），不再经 world→screen。
+	tw.tween_property(lbl, "position", start_pos + Vector2(0.0, -DAMAGE_POPUP_LIFT_PX), 0.55).set_trans(
+		Tween.TRANS_SINE
+	).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "scale", Vector2(1.12, 1.12), 0.14).set_trans(Tween.TRANS_BACK).set_ease(
+		Tween.EASE_OUT
+	)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.38).set_delay(0.2)
 	tw.finished.connect(lbl.queue_free)
 
 
@@ -568,12 +588,15 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	spr.position = home
 	var shake := unit_hit_shake_px()
 	var rest := _look().unit_modulate
-	# 短促闪白 → 回原色；位移限制在格内并结束时强制回格心。
+	# 过曝闪白短停 → 回原色；位移限制在格内并结束时强制回格心。
 	spr.modulate = UNIT_HIT_FLASH
 	var tw := create_tween()
 	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.05).set_trans(Tween.TRANS_SINE)
-	tw.parallel().tween_property(spr, "modulate", rest, 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_property(spr, "position", home, 0.10).set_trans(Tween.TRANS_SINE)
+	tw.parallel().tween_interval(UNIT_HIT_FLASH_HOLD_SEC)
+	tw.tween_property(spr, "position", home, 0.12).set_trans(Tween.TRANS_SINE)
+	tw.parallel().tween_property(spr, "modulate", rest, 0.22).set_trans(Tween.TRANS_SINE).set_ease(
+		Tween.EASE_OUT
+	)
 	tw.finished.connect(func() -> void:
 		if not is_instance_valid(spr) or not _unit_sprites.has(unit):
 			return
@@ -784,6 +807,19 @@ func _position_world_on_label(lbl: Control, world: Vector2) -> void:
 	var canvas := _camera.get_canvas_transform()
 	var screen := canvas * world
 	lbl.position = screen - lbl.size * 0.5
+
+
+func _clamp_label_in_viewport(lbl: Control) -> void:
+	if lbl == null or _viewport == null:
+		return
+	var vs := Vector2(_viewport.size)
+	if vs.x <= 1.0 or vs.y <= 1.0:
+		return
+	var pad := 4.0
+	var w := maxf(lbl.size.x * absf(lbl.scale.x), 1.0)
+	var h := maxf(lbl.size.y * absf(lbl.scale.y), 1.0)
+	lbl.position.x = clampf(lbl.position.x, pad, maxf(pad, vs.x - w - pad))
+	lbl.position.y = clampf(lbl.position.y, pad, maxf(pad, vs.y - h - pad))
 
 
 func _grass_color_for_cell(cell: Vector2i, terrain_id: StringName) -> Color:
