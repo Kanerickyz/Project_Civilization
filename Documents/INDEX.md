@@ -17,6 +17,7 @@
 | [Features/UNITS.md](./Features/UNITS.md) | **战术单位** · 移动距离 / 对手移力池 · 触发被动 |
 | [Features/COMBAT.md](./Features/COMBAT.md) | **普攻 / 胜负 / 对手 AI** |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
+| [Features/BURN_STATUS.md](./Features/BURN_STATUS.md) | **燃烧状态** · 爆爆燃爆 / 死亡点燃 |
 
 ## 仓库里有什么
 

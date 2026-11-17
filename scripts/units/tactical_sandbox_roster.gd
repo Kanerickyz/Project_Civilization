@@ -11,6 +11,7 @@ const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/archer.tres",
 	"res://resources/units/mini_pekka.tres",
 	"res://resources/units/wardrum.tres",
+	"res://resources/units/boomling.tres",
 ]
 
 ## 敌方五狼骑兵（autochess id `rider` / 剪纸 unit_rider）。
@@ -21,6 +22,7 @@ const PLAYER_CELLS: Array[Vector2i] = [
 	Vector2i(1, 4),
 	Vector2i(1, 6),
 	Vector2i(2, 4),
+	Vector2i(2, 6),
 ]
 
 const OPPONENT_CELLS: Array[Vector2i] = [

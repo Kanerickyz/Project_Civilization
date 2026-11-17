@@ -166,6 +166,9 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 	var hurt_logs := TacticalAbilitySystem.process_unit_hurt(self, target, amount)
 	if not target.is_alive():
 		result["killed"] = true
+		# 先死亡触发（爆燃等），再记击杀者被动；死亡单位仍可读 cell。
+		var death_logs := TacticalAbilitySystem.process_unit_death(self, target)
+		hurt_logs.append_array(death_logs)
 		if source != null and source != target:
 			var kill_logs := TacticalAbilitySystem.process_unit_kill(self, source, target)
 			hurt_logs.append_array(kill_logs)
@@ -173,6 +176,57 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 	result["log"] = " · ".join(hurt_logs) if hurt_logs.size() > 0 else ""
 	changed.emit()
 	return result
+
+
+## 对 origin 切比雪夫 ≤ radius 的存活单位施加燃烧（可排除 exclude）。返回受影响人数。
+func apply_burn_aoe(
+	origin: Vector2i,
+	stacks: int,
+	radius: int = 1,
+	exclude: TacticalUnitInstance = null
+) -> int:
+	if stacks <= 0:
+		return 0
+	var n := 0
+	for u in living_units():
+		if u == exclude:
+			continue
+		if GridMathScript.chebyshev(origin, u.cell) > radius:
+			continue
+		u.add_burn_stacks(stacks)
+		n += 1
+	if n > 0:
+		changed.emit()
+	return n
+
+
+## 每方行动段开始：对所有燃烧单位先造成=层数伤害，再减 1 层。
+func process_burn_ticks() -> Array[String]:
+	var logs: Array[String] = []
+	var victims: Array[TacticalUnitInstance] = []
+	for u in living_units():
+		if u.burn_stacks > 0:
+			victims.append(u)
+	for u in victims:
+		if not u.is_alive() or u.burn_stacks <= 0:
+			continue
+		var stacks := u.burn_stacks
+		var hurt := apply_damage(u, stacks, null)
+		if hurt.get("ok", false):
+			logs.append(
+				"%s 燃烧 %d：受到 %d 伤害%s"
+				% [
+					u.def.display_name,
+					stacks,
+					stacks,
+					"（阵亡）" if hurt.get("killed", false) else "",
+				]
+			)
+		if u.is_alive():
+			u.burn_stacks = maxi(0, u.burn_stacks - 1)
+	if logs.size() > 0:
+		changed.emit()
+	return logs
 
 
 func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:

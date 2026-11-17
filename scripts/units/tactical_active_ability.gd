@@ -9,6 +9,7 @@ enum TriggerKind {
 	ON_SELF_DEPLOY,
 	ON_SELF_KILL,
 	ON_SELF_MOVE_END,
+	ON_SELF_DEATH,
 }
 
 
@@ -26,3 +27,6 @@ enum TriggerKind {
 @export var ally_buff_radius: int = 2
 ## 击杀时往玩家手牌加 1 张临时攻击卡（仅玩家击杀生效）。
 @export var grant_ephemeral_attack_on_kill: bool = false
+## 触发时对中心格及周围（切比雪夫 ≤ aoe_burn_radius）存活单位施加燃烧层数。
+@export var aoe_burn_stacks: int = 0
+@export var aoe_burn_radius: int = 1
