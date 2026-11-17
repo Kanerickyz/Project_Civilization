@@ -564,15 +564,24 @@ func _on_confirm_deploy_pressed() -> void:
 
 func _on_unit_deploy_dropped(unit: TacticalUnitInstance, cell: Vector2i) -> void:
 	if not _in_deployment or _input_locked or _game_over:
+		if unit != null and _board_view != null:
+			_board_view.cancel_deploy_drag_visual(unit)
 		return
 	if unit == null or unit.faction != TacticalFactionScript.Id.PLAYER:
 		_last_log = "只能拖动己方单位"
+		if unit != null and _board_view != null:
+			_board_view.cancel_deploy_drag_visual(unit)
 		_refresh_all()
 		return
+	var from := unit.cell
 	if _board.try_deploy_place(unit, cell):
 		_selected_unit = unit
+		if _board_view != null:
+			_board_view.accept_deploy_placement(unit, from)
 		_last_log = "%s 部署至 (%d,%d)" % [unit.def.display_name, cell.x, cell.y]
 	else:
+		if _board_view != null:
+			_board_view.cancel_deploy_drag_visual(unit)
 		_last_log = "只能放到绿区空格或与己方换位"
 	_refresh_all()
 

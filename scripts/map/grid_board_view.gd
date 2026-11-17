@@ -161,6 +161,34 @@ func _clear_deploy_drag() -> void:
 	_deploy_drag_unit = null
 
 
+## 部署落位成功：对齐逻辑格并跳过 hop（拖放已跟手到落点）。
+func accept_deploy_placement(unit: TacticalUnitInstance, previous_cell: Vector2i) -> void:
+	if unit == null:
+		return
+	_last_unit_cells[unit] = unit.cell
+	var other := _unit_under_cell(previous_cell)
+	if other != null and other != unit:
+		_last_unit_cells[other] = other.cell
+		_kill_unit_move_tween(other)
+		_snap_unit_to_cell_center(other)
+		if other.is_alive():
+			_ensure_unit_idle(other)
+	_kill_unit_move_tween(unit)
+	_snap_unit_to_cell_center(unit)
+	if unit.is_alive():
+		_ensure_unit_idle(unit)
+
+
+## 部署落位失败 / 越界：角色弹回原格。
+func cancel_deploy_drag_visual(unit: TacticalUnitInstance) -> void:
+	if unit == null or not _unit_sprites.has(unit):
+		return
+	_kill_unit_move_tween(unit)
+	_snap_unit_to_cell_center(unit)
+	if unit.is_alive():
+		_ensure_unit_idle(unit)
+
+
 func _ensure_long_press_timer() -> void:
 	if _long_press_timer != null:
 		return
@@ -1177,14 +1205,17 @@ func _apply_burn_pulse_alpha(alpha: float) -> void:
 		node.modulate = Color(1.0, 1.0, 1.0, alpha)
 
 
-## 拖牌悬停：cell 为 null 时清空；unit 非空则播选中 scale 脉冲。
-## valid_drop：可落己方合法目标=true；悬停单位但不可落=false；空白格传 false 且 unit=null。
+## 拖牌/部署悬停：cell 为 null 时清空；unit 非空则播选中 scale 脉冲。
+## valid_drop：可落=true（空格或合法目标）；悬停单位但不可落=false；空白无效格 unit=null。
 func set_card_drag_hover(cell: Variant, unit: TacticalUnitInstance, valid_drop: bool) -> void:
 	var prev_hover := _overlay_drag_hover
 	if cell is Vector2i:
 		_overlay_drag_hover = cell as Vector2i
-		if unit != null and unit.is_alive():
-			_overlay_drag_hover_kind = 1 if valid_drop else -1
+		# 可落（含空格）一律绿；不可落且压在单位上为红；其余中性黄。
+		if valid_drop:
+			_overlay_drag_hover_kind = 1
+		elif unit != null and unit.is_alive():
+			_overlay_drag_hover_kind = -1
 		else:
 			_overlay_drag_hover_kind = 0
 	else:
@@ -1724,23 +1755,55 @@ func _continue_press_motion(local_pos: Vector2) -> void:
 		_drag_moved = true
 		# 部署：越过阈值后改为拖单位，不再平移镜头。
 		if _is_deploy_draggable(_press_unit):
-			_deploy_drag_unit = _press_unit
-			_cancel_long_press()
-			_pause_unit_idle(_deploy_drag_unit)
+			_start_deploy_unit_drag(_press_unit)
 	if dist >= LONG_PRESS_SLOP_PX:
 		_cancel_long_press()
 		if _deploy_drag_unit == null:
 			_press_unit = null
 	if _deploy_drag_unit != null:
+		_update_deploy_unit_drag(local_pos)
 		var cell_v: Variant = _pick_cell(local_pos)
 		if cell_v == null:
 			clear_card_drag_hover()
 		else:
 			var cell: Vector2i = cell_v
-			set_card_drag_hover(cell, _deploy_drag_unit, _deploy_drop_valid_at(cell))
+			var valid := _deploy_drop_valid_at(cell)
+			var occupant := _unit_under_cell(cell)
+			var pulse: TacticalUnitInstance = null
+			# 换位时脉冲目标友方；空格只标绿，不脉冲自己。
+			if occupant != null and occupant != _deploy_drag_unit:
+				pulse = occupant
+			set_card_drag_hover(cell, pulse, valid)
 		return
 	if _drag_moved and not _info_shown:
 		_pan_by_screen_delta(delta)
+
+
+func _start_deploy_unit_drag(unit: TacticalUnitInstance) -> void:
+	_deploy_drag_unit = unit
+	_cancel_long_press()
+	_pause_unit_idle(unit)
+	_kill_unit_move_tween(unit)
+	if _drag_select_unit == unit:
+		_clear_drag_select_unit()
+	else:
+		_kill_unit_select_tween(unit)
+	var spr := _unit_sprites.get(unit) as Sprite2D
+	if spr == null:
+		return
+	_float_unit_for_world_tween(spr)
+	spr.z_as_relative = false
+	spr.z_index = UNIT_Z_BASE + 8000
+
+
+func _update_deploy_unit_drag(local_pos: Vector2) -> void:
+	if _deploy_drag_unit == null or not _unit_sprites.has(_deploy_drag_unit):
+		return
+	var spr := _unit_sprites[_deploy_drag_unit] as Sprite2D
+	_float_unit_for_world_tween(spr)
+	spr.position = _local_to_world(local_pos)
+	spr.z_as_relative = false
+	spr.z_index = UNIT_Z_BASE + 8000
 
 
 func _end_press(local_pos: Vector2) -> void:
@@ -1758,11 +1821,14 @@ func _end_press(local_pos: Vector2) -> void:
 		var dropped := _deploy_drag_unit
 		var cell_v: Variant = _pick_cell(local_pos)
 		clear_card_drag_hover()
-		_clear_deploy_drag()
+		# 松手先不弹回旧格：合法落点由沙盘 accept；失败/越界再 cancel。
+		_deploy_drag_unit = null
 		_press_unit = null
-		_suppress_click = false
+		_suppress_click = true
 		if cell_v != null:
 			unit_deploy_dropped.emit(dropped, cell_v as Vector2i)
+		else:
+			cancel_deploy_drag_visual(dropped)
 		return
 	if not _drag_moved and not _suppress_click:
 		_handle_click(local_pos)
@@ -1786,15 +1852,58 @@ func _on_long_press_timeout() -> void:
 
 
 func _unit_under_local(local_pos: Vector2) -> TacticalUnitInstance:
+	# 先按精灵包围盒抓取（高立绘头顶常不在格心），再回退格点。
+	if _camera != null and config != null and size.x > 0.0 and size.y > 0.0:
+		var world := _local_to_world(local_pos)
+		var best: TacticalUnitInstance = null
+		var best_z := -2147483648
+		for key in _unit_sprites.keys():
+			var u := key as TacticalUnitInstance
+			if u == null or not u.is_alive():
+				continue
+			if _deploy_mode and u.faction != TacticalFactionScript.Id.PLAYER:
+				continue
+			var spr := _unit_sprites[u] as Sprite2D
+			if not _sprite_hits_world(spr, world):
+				continue
+			if spr.z_index >= best_z:
+				best_z = spr.z_index
+				best = u
+		if best != null:
+			return best
 	var cell: Variant = _pick_cell(local_pos)
 	if cell == null:
 		return null
 	var c := cell as Vector2i
 	for key in _unit_sprites.keys():
 		var u := key as TacticalUnitInstance
-		if u != null and u.is_alive() and u.cell == c:
-			return u
+		if u == null or not u.is_alive() or u.cell != c:
+			continue
+		if _deploy_mode and u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		return u
 	return null
+
+
+func _sprite_hits_world(spr: Sprite2D, world: Vector2) -> bool:
+	if spr == null or not is_instance_valid(spr) or spr.texture == null:
+		return false
+	var lr := spr.get_rect()
+	var sc := spr.scale
+	var origin := _unit_world_position(spr) + Vector2(lr.position.x * sc.x, lr.position.y * sc.y)
+	var rect_size := Vector2(lr.size.x * absf(sc.x), lr.size.y * absf(sc.y))
+	if rect_size.x <= 0.0 or rect_size.y <= 0.0:
+		return false
+	# 略放大便于点按立绘边缘。
+	var pad := rect_size * 0.08
+	return Rect2(origin - pad * 0.5, rect_size + pad).has_point(world)
+
+
+func _local_to_world(local_pos: Vector2) -> Vector2:
+	if _camera == null or not _camera.is_inside_tree():
+		return local_pos
+	var vp_pos := _to_viewport_pos(local_pos)
+	return _camera.get_canvas_transform().affine_inverse() * vp_pos
 
 
 ## 单位头顶锚点（全局屏幕坐标），供信息卡定位。
