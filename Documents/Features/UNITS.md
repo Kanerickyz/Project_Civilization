@@ -34,6 +34,7 @@
 ## 规则（与 TurnClock）
 
 - 沙盘预置 5 蓝（盾卫/游侠/大剑/鼓手/爆爆）+ 6 红（均为狼骑兵 `rider`，各 10 血）；贴图用已迁入的 `assets/autochess/.../unit_boomling_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
+- **开战前部署**：先进部署阶段，拖己方到左半盘合法格；确认后再抽手牌与开战触发（见 [DEPLOYMENT.md](./DEPLOYMENT.md)）。
 - **玩家行动段**抽手牌；打出移动/攻击/主动技卡后再点目标；点「结束行动」先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。
 - 回到玩家段：清空移动/攻击卡授权后抽牌（玩家无段内攻次预算）；回到对手段：重置对手**移力池**与 `attacked_this_side_turn`。
 - **未做**：商店、招募、CombatEventBus、召唤。

@@ -44,6 +44,9 @@ var _top_bar: MarginContainer
 var _side_panel: PanelContainer
 var _bottom_bar: MarginContainer
 var _unit_info_card: TacticalUnitInfoCard
+var _confirm_deploy_button: Button
+## 开战前部署：确认前不抽手牌、不开战触发。
+var _in_deployment: bool = true
 
 
 func _ready() -> void:
@@ -58,12 +61,69 @@ func _ready() -> void:
 	_build()
 	# HUD 建好后再听牌库变化，避免 _ready 早期 changed 打到空 Label。
 	_deck.changed.connect(_on_deck_changed)
+	_enter_deployment_phase()
+	_refresh_all()
+	_show_deploy_banner()
+
+
+func _enter_deployment_phase() -> void:
+	_in_deployment = true
+	_pending_kind = PendingKind.NONE
+	_focus_unit = null
+	_selected_unit = null
+	_last_log = "部署：拖己方单位到绿区 · 点「开始战斗」开战"
+	_apply_deploy_mode_to_board()
+	_sync_deploy_action_buttons()
+
+
+func _begin_battle_after_deploy() -> void:
+	if not _in_deployment:
+		return
+	_in_deployment = false
+	if _board_view != null:
+		_board_view.set_deploy_mode(false)
+	_sync_deploy_action_buttons()
+	_layout_hud_for_viewport()
 	_fire_battle_start_triggers()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_deck.begin_player_turn()
+	_last_log = "战斗开始 · 已抽手牌"
 	_refresh_all()
 	_show_turn_banner()
+
+
+## GUI / 验收：跳过部署直接开战（若已开战则无操作）。
+func capture_confirm_deploy() -> void:
+	_begin_battle_after_deploy()
+
+
+func _apply_deploy_mode_to_board() -> void:
+	if _board_view == null or _board == null:
+		return
+	var cells: Array = _board.player_deploy_cells()
+	_board_view.set_deploy_mode(_in_deployment, cells)
+
+
+func _sync_deploy_action_buttons() -> void:
+	if _confirm_deploy_button != null:
+		_confirm_deploy_button.visible = _in_deployment
+	if _end_turn_button != null:
+		_end_turn_button.visible = not _in_deployment
+	if _cancel_target_button != null:
+		_cancel_target_button.visible = not _in_deployment
+	if _hand_fan != null:
+		_hand_fan.visible = not _in_deployment
+
+
+func _show_deploy_banner() -> void:
+	_turn_banner.text = "部署阶段 · 调整己方站位"
+	_turn_banner_panel.modulate.a = 1.0
+	_turn_banner_panel.scale = Vector2(0.94, 0.94)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(_turn_banner_panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK)
+	tw.chain().tween_property(_turn_banner_panel, "modulate:a", 0.0, 0.55).set_delay(0.75)
 
 
 func _load_board_config() -> BoardConfig:
@@ -111,6 +171,7 @@ func _build() -> void:
 	_board_view.cell_clicked.connect(_on_cell_clicked)
 	_board_view.unit_long_pressed.connect(_on_unit_long_pressed)
 	_board_view.unit_info_closed.connect(_hide_unit_info_card)
+	_board_view.unit_deploy_dropped.connect(_on_unit_deploy_dropped)
 
 	_unit_info_card = TacticalUnitInfoCardScript.new()
 	_unit_info_card.name = "UnitInfoCard"
@@ -190,6 +251,12 @@ func _build() -> void:
 	actions.add_theme_constant_override("separation", 8)
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	bottom_col.add_child(actions)
+
+	_confirm_deploy_button = Button.new()
+	_confirm_deploy_button.text = "开始战斗"
+	_confirm_deploy_button.custom_minimum_size = Vector2(112, 32)
+	_confirm_deploy_button.pressed.connect(_on_confirm_deploy_pressed)
+	actions.add_child(_confirm_deploy_button)
 
 	_end_turn_button = Button.new()
 	_end_turn_button.text = "结束行动"
@@ -291,12 +358,14 @@ func _layout_hud_for_viewport() -> void:
 		_bottom_bar.add_theme_constant_override("margin_bottom", 6)
 		_end_turn_button.custom_minimum_size = Vector2(88, 30)
 		_cancel_target_button.custom_minimum_size = Vector2(88, 30)
+		if _confirm_deploy_button != null:
+			_confirm_deploy_button.custom_minimum_size = Vector2(104, 30)
 		_turn_banner_panel.anchor_top = 0.28
 		_turn_banner_panel.anchor_bottom = 0.28
 		# 顶条 + 底栏（手牌+按钮）留白，棋盘只占中间可点区。
 		_board_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_board_view.offset_top = 122.0
-		_board_view.offset_bottom = -156.0
+		_board_view.offset_bottom = -156.0 if not _in_deployment else -56.0
 		_board_view.recenter_camera()
 	else:
 		_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -311,11 +380,13 @@ func _layout_hud_for_viewport() -> void:
 		_bottom_bar.add_theme_constant_override("margin_bottom", 4)
 		_end_turn_button.custom_minimum_size = Vector2(96, 32)
 		_cancel_target_button.custom_minimum_size = Vector2(96, 32)
+		if _confirm_deploy_button != null:
+			_confirm_deploy_button.custom_minimum_size = Vector2(112, 32)
 		_turn_banner_panel.anchor_top = 0.36
 		_turn_banner_panel.anchor_bottom = 0.36
 		_board_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_board_view.offset_top = 0.0
-		_board_view.offset_bottom = -140.0
+		_board_view.offset_bottom = -140.0 if not _in_deployment else -56.0
 		_board_view.recenter_camera()
 
 
@@ -346,15 +417,23 @@ func _clear_pending_target(keep_move_focus: bool = true) -> void:
 
 
 func _refresh_all() -> void:
-	_turn_label.text = "对战 · %s" % _clock.status_text()
+	if _in_deployment:
+		_turn_label.text = "对战 · 部署阶段"
+	else:
+		_turn_label.text = "对战 · %s" % _clock.status_text()
 	_hint_label.text = _compose_hint()
 	_refresh_unit_panel()
 	_refresh_action_buttons()
 	_refresh_hand_ui()
+	_sync_deploy_action_buttons()
 	var move_cells: Array = []
 	var attack_cells: Array = []
 	var sel_cell := Vector2i(-1, -1)
-	if (
+	if _in_deployment:
+		move_cells = _board.player_deploy_cells()
+		if _selected_unit != null and _selected_unit.is_alive():
+			sel_cell = _selected_unit.cell
+	elif (
 		_focus_unit != null
 		and _focus_unit.is_alive()
 		and _clock.player_active
@@ -377,6 +456,10 @@ func _refresh_all() -> void:
 
 
 func _compose_hint() -> String:
+	if _in_deployment:
+		if _last_log != "":
+			return _last_log
+		return "部署：拖己方单位到绿区 · 点「开始战斗」开战"
 	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
 		return "移动中：%s · 点绿格（本卡一次）" % _focus_unit.def.display_name
 	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
@@ -393,7 +476,9 @@ func _compose_hint() -> String:
 
 
 func _refresh_action_buttons() -> void:
-	var player_turn := _clock.player_active and not _game_over
+	if _confirm_deploy_button != null:
+		_confirm_deploy_button.disabled = not _in_deployment or _input_locked or _game_over
+	var player_turn := _clock.player_active and not _game_over and not _in_deployment
 	_end_turn_button.disabled = not player_turn or _input_locked
 	_cancel_target_button.disabled = (
 		not player_turn or _input_locked or _pending_kind == PendingKind.NONE
@@ -440,6 +525,10 @@ func _refresh_unit_panel() -> void:
 func _refresh_hand_ui() -> void:
 	if _hand_fan == null:
 		return
+	if _in_deployment:
+		_hand_fan.set_hand([], [], [])
+		_hand_fan.set_interactive(false)
+		return
 	var labels: Array[String] = []
 	var kinds: Array[int] = []
 	var details: Array[String] = []
@@ -448,7 +537,9 @@ func _refresh_hand_ui() -> void:
 		kinds.append(int(card.kind))
 		details.append(card.rules_detail())
 	_hand_fan.set_hand(labels, kinds, details)
-	var player_turn := _clock.player_active and not _game_over and not _input_locked
+	var player_turn := (
+		_clock.player_active and not _game_over and not _input_locked and not _in_deployment
+	)
 	_hand_fan.set_interactive(player_turn)
 
 
@@ -464,11 +555,32 @@ func _show_turn_banner() -> void:
 	tw.chain().tween_property(_turn_banner_panel, "modulate:a", 0.0, 0.55).set_delay(0.75)
 
 
+func _on_confirm_deploy_pressed() -> void:
+	if not _in_deployment or _input_locked or _game_over:
+		return
+	_begin_battle_after_deploy()
+
+
+func _on_unit_deploy_dropped(unit: TacticalUnitInstance, cell: Vector2i) -> void:
+	if not _in_deployment or _input_locked or _game_over:
+		return
+	if unit == null or unit.faction != TacticalFactionScript.Id.PLAYER:
+		_last_log = "只能拖动己方单位"
+		_refresh_all()
+		return
+	if _board.try_deploy_place(unit, cell):
+		_selected_unit = unit
+		_last_log = "%s 部署至 (%d,%d)" % [unit.def.display_name, cell.x, cell.y]
+	else:
+		_last_log = "只能放到绿区空格或与己方换位"
+	_refresh_all()
+
+
 ## 拖牌跟手：高亮当前格；悬停单位播选中脉冲（可落/不可落不同态）。
 func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 	if _board_view == null:
 		return
-	if _input_locked or _game_over or not _clock.player_active:
+	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
 		_board_view.clear_card_drag_hover()
 		return
 	if index < 0 or index >= _deck.hand.size():
@@ -502,7 +614,7 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if _board_view != null:
 		_board_view.clear_card_drag_hover()
-	if _input_locked or _game_over or not _clock.player_active:
+	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
 		_hand_fan.notify_drop_resolved(false)
 		return
 	if index < 0 or index >= _deck.hand.size():
@@ -589,7 +701,7 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 
 
 func _on_cancel_target_pressed() -> void:
-	if _input_locked or _game_over or not _clock.player_active:
+	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
 		return
 	_last_log = "已取消瞄准（已用卡不回手）"
 	_clear_pending_target(true)
@@ -618,11 +730,17 @@ func _hide_unit_info_card() -> void:
 
 
 func _on_cell_clicked(cell: Vector2i) -> void:
-	if _input_locked or _game_over or not _clock.player_active:
+	if _input_locked or _game_over:
 		return
 	if _hand_fan != null and _hand_fan.is_busy():
 		return
 	_hide_unit_info_card()
+
+	if _in_deployment:
+		_on_deploy_cell_clicked(cell)
+		return
+	if not _clock.player_active:
+		return
 
 	var clicked := _board.unit_at(cell)
 
@@ -774,8 +892,43 @@ func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
 		_refresh_hand_ui()
 
 
+## 部署阶段点选：点己方选中；已选中时点绿区空格/己方则落位或换位。
+func _on_deploy_cell_clicked(cell: Vector2i) -> void:
+	var clicked := _board.unit_at(cell)
+	if clicked != null and clicked.faction == TacticalFactionScript.Id.PLAYER:
+		if (
+			_selected_unit != null
+			and _selected_unit != clicked
+			and _selected_unit.faction == TacticalFactionScript.Id.PLAYER
+		):
+			if _board.try_deploy_place(_selected_unit, cell):
+				_last_log = "%s 与 %s 换位" % [
+					_selected_unit.def.display_name,
+					clicked.def.display_name,
+				]
+				_refresh_all()
+				return
+		_selected_unit = clicked
+		_last_log = "已选 %s · 拖到绿区或点绿区落位" % clicked.def.display_name
+		_refresh_all()
+		return
+	if _selected_unit != null and _selected_unit.faction == TacticalFactionScript.Id.PLAYER:
+		if _board.try_deploy_place(_selected_unit, cell):
+			_last_log = "%s 部署至 (%d,%d)" % [_selected_unit.def.display_name, cell.x, cell.y]
+		else:
+			_last_log = "只能放到绿区空格或与己方换位"
+		_refresh_all()
+		return
+	if clicked != null:
+		_selected_unit = clicked
+		_last_log = "敌方固定 · 请拖己方单位"
+	else:
+		_last_log = "先点选己方单位，再拖/点到绿区"
+	_refresh_all()
+
+
 func _on_end_turn_pressed() -> void:
-	if _input_locked or _game_over or not _clock.player_active:
+	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
 		return
 	_deck.end_player_turn()
 	_pending_kind = PendingKind.NONE

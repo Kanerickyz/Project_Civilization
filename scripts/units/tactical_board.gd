@@ -310,6 +310,55 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	return true
 
 
+## 开战前部署：左半盘可通行格；可与己方换位；不耗移力、不触发移动结束被动。
+func is_player_deploy_cell(cell: Vector2i) -> bool:
+	if not GridMathScript.in_bounds(cell, grid_width, grid_height):
+		return false
+	if cell.x >= int(grid_width / 2):
+		return false
+	return is_passable(cell)
+
+
+## 列出当前棋盘全部合法己方部署格（供 overlay）。
+func player_deploy_cells() -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for gx in range(int(grid_width / 2)):
+		for gy in range(grid_height):
+			var cell := Vector2i(gx, gy)
+			if is_passable(cell):
+				out.append(cell)
+	return out
+
+
+func can_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
+	if unit == null or not unit.is_alive():
+		return false
+	if unit.faction != TacticalFactionScript.Id.PLAYER:
+		return false
+	if not is_player_deploy_cell(dest):
+		return false
+	var occupant := unit_at(dest)
+	if occupant == null or occupant == unit:
+		return true
+	return occupant.faction == TacticalFactionScript.Id.PLAYER
+
+
+func try_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
+	if not can_deploy_place(unit, dest):
+		return false
+	if unit.cell == dest:
+		return true
+	var occupant := unit_at(dest)
+	if occupant == null:
+		unit.cell = dest
+	else:
+		var from := unit.cell
+		unit.cell = dest
+		occupant.cell = from
+	changed.emit()
+	return true
+
+
 func allies_in_radius(origin: Vector2i, faction: TacticalFaction.Id, radius: int, exclude_cell: Vector2i) -> Array[TacticalUnitInstance]:
 	var out: Array[TacticalUnitInstance] = []
 	for u in living_units():
