@@ -86,7 +86,7 @@ func _begin_battle_after_deploy() -> void:
 	_layout_hud_for_viewport()
 	_fire_battle_start_triggers()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
-	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
+	await _apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_deck.begin_player_turn()
 	_last_log = "战斗开始 · 已抽手牌"
 	_refresh_all()
@@ -141,14 +141,43 @@ func _fire_battle_start_triggers() -> void:
 
 
 func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
-	# 燃烧先于段开始被动：先造成=层数伤害再减层。
-	var burn_logs := _board.process_burn_ticks()
-	if burn_logs.size() > 0:
-		_last_log = burn_logs[burn_logs.size() - 1]
-		# 燃烧可本 tick 新杀；on_player_unit_died 幂等，旧尸体再扫也不减 MOVE。
-		for u in _board.units:
-			if not u.is_alive():
-				_purge_dead_unit_cards(u)
+	# 燃烧先于段开始被动与本方行动：先扣血飘字，再被动，再意图/出牌。
+	var burn_events: Array[Dictionary] = _board.process_burn_ticks()
+	var killed_now: Array[TacticalUnitInstance] = []
+	for ev in burn_events:
+		var log_line := str(ev.get("log", ""))
+		if log_line != "":
+			_last_log = log_line
+		var unit := ev.get("unit") as TacticalUnitInstance
+		var cell: Vector2i = ev.get("cell", Vector2i.ZERO)
+		var dmg := int(ev.get("damage", 0))
+		if unit == null or dmg <= 0:
+			continue
+		# 与普攻受击同一套飘字 + 闪白。
+		_board_view.play_damage_popup(cell, dmg)
+		_board_view.play_unit_hit(unit)
+		if bool(ev.get("killed", false)):
+			killed_now.append(unit)
+			_purge_dead_unit_cards(unit)
+	# 燃烧可本 tick 新杀；on_player_unit_died 幂等，旧尸体再扫也不减 MOVE。
+	for u in _board.units:
+		if not u.is_alive():
+			_purge_dead_unit_cards(u)
+	if burn_events.size() > 0:
+		_refresh_all()
+		# 给飘字一拍可见窗口，再让本方单位执行意图/出牌。
+		await get_tree().create_timer(0.38).timeout
+		for dead in killed_now:
+			_board_view.play_unit_death(dead)
+			if _selected_unit == dead:
+				_selected_unit = null
+			if _focus_unit == dead:
+				_focus_unit = null
+				_pending_kind = PendingKind.NONE
+		if killed_now.size() > 0:
+			await get_tree().create_timer(0.22).timeout
+			if _check_victory():
+				return
 	var logs := TacticalAbilitySystemScript.process_side_turn_start(_board, faction)
 	if logs.size() > 0:
 		_last_log = logs[logs.size() - 1]
@@ -447,6 +476,12 @@ func _refresh_all() -> void:
 			attack_cells = _board.attack_range_cells(_focus_unit)
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
+		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）。
+		if TacticalEnemyAiScript.uses_behavior_sm(_selected_unit):
+			move_cells = _board.preview_reachable_move_cells(
+				_selected_unit, TacticalEnemyAiScript.MOVE_STEP_CAP
+			)
+			attack_cells = _board.attack_range_cells(_selected_unit)
 	_board_view.sync_tactical_units(
 		_board.living_units(),
 		sel_cell,
@@ -819,7 +854,10 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 	# 无待结算卡：仅查看单位。
 	if clicked != null:
 		_selected_unit = clicked
-		_last_log = "查看 %s · 移/攻请拖卡到单位" % clicked.def.display_name
+		if TacticalEnemyAiScript.uses_behavior_sm(clicked):
+			_last_log = "查看 %s · 绿=可移动 · 红=可攻击" % clicked.def.display_name
+		else:
+			_last_log = "查看 %s · 移/攻请拖卡到单位" % clicked.def.display_name
 		_refresh_all()
 		return
 	if not _board.is_passable(cell):
@@ -945,7 +983,13 @@ func _on_end_turn_pressed() -> void:
 	_focus_unit = null
 	_clock.end_turn()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
-	_apply_side_turn_start_triggers(TacticalFactionScript.Id.OPPONENT)
+	_input_locked = true
+	_refresh_action_buttons()
+	await _apply_side_turn_start_triggers(TacticalFactionScript.Id.OPPONENT)
+	if _game_over:
+		_input_locked = false
+		_refresh_all()
+		return
 	_selected_unit = null
 	_show_turn_banner()
 	_refresh_all()
@@ -997,13 +1041,37 @@ func _run_opponent_turn_async() -> void:
 							_pending_kind = PendingKind.NONE
 				_refresh_all()
 				await get_tree().create_timer(0.28).timeout
+			elif kind == "heal":
+				var healer := ev["unit"] as TacticalUnitInstance
+				_last_log = str(ev.get("log", "对手回血"))
+				_board_view.play_float_text(
+					healer.cell, "+%d血" % int(ev.get("amount", 0)), Color("7dff9a")
+				)
+				_refresh_all()
+				await get_tree().create_timer(0.28).timeout
+			elif kind == "buff_atk":
+				var buffer := ev["unit"] as TacticalUnitInstance
+				_last_log = str(ev.get("log", "对手加攻"))
+				_board_view.play_float_text(
+					buffer.cell, "+%d攻" % int(ev.get("amount", 0)), Color("ffe08a")
+				)
+				_refresh_all()
+				await get_tree().create_timer(0.28).timeout
+			elif kind == "idle":
+				_last_log = str(ev.get("log", "对手待机"))
+				_refresh_all()
+				await get_tree().create_timer(0.12).timeout
 			if _check_victory():
 				return
 		await get_tree().create_timer(0.18).timeout
 
 	_clock.end_turn()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
-	_apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
+	await _apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
+	if _game_over:
+		_input_locked = false
+		_refresh_all()
+		return
 	_deck.begin_player_turn()
 	_last_log = "对手结束行动 · 已抽手牌"
 	_show_turn_banner()
@@ -1047,6 +1115,19 @@ func capture_select_player_unit(unit_id: String) -> void:
 			_selected_unit = u
 			_refresh_all()
 			return
+
+
+## GUI 验收：选中敌方狼骑兵并刷新行动格 overlay。
+func capture_select_opponent_rider() -> bool:
+	for u in _board.living_units():
+		if TacticalEnemyAiScript.uses_behavior_sm(u):
+			_focus_unit = null
+			_pending_kind = PendingKind.NONE
+			_selected_unit = u
+			_last_log = "查看 %s · 绿=可移动 · 红=可攻击" % u.def.display_name
+			_refresh_all()
+			return true
+	return false
 
 
 ## GUI 验收：弹出指定单位信息卡（模拟长按）。

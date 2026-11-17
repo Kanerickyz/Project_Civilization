@@ -5,9 +5,41 @@ const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
-## 对手行动段最小启发式：逐单位行动，能攻则攻，否则消耗移动力向最近玩家靠近。
+## 敌方狼骑兵行为状态机：攻击 → 移动 →（回血|加攻 随机）循环；各单位独立相位。
+## 「可攻击」一律走 TacticalCombat.attackable_cells（rider.attack_range=1 近战邻格 + LOS）。
 
+enum Intent { ATTACK, MOVE, HEAL, BUFF_ATK }
+
+const RIDER_ID := "rider"
+const HEAL_AMOUNT := 2
+const BUFF_ATK_AMOUNT := 2
+## 移动意图单次最多靠近格数（≠ 攻击距离；攻击距离见 rider.tres attack_range=1）。
+const MOVE_STEP_CAP := 2
 const _UNREACHABLE_BASE := 10000
+
+
+static func uses_behavior_sm(unit: TacticalUnitInstance) -> bool:
+	return (
+		unit != null
+		and unit.is_alive()
+		and unit.faction == TacticalFactionScript.Id.OPPONENT
+		and unit.def != null
+		and unit.def.id == RIDER_ID
+	)
+
+
+static func intent_name(intent: int) -> String:
+	match intent:
+		Intent.ATTACK:
+			return "攻击"
+		Intent.MOVE:
+			return "移动"
+		Intent.HEAL:
+			return "回血"
+		Intent.BUFF_ATK:
+			return "加攻"
+		_:
+			return "?"
 
 
 static func sorted_opponents(board: TacticalBoard) -> Array[TacticalUnitInstance]:
@@ -15,25 +47,214 @@ static func sorted_opponents(board: TacticalBoard) -> Array[TacticalUnitInstance
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.OPPONENT:
 			opponents.append(u)
-	opponents.sort_custom(func(a, b): return a.def.id < b.def.id)
+	opponents.sort_custom(func(a: TacticalUnitInstance, b: TacticalUnitInstance) -> bool:
+		if a.def.id != b.def.id:
+			return a.def.id < b.def.id
+		if a.cell.y != b.cell.y:
+			return a.cell.y < b.cell.y
+		return a.cell.x < b.cell.x
+	)
 	return opponents
 
 
-static func run_opponent_turn(board: TacticalBoard) -> Array[Dictionary]:
+static func run_opponent_turn(
+	board: TacticalBoard, rng: RandomNumberGenerator = null
+) -> Array[Dictionary]:
 	var events: Array[Dictionary] = []
+	var local_rng := rng
+	if local_rng == null:
+		local_rng = RandomNumberGenerator.new()
+		local_rng.randomize()
 	for unit in sorted_opponents(board):
-		events.append_array(run_opponent_unit_actions(board, unit))
+		events.append_array(run_opponent_unit_actions(board, unit, local_rng))
 	return events
 
 
-static func run_opponent_unit_actions(board: TacticalBoard, unit: TacticalUnitInstance) -> Array[Dictionary]:
+static func run_opponent_unit_actions(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	rng: RandomNumberGenerator = null
+) -> Array[Dictionary]:
 	var events: Array[Dictionary] = []
 	if unit == null or not unit.is_alive():
 		return events
+	if not uses_behavior_sm(unit):
+		return _legacy_unit_actions(board, unit)
+
+	var local_rng := rng
+	if local_rng == null:
+		local_rng = RandomNumberGenerator.new()
+		local_rng.randomize()
+
+	var start_intent: int = unit.next_intent
+	var scanned: Dictionary = {}
+	while unit.is_alive():
+		var intent: int = unit.next_intent
+		if scanned.has(intent):
+			# 整圈不可行：本回合待机，推进一档意图以免永久卡死。
+			_advance_intent(unit, local_rng)
+			events.append({
+				"kind": "idle",
+				"unit": unit,
+				"intent": start_intent,
+				"log": "对手 %s 无可行行为，待机" % unit.def.display_name,
+			})
+			break
+		scanned[intent] = true
+
+		match intent:
+			Intent.ATTACK:
+				var atk_ev := _try_attack_nearest(board, unit)
+				if not atk_ev.is_empty():
+					events.append(atk_ev)
+					_advance_intent(unit, local_rng)
+					break
+				unit.next_intent = Intent.MOVE
+			Intent.MOVE:
+				# 已能打到玩家：跳过移动，改为攻击。
+				var redirect := _try_attack_nearest(board, unit)
+				if not redirect.is_empty():
+					events.append(redirect)
+					_advance_intent(unit, local_rng)
+					break
+				var move_evs := _try_move_toward_nearest(board, unit)
+				if not move_evs.is_empty():
+					events.append_array(move_evs)
+					_advance_intent(unit, local_rng)
+					break
+				unit.next_intent = _roll_support_intent(local_rng)
+			Intent.HEAL:
+				var heal_ev := _try_heal(board, unit)
+				if not heal_ev.is_empty():
+					events.append(heal_ev)
+					_advance_intent(unit, local_rng)
+					break
+				unit.next_intent = Intent.ATTACK
+			Intent.BUFF_ATK:
+				var buff_ev := _try_buff_atk(board, unit)
+				if not buff_ev.is_empty():
+					events.append(buff_ev)
+					_advance_intent(unit, local_rng)
+					break
+				unit.next_intent = Intent.ATTACK
+			_:
+				unit.next_intent = Intent.ATTACK
+				break
+	return events
+
+
+static func _advance_intent(unit: TacticalUnitInstance, rng: RandomNumberGenerator) -> void:
+	match unit.next_intent:
+		Intent.ATTACK:
+			unit.next_intent = Intent.MOVE
+		Intent.MOVE:
+			unit.next_intent = _roll_support_intent(rng)
+		Intent.HEAL, Intent.BUFF_ATK:
+			unit.next_intent = Intent.ATTACK
+		_:
+			unit.next_intent = Intent.ATTACK
+
+
+static func _roll_support_intent(rng: RandomNumberGenerator) -> int:
+	if rng.randi_range(0, 1) == 0:
+		return Intent.HEAL
+	return Intent.BUFF_ATK
+
+
+static func _try_attack_nearest(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:
+	var atk_cells := TacticalCombatScript.attackable_cells(board, unit)
+	if atk_cells.is_empty():
+		return {}
+	var best_cell := _pick_nearest_attack_target(board, unit, atk_cells)
+	var res := TacticalCombatScript.try_basic_attack(
+		board, unit, best_cell, TacticalFactionScript.Id.OPPONENT
+	)
+	if not res["ok"]:
+		return {}
+	return {"kind": "attack", "result": res, "unit": unit, "cell": best_cell}
+
+
+static func _pick_nearest_attack_target(
+	board: TacticalBoard, attacker: TacticalUnitInstance, cells: Array[Vector2i]
+) -> Vector2i:
+	var best_cell := cells[0]
+	var best_dist := 999999
+	var best_hp := 999999
+	for c in cells:
+		var t := board.unit_at(c)
+		if t == null:
+			continue
+		var d := GridMathScript.chebyshev(attacker.cell, c)
+		if d < best_dist or (d == best_dist and t.hp < best_hp):
+			best_dist = d
+			best_hp = t.hp
+			best_cell = c
+	return best_cell
+
+
+static func _try_move_toward_nearest(
+	board: TacticalBoard, unit: TacticalUnitInstance
+) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	if unit.remaining_move_budget <= 0:
+		return events
+	# 本行为最多靠近 MOVE_STEP_CAP 格（狼骑移力池通常同为 2）。
+	var budget_cap := mini(unit.remaining_move_budget, MOVE_STEP_CAP)
+	var saved_budget := unit.remaining_move_budget
+	unit.remaining_move_budget = budget_cap
+	var dest: Vector2i = _best_step_toward_player(board, unit)
+	unit.remaining_move_budget = saved_budget
+	if dest.x < 0:
+		return events
+	if dest == unit.cell:
+		return events
+	# 已在最优却无法更近（无可达格）→ 不可执行。
+	var before := unit.cell
+	if not board.try_move(unit, dest):
+		return events
+	if unit.cell == before:
+		return events
+	events.append({"kind": "move", "unit": unit, "dest": unit.cell, "from": before})
+	return events
+
+
+static func _try_heal(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:
+	var max_hp := unit.effective_max_hp()
+	if unit.hp >= max_hp:
+		return {}
+	var before := unit.hp
+	unit.hp = mini(max_hp, unit.hp + HEAL_AMOUNT)
+	var gained := unit.hp - before
+	if gained <= 0:
+		return {}
+	board.changed.emit()
+	return {
+		"kind": "heal",
+		"unit": unit,
+		"amount": gained,
+		"log": "对手 %s 恢复 %d 血" % [unit.def.display_name, gained],
+	}
+
+
+static func _try_buff_atk(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:
+	unit.atk_bonus += BUFF_ATK_AMOUNT
+	board.changed.emit()
+	return {
+		"kind": "buff_atk",
+		"unit": unit,
+		"amount": BUFF_ATK_AMOUNT,
+		"log": "对手 %s 攻击 +%d" % [unit.def.display_name, BUFF_ATK_AMOUNT],
+	}
+
+
+static func _legacy_unit_actions(
+	board: TacticalBoard, unit: TacticalUnitInstance
+) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
 	while unit.is_alive():
 		var atk_cells := TacticalCombatScript.attackable_cells(board, unit)
 		if not atk_cells.is_empty():
-			var best_cell := _pick_attack_target(board, unit, atk_cells)
+			var best_cell := _pick_nearest_attack_target(board, unit, atk_cells)
 			var res := TacticalCombatScript.try_basic_attack(
 				board, unit, best_cell, TacticalFactionScript.Id.OPPONENT
 			)
@@ -47,21 +268,6 @@ static func run_opponent_unit_actions(board: TacticalBoard, unit: TacticalUnitIn
 			break
 		events.append({"kind": "move", "unit": unit, "dest": dest})
 	return events
-
-
-static func _pick_attack_target(
-	board: TacticalBoard, attacker: TacticalUnitInstance, cells: Array[Vector2i]
-) -> Vector2i:
-	var best: TacticalUnitInstance = null
-	var best_cell := cells[0]
-	for c in cells:
-		var t := board.unit_at(c)
-		if t == null:
-			continue
-		if best == null or t.hp < best.hp:
-			best = t
-			best_cell = c
-	return best_cell
 
 
 static func _best_step_toward_player(
@@ -78,7 +284,6 @@ static func _best_step_toward_player(
 	if players.is_empty():
 		return reachable[0]
 
-	# 用路径距离（绕墙）而非切比雪夫，避免贴墙卡死；无墙时两者相同。
 	var player_dist: Array[Dictionary] = []
 	for p in players:
 		player_dist.append(board.path_distances_from(p.cell))
@@ -87,9 +292,24 @@ static func _best_step_toward_player(
 	for dest in reachable:
 		var min_d := 999999
 		for i in players.size():
-			var d: int = int(player_dist[i].get(dest, _UNREACHABLE_BASE + GridMathScript.chebyshev(dest, players[i].cell)))
+			var d: int = int(
+				player_dist[i].get(
+					dest, _UNREACHABLE_BASE + GridMathScript.chebyshev(dest, players[i].cell)
+				)
+			)
 			min_d = mini(min_d, d)
 		if min_d < best_dist:
 			best_dist = min_d
 			best_dest = dest
+	# 若最近可达点并不比当前位置更近，则移动无意义 → 判不可执行。
+	var cur_min := 999999
+	for i in players.size():
+		var cd: int = int(
+			player_dist[i].get(
+				unit.cell, _UNREACHABLE_BASE + GridMathScript.chebyshev(unit.cell, players[i].cell)
+			)
+		)
+		cur_min = mini(cur_min, cd)
+	if best_dist >= cur_min:
+		return unreachable
 	return best_dest

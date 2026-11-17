@@ -18,6 +18,8 @@ var burn_stacks: int = 0
 var armor: int = 0
 ## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减 MOVE/攻）。
 var death_cards_culled: bool = false
+## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战默认攻击）。
+var next_intent: int = 0
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:
@@ -26,6 +28,8 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 	cell = p_cell
 	hp = p_def.max_hp
 	remaining_move_budget = p_def.action_move_budget()
+	# 狼骑兵开战意图为攻击；其它单位不读此字段。
+	next_intent = 0
 
 
 func effective_attack() -> int:

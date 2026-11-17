@@ -4,6 +4,7 @@ const TacticalSandboxRosterScript := preload("res://scripts/units/tactical_sandb
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TurnClockScript := preload("res://scripts/core/turn_clock.gd")
 
 
@@ -17,6 +18,9 @@ func _initialize() -> void:
 	if not _test_reachable_and_attack_overlay_cells():
 		quit(1)
 		return
+	if not _test_wolf_action_preview_overlay_cells():
+		quit(1)
+		return
 	if not _test_victory_detection():
 		quit(1)
 		return
@@ -24,6 +28,15 @@ func _initialize() -> void:
 		quit(1)
 		return
 	if not _test_attack_flag_resets_with_side_turn():
+		quit(1)
+		return
+	if not _test_wolf_intent_attack_then_advance():
+		quit(1)
+		return
+	if not _test_wolf_intent_heal_skip_when_full():
+		quit(1)
+		return
+	if not _test_wolf_melee_range_one():
 		quit(1)
 		return
 	print("GAME_LOOP_OK")
@@ -105,6 +118,42 @@ func _test_reachable_and_attack_overlay_cells() -> bool:
 	return true
 
 
+func _test_wolf_action_preview_overlay_cells() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rider: TacticalUnitInstance = null
+	for u in board.living_units():
+		if TacticalEnemyAiScript.uses_behavior_sm(u):
+			rider = u
+			break
+	if rider == null:
+		push_error("GameLoop: missing wolf rider for action preview")
+		return false
+	# 玩家回合查看时移力可能已耗尽，预览仍应按行动预算封顶展示。
+	rider.remaining_move_budget = 0
+	var moves := board.preview_reachable_move_cells(
+		rider, TacticalEnemyAiScript.MOVE_STEP_CAP
+	)
+	if moves.is_empty():
+		push_error("GameLoop: wolf preview should show move cells with depleted budget")
+		return false
+	if rider.remaining_move_budget != 0:
+		push_error("GameLoop: wolf preview must not mutate remaining_move_budget")
+		return false
+	for c in moves:
+		if GridMathScript.chebyshev(rider.cell, c) > TacticalEnemyAiScript.MOVE_STEP_CAP:
+			push_error("GameLoop: wolf preview move beyond MOVE_STEP_CAP")
+			return false
+	var atk := board.attack_range_cells(rider)
+	if atk.is_empty():
+		push_error("GameLoop: wolf preview should show attack footprint")
+		return false
+	for c in atk:
+		if GridMathScript.chebyshev(rider.cell, c) > rider.def.attack_range:
+			push_error("GameLoop: wolf attack cell out of range")
+			return false
+	return true
+
+
 func _test_victory_detection() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	for u in board.units:
@@ -156,5 +205,102 @@ func _test_attack_flag_resets_with_side_turn() -> bool:
 	)
 	if not res2["ok"]:
 		push_error("GameLoop: opponent should attack on new side turn after reset")
+		return false
+	return true
+
+
+func _test_wolf_intent_attack_then_advance() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	if foe.next_intent != TacticalEnemyAiScript.Intent.ATTACK:
+		push_error("GameLoop: rider should start with attack intent")
+		return false
+	player.cell = foe.cell + Vector2i(1, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	if events.is_empty() or events[0].get("kind", "") != "attack":
+		push_error("GameLoop: rider should execute attack intent")
+		return false
+	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
+		push_error("GameLoop: after attack intent should advance to move")
+		return false
+	return true
+
+
+func _test_wolf_intent_heal_skip_when_full() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	# 满血回血意图应跳过；邻格可攻时落到攻击并推进。
+	foe.hp = foe.effective_max_hp()
+	foe.next_intent = TacticalEnemyAiScript.Intent.HEAL
+	player.cell = foe.cell + Vector2i(1, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	if events.is_empty() or events[0].get("kind", "") != "attack":
+		push_error("GameLoop: full-hp heal should skip into attack")
+		return false
+	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
+		push_error("GameLoop: after skipped-heal attack should advance to move")
+		return false
+	return true
+
+
+## 狼骑兵攻击距离固定 1：距 2 不可攻；邻格可攻（意图「可攻击」与 combat 一致）。
+func _test_wolf_melee_range_one() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var player: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		if u.faction == TacticalFactionScript.Id.OPPONENT and foe == null:
+			foe = u
+	if player == null or foe == null:
+		return false
+	if foe.def.attack_range != 1:
+		push_error("GameLoop: rider attack_range must be 1, got %d" % foe.def.attack_range)
+		return false
+
+	# 距 2：不可普攻，意图攻击应跳过（满血时落到移动或支援）。
+	player.cell = foe.cell + Vector2i(2, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	var far_cells := TacticalCombatScript.attackable_cells(board, foe)
+	if not far_cells.is_empty():
+		push_error("GameLoop: rider must not attack at chebyshev 2")
+		return false
+	var far_events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	for ev in far_events:
+		if ev.get("kind", "") == "attack":
+			push_error("GameLoop: attack intent must not hit at range 2")
+			return false
+
+	# 邻格（距 1）：可攻。
+	player.cell = foe.cell + Vector2i(1, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	var near_cells := TacticalCombatScript.attackable_cells(board, foe)
+	if near_cells.is_empty() or not near_cells.has(player.cell):
+		push_error("GameLoop: rider should attack adjacent cell")
+		return false
+	var near_events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
+	if near_events.is_empty() or near_events[0].get("kind", "") != "attack":
+		push_error("GameLoop: attack intent should fire at range 1")
 		return false
 	return true
