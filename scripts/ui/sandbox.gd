@@ -689,7 +689,7 @@ func _feedback_from_attack(target: TacticalUnitInstance, res: Dictionary) -> voi
 func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
 	if unit == null:
 		return
-	# 仅己方阵亡削减通用移/攻各 1；敌方不影响玩家牌库。
+	# 仅己方阵亡：手/库/弃减通用移/攻各 1，并减该角色绑定主动技；敌方不影响玩家牌库。
 	if unit.faction != TacticalFactionScript.Id.PLAYER:
 		return
 	var n := _deck.on_player_unit_died(unit)
@@ -698,6 +698,8 @@ func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
 			unit.def.display_name if unit.def != null else "单位",
 			n,
 		]
+		# 对手段常锁输入；deck.changed 在锁定期会跳过 UI，此处强制同步手牌。
+		_refresh_hand_ui()
 
 
 func _on_end_turn_pressed() -> void:
@@ -741,7 +743,10 @@ func _run_opponent_turn_async() -> void:
 				var tw := _board_view.play_unit_attack(attacker, cell)
 				if tw != null:
 					await tw.finished
-				var target := _board.unit_at(cell)
+				# 击杀后 unit_at 只返回存活单位，须用结算里保留的 target 引用。
+				var target: TacticalUnitInstance = res.get("target") as TacticalUnitInstance
+				if target == null:
+					target = _board.unit_at(cell)
 				if target != null:
 					_board_view.play_damage_popup(cell, int(res.get("damage", 0)))
 					_board_view.play_unit_hit(target)

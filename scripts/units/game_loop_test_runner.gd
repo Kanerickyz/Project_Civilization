@@ -11,6 +11,9 @@ func _initialize() -> void:
 	if not _test_basic_attack():
 		quit(1)
 		return
+	if not _test_kill_result_keeps_target_when_unit_at_null():
+		quit(1)
+		return
 	if not _test_reachable_and_attack_overlay_cells():
 		quit(1)
 		return
@@ -46,6 +49,38 @@ func _test_basic_attack() -> bool:
 	)
 	if not res["ok"] or foe.hp >= before:
 		push_error("GameLoop: basic attack should deal damage")
+		return false
+	return true
+
+
+## 击杀后 unit_at 为 null；结算须保留 target，供对手段清牌/死亡表现（PC-32）。
+func _test_kill_result_keeps_target_when_unit_at_null() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var attacker: TacticalUnitInstance = null
+	var victim: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT and attacker == null:
+			attacker = u
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "wardrum":
+			victim = u
+	if attacker == null or victim == null:
+		push_error("GameLoop: missing rider/wardrum for kill-target test")
+		return false
+	victim.hp = 1
+	victim.cell = attacker.cell + Vector2i(1, 0)
+	var cell := victim.cell
+	var res := TacticalCombatScript.try_basic_attack(
+		board, attacker, cell, TacticalFactionScript.Id.OPPONENT
+	)
+	if not res["ok"] or not res.get("killed", false):
+		push_error("GameLoop: expected kill on 1-hp wardrum")
+		return false
+	if board.unit_at(cell) != null:
+		push_error("GameLoop: unit_at should be null after kill")
+		return false
+	var kept: TacticalUnitInstance = res.get("target") as TacticalUnitInstance
+	if kept != victim:
+		push_error("GameLoop: kill result must keep target ref for death cull")
 		return false
 	return true
 

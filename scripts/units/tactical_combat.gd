@@ -41,7 +41,7 @@ static func try_basic_attack(
 	allow_friendly: bool = false,
 	bonus_damage: int = 0
 ) -> Dictionary:
-	var result := {"ok": false, "log": "", "damage": 0, "killed": false}
+	var result := {"ok": false, "log": "", "damage": 0, "killed": false, "target": null}
 	if not can_basic_attack(attacker, active_faction):
 		result["log"] = "本段行动已攻击过或无法攻击"
 		return result
@@ -57,6 +57,7 @@ static func try_basic_attack(
 		return result
 	var dmg := attacker.effective_attack() + maxi(0, bonus_damage)
 	var hurt := board.apply_damage(target, dmg, attacker)
+	result["target"] = target
 	result["damage"] = dmg
 	result["killed"] = hurt.get("killed", false)
 	attacker.attacked_this_side_turn = true
