@@ -39,6 +39,9 @@ func _initialize() -> void:
 	if not _test_attack_card_authorizes_repeat_hits():
 		quit(1)
 		return
+	if not _test_attack_card_stacks_on_same_unit():
+		quit(1)
+		return
 	if not _test_ally_can_be_attacked():
 		quit(1)
 		return
@@ -445,6 +448,72 @@ func _test_attack_card_authorizes_repeat_hits() -> bool:
 		push_error("CardActions: after second attack card, hit should succeed")
 		return false
 	deck.consume_attack_authorization(knight)
+	return true
+
+
+func _test_attack_card_stacks_on_same_unit() -> bool:
+	# 同单位连拖多张攻击卡：队列累加，可连续结算多次（PC-36）。
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	var knight: TacticalUnitInstance = null
+	var foe: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
+			knight = u
+		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
+			foe = u
+	if knight == null or foe == null:
+		push_error("CardActions: stack test need knight + foe")
+		return false
+	foe.cell = knight.cell + Vector2i(0, 1)
+	foe.hp = 99
+	if not deck.authorize_attack(knight, 2):
+		push_error("CardActions: stack first authorize failed")
+		return false
+	if not deck.authorize_attack(knight, 0):
+		push_error("CardActions: stack second authorize failed")
+		return false
+	if deck.attack_authorization_count(knight) != 2:
+		push_error("CardActions: expected 2 stacked attack charges")
+		return false
+	if deck.pending_attack_bonus != 2:
+		push_error("CardActions: pending bonus should stay first-card +2")
+		return false
+	var first := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true, deck.pending_attack_bonus
+	)
+	if not first["ok"] or int(first["damage"]) != knight.effective_attack() + 2:
+		push_error("CardActions: first stacked hit should use +2 bonus")
+		return false
+	var bonus1 := deck.consume_attack_authorization(knight)
+	if bonus1 != 2:
+		push_error("CardActions: consume should return first bonus 2")
+		return false
+	if not deck.is_attack_authorized(knight):
+		push_error("CardActions: second charge must remain after first consume")
+		return false
+	if deck.pending_attack_bonus != 0:
+		push_error("CardActions: pending should follow second charge bonus 0")
+		return false
+	var second := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true, deck.pending_attack_bonus
+	)
+	if not second["ok"]:
+		push_error("CardActions: second stacked hit should succeed")
+		return false
+	deck.consume_attack_authorization(knight)
+	if deck.is_attack_authorized(knight):
+		push_error("CardActions: queue must be empty after two consumes")
+		return false
+	deck.authorize_attack(knight, 1)
+	deck.authorize_attack(knight, 3)
+	deck.clear_attack_authorization(knight)
+	if deck.is_attack_authorized(knight) or deck.pending_attack_bonus != 0:
+		push_error("CardActions: clear_attack_authorization must wipe stack")
+		return false
 	return true
 
 

@@ -325,8 +325,9 @@ func _on_deck_changed() -> void:
 
 func _clear_pending_target(keep_move_focus: bool = true) -> void:
 	_pending_kind = PendingKind.NONE
+	# 取消瞄准：已打牌不回手，清空该单位全部攻击授权（含连拖叠加）。
 	if _focus_unit != null and _deck.is_attack_authorized(_focus_unit):
-		_deck.consume_attack_authorization(_focus_unit)
+		_deck.clear_attack_authorization(_focus_unit)
 	else:
 		_deck.pending_attack_bonus = 0
 	if not keep_move_focus:
@@ -368,7 +369,10 @@ func _compose_hint() -> String:
 	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
 		return "移动中：%s · 点绿格（本卡一次）" % _focus_unit.def.display_name
 	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
-		return "攻击中：%s · 点红圈内敌人" % _focus_unit.def.display_name
+		var left := _deck.attack_authorization_count(_focus_unit)
+		if left > 1:
+			return "攻击中：%s · 点红圈内单位（余 %d 次）" % [_focus_unit.def.display_name, left]
+		return "攻击中：%s · 点红圈内单位" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
 	return "长按单位看信息卡 · 长按卡牌看详情 · 拖到己方单位使用 · 库 %d · 弃 %d" % [
@@ -686,7 +690,7 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	if not atk["ok"]:
 		_refresh_all()
 		return
-	# 成功后消耗本卡授权（玩家无 attacked_this_side_turn 预算）。
+	# 成功后消耗队首授权（玩家无 attacked_this_side_turn 预算）。
 	_deck.consume_attack_authorization(attacker)
 	_input_locked = true
 	_refresh_action_buttons()
@@ -695,7 +699,11 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		await tw.finished
 	_feedback_from_attack(target, atk)
 	_pending_kind = PendingKind.NONE
-	if attacker.is_alive() and _deck.is_move_authorized(attacker):
+	# 同单位连拖多张攻击卡：仍有余次则继续瞄准，否则若有移动授权则切回移动。
+	if attacker.is_alive() and _deck.is_attack_authorized(attacker):
+		_pending_kind = PendingKind.ATTACK
+		_focus_unit = attacker
+	elif attacker.is_alive() and _deck.is_move_authorized(attacker):
 		_pending_kind = PendingKind.MOVE
 		_focus_unit = attacker
 	_check_victory()
