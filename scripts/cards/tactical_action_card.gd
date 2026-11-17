@@ -9,15 +9,18 @@ enum Kind {
 	SKILL_DRAW,
 	SKILL_STRONG_ATTACK,
 	SKILL_BURN_ATTACK,
+	SKILL_ARMOR,
 }
 
 var kind: Kind = Kind.MOVE
-## 绑角色 id（空=不绑）；鸣鼓换手/燃爆攻用于死亡 cull 归属；加强攻为空。
+## 绑角色 id（空=不绑）；鸣鼓换手/燃爆攻用于死亡 cull 归属；加强攻/护甲为空。
 var bound_unit_id: String = ""
 ## 强攻卡额外伤害。
 var attack_bonus_damage: int = 0
 ## 燃爆攻：命中后对目标格及周围施加的燃烧层数。
 var aoe_burn_stacks: int = 0
+## 护甲卡：给目标叠加的护甲值。
+var armor_grant: int = 0
 ## 用完销毁、不进弃/库；仅可在手牌短暂存在。
 var ephemeral: bool = false
 
@@ -27,18 +30,20 @@ func _init(
 	p_bound_unit_id: String = "",
 	p_attack_bonus_damage: int = 0,
 	p_ephemeral: bool = false,
-	p_aoe_burn_stacks: int = 0
+	p_aoe_burn_stacks: int = 0,
+	p_armor_grant: int = 0
 ) -> void:
 	kind = p_kind
 	bound_unit_id = p_bound_unit_id
 	attack_bonus_damage = p_attack_bonus_damage
 	ephemeral = p_ephemeral
 	aoe_burn_stacks = p_aoe_burn_stacks
+	armor_grant = p_armor_grant
 
 
 func is_valid() -> bool:
 	match kind:
-		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK:
+		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR:
 			return true
 		_:
 			return false
@@ -57,6 +62,7 @@ func is_active_skill() -> bool:
 		kind == Kind.SKILL_DRAW
 		or kind == Kind.SKILL_STRONG_ATTACK
 		or kind == Kind.SKILL_BURN_ATTACK
+		or kind == Kind.SKILL_ARMOR
 	)
 
 
@@ -75,6 +81,8 @@ func kind_label() -> String:
 			return "加强攻击"
 		Kind.SKILL_BURN_ATTACK:
 			return "燃爆"
+		Kind.SKILL_ARMOR:
+			return "护甲"
 		_:
 			return "移动"
 
@@ -98,6 +106,8 @@ func rules_detail() -> String:
 				"只能拖到爆爆：选定后点红圈内单位普攻；对目标及其周围格施加 %d 层燃烧。"
 				% maxi(1, aoe_burn_stacks)
 			)
+		Kind.SKILL_ARMOR:
+			return "拖到任意己方单位：立刻 +%d 护甲（可叠加）。伤害先打护甲，溢出不穿血。" % maxi(1, armor_grant)
 		_:
 			return ""
 
@@ -138,3 +148,8 @@ static func make_skill_burn_attack(
 	bound_id: String = "boomling", burn_stacks: int = 3
 ) -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_BURN_ATTACK, bound_id, 0, false, burn_stacks)
+
+
+## 盾卫主动技：通用护甲卡，拖到任意己方立刻加护甲（默认 +2，可配置）。
+static func make_skill_armor(amount: int = 2) -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_ARMOR, "", 0, false, 0, maxi(1, amount))

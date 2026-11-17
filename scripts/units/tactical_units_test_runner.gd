@@ -22,6 +22,12 @@ func _initialize() -> void:
 	if not _test_knight_hurt():
 		quit(1)
 		return
+	if not _test_armor_absorbs_no_overflow_hp():
+		quit(1)
+		return
+	if not _test_armor_blocks_hurt_passive():
+		quit(1)
+		return
 	if not _test_wardrum_move_end_buff():
 		quit(1)
 		return
@@ -146,6 +152,52 @@ func _test_knight_hurt() -> bool:
 	board.apply_damage(knight, 1, null)
 	if knight.effective_attack() != before + 1:
 		push_error("TacticalUnits: knight hurt should +1 atk")
+		return false
+	return true
+
+
+func _test_armor_absorbs_no_overflow_hp() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var unit := _player_unit(board, "archer")
+	if unit == null:
+		return false
+	unit.add_armor(2)
+	var hp_before := unit.hp
+	var res := board.apply_damage(unit, 5, null)
+	if not res.get("ok", false):
+		push_error("TacticalUnits: armor absorb hit should ok")
+		return false
+	if int(res.get("armor_absorbed", -1)) != 2:
+		push_error("TacticalUnits: should absorb existing armor")
+		return false
+	if int(res.get("hp_damage", -1)) != 0:
+		push_error("TacticalUnits: overflow must not hit HP")
+		return false
+	if unit.armor != 0 or unit.hp != hp_before:
+		push_error("TacticalUnits: armor zero, HP unchanged after overflow")
+		return false
+	unit.add_armor(3)
+	hp_before = unit.hp
+	res = board.apply_damage(unit, 2, null)
+	if unit.armor != 1 or unit.hp != hp_before or int(res.get("hp_damage", -1)) != 0:
+		push_error("TacticalUnits: partial armor hit should leave remainder")
+		return false
+	return true
+
+
+func _test_armor_blocks_hurt_passive() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	if knight == null:
+		return false
+	knight.add_armor(2)
+	var before := knight.effective_attack()
+	board.apply_damage(knight, 1, null)
+	if knight.effective_attack() != before:
+		push_error("TacticalUnits: armor-only hit must not trigger hurt atk")
+		return false
+	if knight.armor != 1:
+		push_error("TacticalUnits: armor should drop by 1")
 		return false
 	return true
 
