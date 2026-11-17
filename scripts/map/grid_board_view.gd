@@ -88,8 +88,8 @@ var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label（常驻 HP + 攻）
-var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Label（燃N）
-var _intent_icons: Dictionary = {} # TacticalUnitInstance -> Label（狼骑下一意图角标）
+var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 燃N）
+var _intent_icons: Dictionary = {} # TacticalUnitInstance -> Control（狼骑下一意图角标）
 var _burn_markers: Dictionary = {} # Vector2i -> Node2D（点燃地块标记）
 var _overlay_burn: Dictionary = {} # Vector2i -> true
 var _burn_pulse_tween: Tween
@@ -385,9 +385,9 @@ func _rebuild_board() -> void:
 			hp_lbl.queue_free()
 	_hp_bars.clear()
 	for key in _burn_badges.keys():
-		var burn_lbl: Label = _burn_badges[key] as Label
-		if burn_lbl != null and is_instance_valid(burn_lbl):
-			burn_lbl.queue_free()
+		var burn_root: Control = _burn_badges[key] as Control
+		if burn_root != null and is_instance_valid(burn_root):
+			burn_root.queue_free()
 	_burn_badges.clear()
 	for key in _intent_icons.keys():
 		var intent_icon: Control = _intent_icons[key] as Control
@@ -644,7 +644,7 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 		bar.queue_free()
 		_hp_bars.erase(unit)
 	if _burn_badges.has(unit):
-		var badge: Label = _burn_badges[unit] as Label
+		var badge: Control = _burn_badges[unit] as Control
 		badge.queue_free()
 		_burn_badges.erase(unit)
 	if _intent_icons.has(unit):
@@ -957,12 +957,11 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		bar = Label.new()
 		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		bar.add_theme_font_override("font", UI_FONT)
-		bar.add_theme_font_size_override("font_size", 11)
 		bar.add_theme_color_override("font_outline_color", Color("0a1018"))
 		bar.add_theme_constant_override("outline_size", 3)
 		_labels_root.add_child(bar)
 		_hp_bars[unit] = bar
+	_apply_ui_label_font(bar, 12)
 	_update_hp_bar(unit)
 	_ensure_burn_badge(unit)
 	_ensure_intent_icon(unit)
@@ -972,24 +971,43 @@ func _ensure_burn_badge(unit: TacticalUnitInstance) -> void:
 	if _burn_badges.has(unit):
 		_update_burn_badge(unit)
 		return
-	var badge := Label.new()
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	badge.add_theme_font_override("font", UI_FONT)
-	badge.add_theme_font_size_override("font_size", 12)
-	badge.add_theme_color_override("font_color", BURN_BADGE_COLOR)
-	badge.add_theme_color_override("font_outline_color", Color("2a0c04"))
-	badge.add_theme_constant_override("outline_size", 4)
-	badge.visible = false
-	_labels_root.add_child(badge)
-	_burn_badges[unit] = badge
+	# Web 无系统字体：◆ 不在 Noto/Droid；与意图角标同构——旋转方块菱形 + 中文 Label。
+	var root := Control.new()
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.visible = false
+	var gem := ColorRect.new()
+	gem.name = "Gem"
+	gem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gem.size = Vector2(8, 8)
+	gem.pivot_offset = Vector2(4, 4)
+	gem.rotation_degrees = 45.0
+	gem.color = BURN_BADGE_COLOR
+	root.add_child(gem)
+	var text := Label.new()
+	text.name = "Text"
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_ui_label_font(text, 12)
+	text.add_theme_color_override("font_color", BURN_BADGE_COLOR)
+	text.add_theme_color_override("font_outline_color", Color("2a0c04"))
+	text.add_theme_constant_override("outline_size", 4)
+	root.add_child(text)
+	_labels_root.add_child(root)
+	_burn_badges[unit] = root
 	_update_burn_badge(unit)
+
+
+func _apply_ui_label_font(lbl: Label, font_size: int) -> void:
+	# 血攻/燃烧/意图等世界 Label 必须显式挂 ui_font；勿依赖 Theme 默认或系统回退。
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", font_size)
 
 
 func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	if not _hp_bars.has(unit) or not _unit_sprites.has(unit):
 		return
 	var bar := _hp_bars[unit] as Label
+	_apply_ui_label_font(bar, 12)
 	var spr := _unit_sprites[unit] as Sprite2D
 	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）；有护甲时附「甲N」。
 	if unit.armor > 0:
@@ -1017,17 +1035,30 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 func _update_burn_badge(unit: TacticalUnitInstance) -> void:
 	if not _burn_badges.has(unit) or not _unit_sprites.has(unit):
 		return
-	var badge := _burn_badges[unit] as Label
+	var root := _burn_badges[unit] as Control
 	if unit.burn_stacks <= 0 or not unit.is_alive():
-		badge.visible = false
+		root.visible = false
 		return
-	badge.visible = true
-	# ◆ 作火焰形占位图标 + 层数数字（纯 2D Label，无 Light2D）。
-	badge.text = "◆燃%d" % unit.burn_stacks
+	root.visible = true
+	var gem := root.get_node("Gem") as ColorRect
+	var text := root.get_node("Text") as Label
+	_apply_ui_label_font(text, 12)
+	text.text = "燃%d" % unit.burn_stacks
+	text.add_theme_color_override("font_color", BURN_BADGE_COLOR)
+	gem.color = BURN_BADGE_COLOR
+	text.reset_size()
+	var gem_span := 11.0
+	var gap := 2.0
+	gem.position = Vector2(1.5, (maxf(text.size.y, gem_span) - 8.0) * 0.5)
+	text.position = Vector2(gem_span + gap, 0.0)
+	root.size = Vector2(
+		gem_span + gap + text.size.x,
+		maxf(text.size.y, gem_span)
+	)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var side_off := Vector2(config.unit_world_height * 0.55, -config.unit_world_height * 0.55)
-	_position_world_on_label(badge, _unit_world_position(spr) + side_off)
-	_clamp_label_in_viewport(badge)
+	_position_world_on_label(root, _unit_world_position(spr) + side_off)
+	_clamp_label_in_viewport(root)
 
 
 func _ensure_intent_icon(unit: TacticalUnitInstance) -> void:
@@ -1054,8 +1085,7 @@ func _ensure_intent_icon(unit: TacticalUnitInstance) -> void:
 	text.name = "Text"
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	text.add_theme_font_override("font", UI_FONT)
-	text.add_theme_font_size_override("font_size", 12)
+	_apply_ui_label_font(text, 12)
 	text.add_theme_color_override("font_outline_color", Color("0a1018"))
 	text.add_theme_constant_override("outline_size", 4)
 	root.add_child(text)
