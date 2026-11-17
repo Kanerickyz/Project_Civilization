@@ -81,6 +81,13 @@ func _fire_battle_start_triggers() -> void:
 
 
 func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
+	# 燃烧先于段开始被动：先造成=层数伤害再减层。
+	var burn_logs := _board.process_burn_ticks()
+	if burn_logs.size() > 0:
+		_last_log = burn_logs[burn_logs.size() - 1]
+		for u in _board.units:
+			if not u.is_alive():
+				_purge_dead_unit_cards(u)
 	var logs := TacticalAbilitySystemScript.process_side_turn_start(_board, faction)
 	if logs.size() > 0:
 		_last_log = logs[logs.size() - 1]
@@ -403,8 +410,11 @@ func _refresh_unit_panel() -> void:
 		move_line = "移动距离 %d" % u.def.move_range
 	else:
 		move_line = "移力 %d/%d" % [u.remaining_move_budget, u.def.action_move_budget()]
+	var burn_extra := ""
+	if u.burn_stacks > 0:
+		burn_extra = "\n燃烧 %d 层" % u.burn_stacks
 	_unit_panel.text = (
-		"%s · %s\nHP %d/%d · 攻 %d · %s · 射程 %d\n移动：%s\n%s\n%s"
+		"%s · %s\nHP %d/%d · 攻 %d · %s · 射程 %d\n移动：%s%s\n%s\n%s"
 		% [
 			u.def.display_name,
 			TacticalFactionScript.label(u.faction),
@@ -414,6 +424,7 @@ func _refresh_unit_panel() -> void:
 			move_line,
 			u.def.attack_range,
 			move_auth,
+			burn_extra,
 			skill_line,
 			skill_rules,
 		]
@@ -542,12 +553,17 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_pending_kind = PendingKind.MOVE
 		_last_log = "移动：%s · 点绿格（本卡仅一次）" % target.def.display_name
 	elif card.is_attack_aim():
-		_deck.authorize_attack(target, card.attack_bonus_damage)
+		_deck.authorize_attack(target, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK
 		if card.kind == TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK:
 			_last_log = "加强攻击：%s · 额外+%d · 点红圈内单位（含友方；本卡一次）" % [
 				target.def.display_name,
 				card.attack_bonus_damage,
+			]
+		elif card.kind == TacticalActionCardScript.Kind.SKILL_BURN_ATTACK:
+			_last_log = "燃爆：%s · 目标及周围 +%d 燃烧 · 点红圈内单位" % [
+				target.def.display_name,
+				card.aoe_burn_stacks,
 			]
 		else:
 			_last_log = "攻击者：%s · 点红圈内单位（含友方；本卡一次）" % target.def.display_name
@@ -678,13 +694,15 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		_refresh_all()
 		return
 	var bonus := _deck.pending_attack_bonus
+	var burn_stacks := _deck.pending_aoe_burn_stacks
 	var atk := TacticalCombatScript.try_basic_attack(
 		_board,
 		attacker,
 		target_cell,
 		TacticalFactionScript.Id.PLAYER,
 		true,
-		bonus
+		bonus,
+		burn_stacks
 	)
 	_last_log = atk["log"]
 	if not atk["ok"]:
@@ -892,7 +910,7 @@ func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
-## kind_name: move | attack | skill_draw | skill_strong_attack
+## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want := TacticalActionCardScript.Kind.MOVE
 	match kind_name:
@@ -902,6 +920,8 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			want = TacticalActionCardScript.Kind.SKILL_DRAW
 		"skill_strong_attack":
 			want = TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK
+		"skill_burn_attack":
+			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
 		_:
 			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
@@ -935,7 +955,7 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 		_focus_unit = null
 		_deck.resolve_wardrum_redraw()
 	elif card.is_attack_aim():
-		_deck.authorize_attack(unit, card.attack_bonus_damage)
+		_deck.authorize_attack(unit, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK
 	else:
 		return false

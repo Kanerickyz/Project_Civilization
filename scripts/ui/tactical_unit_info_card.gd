@@ -213,6 +213,8 @@ func _active_skill_line(unit_id: String) -> String:
 			return "[b]主动技 · 鸣鼓换手[/b]\n拖到棋盘任意有效格：弃光手牌再抽 5。"
 		"knight", "mini_pekka":
 			return "[b]主动技 · 加强攻击[/b]\n通用卡：拖到任意己方；本次攻击额外 +2 伤害。"
+		"boomling":
+			return "[b]主动技 · 燃爆[/b]\n只能拖到爆爆：普攻时对目标及周围施加 3 层燃烧。"
 		_:
 			return ""
 

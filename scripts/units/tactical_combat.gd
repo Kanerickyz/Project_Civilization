@@ -42,9 +42,17 @@ static func try_basic_attack(
 	target_cell: Vector2i,
 	active_faction: TacticalFaction.Id,
 	allow_friendly: bool = false,
-	bonus_damage: int = 0
+	bonus_damage: int = 0,
+	aoe_burn_stacks: int = 0
 ) -> Dictionary:
-	var result := {"ok": false, "log": "", "damage": 0, "killed": false, "target": null}
+	var result := {
+		"ok": false,
+		"log": "",
+		"damage": 0,
+		"killed": false,
+		"target": null,
+		"burn_applied": 0,
+	}
 	if not can_basic_attack(attacker, active_faction):
 		result["log"] = "本段行动已攻击过或无法攻击"
 		return result
@@ -69,6 +77,8 @@ static func try_basic_attack(
 	result["ok"] = hurt.get("ok", false)
 	var extra: String = hurt.get("log", "")
 	var tag := "加强攻" if bonus_damage > 0 else "普攻"
+	if aoe_burn_stacks > 0:
+		tag = "燃爆攻"
 	result["log"] = "%s %s %s，造成 %d 伤害" % [
 		attacker.def.display_name,
 		tag,
@@ -79,6 +89,12 @@ static func try_basic_attack(
 		result["log"] += " · " + extra
 	if result["killed"]:
 		result["log"] += "（击杀）"
+	# 技能燃爆：对目标格及周围施加燃烧（排除攻击者）。目标已死仍对周围生效。
+	if result["ok"] and aoe_burn_stacks > 0:
+		var burned := board.apply_burn_aoe(target_cell, aoe_burn_stacks, 1, attacker)
+		result["burn_applied"] = burned
+		if burned > 0:
+			result["log"] += " · 燃爆：%d 名单位 +%d 燃烧" % [burned, aoe_burn_stacks]
 	return result
 
 

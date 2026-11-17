@@ -47,6 +47,13 @@ static func process_unit_move_end(board: TacticalBoard, unit: TacticalUnitInstan
 	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_MOVE_END)
 
 
+## 单位刚阵亡时触发（仍可读 cell / def）；用于爆爆死亡点燃等。
+static func process_unit_death(board: TacticalBoard, unit: TacticalUnitInstance) -> Array[String]:
+	if unit == null or unit.def == null:
+		return []
+	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_DEATH)
+
+
 static func _try_trigger(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
@@ -69,6 +76,8 @@ static func _try_trigger(
 			return _apply_ally_buff(board, unit, ab, "鸣鼓")
 		TacticalActiveAbility.TriggerKind.ON_SELF_MOVE_END:
 			return _apply_ally_buff(board, unit, ab, "鼓阵")
+		TacticalActiveAbility.TriggerKind.ON_SELF_DEATH:
+			return _apply_death_aoe_burn(board, unit, ab)
 		_:
 			return []
 
@@ -141,4 +150,22 @@ static func _apply_ally_buff(
 	return [
 		"%s %s：%d 名周围角色 %s（本场）"
 		% [unit.def.display_name, tag, buffed, "、".join(parts)],
+	]
+
+
+static func _apply_death_aoe_burn(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility
+) -> Array[String]:
+	if ab.aoe_burn_stacks <= 0:
+		return []
+	var n := board.apply_burn_aoe(unit.cell, ab.aoe_burn_stacks, ab.aoe_burn_radius, null)
+	if n <= 0:
+		return [
+			"%s 爆燃：周围无单位可点燃" % unit.def.display_name,
+		]
+	return [
+		"%s 爆燃：%d 名单位获得 %d 层燃烧"
+		% [unit.def.display_name, n, ab.aoe_burn_stacks],
 	]

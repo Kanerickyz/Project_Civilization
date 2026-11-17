@@ -163,8 +163,8 @@ func _make_card(text: String, kind: int, index: int) -> Panel:
 		# 攻击
 		style.bg_color = Color(0.42, 0.14, 0.16, 0.97)
 		style.border_color = Color(0.85, 0.45, 0.4, 1.0)
-	elif kind == 2 or kind == 3:
-		# 主动技（换手 / 加强攻）
+	elif kind == 2 or kind == 3 or kind == 4:
+		# 主动技（换手 / 加强攻 / 燃爆）
 		style.bg_color = Color(0.28, 0.22, 0.12, 0.97)
 		style.border_color = Color(0.9, 0.72, 0.35, 1.0)
 	else:

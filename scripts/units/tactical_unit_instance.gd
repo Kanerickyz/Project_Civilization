@@ -12,6 +12,8 @@ var moved_this_side_turn: bool = false
 var remaining_move_budget: int = 0
 var attacked_this_side_turn: bool = false
 var deploy_trigger_fired: bool = false
+## 燃烧层数：每方行动段开始时先造成=层数伤害，再减 1 层。
+var burn_stacks: int = 0
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:
@@ -32,3 +34,9 @@ func effective_max_hp() -> int:
 
 func is_alive() -> bool:
 	return hp > 0
+
+
+func add_burn_stacks(amount: int) -> void:
+	if amount <= 0:
+		return
+	burn_stacks += amount

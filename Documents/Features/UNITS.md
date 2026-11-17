@@ -1,4 +1,4 @@
-# 战术单位 · 四人首版
+# 战术单位 · 五人首版
 
 > **已实现**（轻量切片）。数据在 `resources/units/*.tres`，逻辑在 `scripts/units/`。
 
@@ -10,6 +10,7 @@
 | 游侠 | `archer` | 2 | — | 3 | 攻击距离 3、移动距离 2；远程 |
 | 大剑 | `mini_pekka` | 1 | — | 1 | 慢速重击 |
 | 鼓手 | `wardrum` | 2 | — | 1 | 支援机动 |
+| 爆爆 | `boomling` | 1 | — | 2 | 生命 6、攻击 2；燃烧 |
 | 狼骑兵 | `rider` | 2 | 2 | 1 | 敌方编制；高速近战（无被动） |
 
 - **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **2**。
@@ -26,12 +27,13 @@
 | 游侠 | **击杀** | 立刻往手牌加 1 张临时攻击卡（用完销毁、不进三库） |
 | 大剑 | — | **无被动** |
 | 鼓手 | **移动结束** | 2 格内其他角色攻击 +1、生命 +1（本场；生命抬上限并回等量） |
+| 爆爆 | **死亡** | 所在格及周围格单位获得 3 层燃烧（见 [BURN_STATUS.md](./BURN_STATUS.md)） |
 
-侧栏仅**只读**说明。伤害/击杀/移动结束走 `TacticalBoard` 挂接触发。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
+侧栏仅**只读**说明。伤害/击杀/移动结束/死亡走 `TacticalBoard` 挂接触发。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 
 ## 规则（与 TurnClock）
 
-- 沙盘预置 4 蓝（盾卫/游侠/大剑/鼓手）+ 5 红（均为狼骑兵 `rider`）；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
+- 沙盘预置 5 蓝（盾卫/游侠/大剑/鼓手/爆爆）+ 5 红（均为狼骑兵 `rider`）；贴图用已迁入的 `assets/autochess/.../unit_boomling_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（`effective_attack`，含 buff；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
 - **玩家行动段**抽手牌；打出移动/攻击/主动技卡后再点目标；点「结束行动」先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。
 - 回到玩家段：清空移动/攻击卡授权后抽牌（玩家无段内攻次预算）；回到对手段：重置对手**移力池**与 `attacked_this_side_turn`。
 - **未做**：商店、招募、CombatEventBus、召唤。

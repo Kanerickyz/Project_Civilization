@@ -87,9 +87,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 4 人：鼓手/盾卫/大剑有技，游侠无 → 3
-	if skills != 3:
-		push_error("CardActions: expected 3 skill cards, got %d" % skills)
+	# 5 人：鼓手/盾卫/大剑/爆爆有技，游侠无 → 4
+	if skills != 4:
+		push_error("CardActions: expected 4 skill cards, got %d" % skills)
 		return false
 	var expected := living_players * 2 + skills
 	if deck.draw_pile.size() != expected or deck.total_cards() != expected:
@@ -110,6 +110,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 2:
 		push_error("CardActions: knight+pekka strong attack expected")
 		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_BURN_ATTACK) != 1:
+		push_error("CardActions: one boomling burn skill expected")
+		return false
 	for c in deck.draw_pile:
 		if c.ephemeral:
 			push_error("CardActions: build must not include ephemeral")
@@ -119,6 +122,12 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 			and c.bound_unit_id != ""
 		):
 			push_error("CardActions: strong attack must be unbound")
+			return false
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
+			and (c.bound_unit_id != "boomling" or c.aoe_burn_stacks != 3)
+		):
+			push_error("CardActions: burn skill must bind boomling with 3 stacks")
 			return false
 	return true
 
