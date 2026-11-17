@@ -804,8 +804,10 @@ func _test_combat_tweens_stay_in_cell() -> bool:
 	if hit_tw == null:
 		push_error("hit tween missing")
 		return false
-	if spr_t.modulate.r < 1.2 or spr_t.modulate.g < 1.2 or spr_t.modulate.b < 1.2:
-		push_error("hit should flash white first, got %s" % spr_t.modulate)
+	if view.unit_hit_flash_amount(target) < 0.99:
+		push_error(
+			"hit should flash pure white first, flash_amount=%s" % view.unit_hit_flash_amount(target)
+		)
 		return false
 	var max_hit := 0.0
 	while hit_tw.is_running():
