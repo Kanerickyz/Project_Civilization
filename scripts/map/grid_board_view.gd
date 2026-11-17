@@ -39,6 +39,7 @@ const LONG_PRESS_SLOP_PX := 10.0
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const GridPathfindingScript := preload("res://scripts/units/grid_pathfinding.gd")
 const UI_FONT := preload("res://resources/ui/ui_font.tres")
+const HIT_FLASH_SHADER := preload("res://resources/units/shaders/unit_hit_flash.gdshader")
 const OVERLAY_Z := 4
 const WALL_Z := 2
 const GRASS_Z := 0
@@ -400,9 +401,9 @@ func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 ## 受击/冲刺位移相对 cell_size 的上限（世界单位；旧 +4.0 在 cell_size=1 时飞出数格）。
 const UNIT_HIT_SHAKE_FRAC := 0.08
 const UNIT_ATTACK_LUNGE_FRAC := 0.28
-## 受击瞬间过曝闪白（GL Compatibility modulate >1 可读）。
-const UNIT_HIT_FLASH := Color(2.6, 2.6, 2.6, 1.0)
+## 受击纯白闪：shader flash_amount=1 把不透明像素拉到 RGB 纯白（非 modulate 灰白过曝）。
 const UNIT_HIT_FLASH_HOLD_SEC := 0.08
+const UNIT_HIT_FLASH_FADE_SEC := 0.22
 const DAMAGE_POPUP_FONT_SIZE := 28
 const DAMAGE_POPUP_LIFT_PX := 56.0
 
@@ -578,7 +579,7 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	if config == null or not _unit_sprites.has(unit):
 		return null
 	_pause_unit_idle(unit)
-	# 受击用 position/modulate；先停选中 scale，避免叠脉冲。
+	# 受击用 position + 纯白 flash shader；先停选中 scale，避免叠脉冲。
 	if _drag_select_unit == unit:
 		_clear_drag_select_unit()
 	else:
@@ -588,24 +589,60 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	spr.position = home
 	var shake := unit_hit_shake_px()
 	var rest := _look().unit_modulate
-	# 过曝闪白短停 → 回原色；位移限制在格内并结束时强制回格心。
-	spr.modulate = UNIT_HIT_FLASH
+	spr.modulate = rest
+	var mat := _ensure_unit_flash_material(spr)
+	# 瞬间完全纯白 → 短停 → 淡回贴图色；位移限制在格内并结束时强制回格心。
+	mat.set_shader_parameter("flash_amount", 1.0)
 	var tw := create_tween()
 	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.05).set_trans(Tween.TRANS_SINE)
 	tw.parallel().tween_interval(UNIT_HIT_FLASH_HOLD_SEC)
 	tw.tween_property(spr, "position", home, 0.12).set_trans(Tween.TRANS_SINE)
-	tw.parallel().tween_property(spr, "modulate", rest, 0.22).set_trans(Tween.TRANS_SINE).set_ease(
-		Tween.EASE_OUT
-	)
+	tw.parallel().tween_method(
+		_apply_hit_flash_amount.bind(mat), 1.0, 0.0, UNIT_HIT_FLASH_FADE_SEC
+	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(func() -> void:
 		if not is_instance_valid(spr) or not _unit_sprites.has(unit):
 			return
 		spr.modulate = rest
+		_set_unit_flash_amount(spr, 0.0)
 		_snap_unit_to_cell_center(unit)
 		if unit.is_alive():
 			_ensure_unit_idle(unit)
 	)
 	return tw
+
+
+func _ensure_unit_flash_material(spr: Sprite2D) -> ShaderMaterial:
+	var mat := spr.material as ShaderMaterial
+	if mat != null and mat.shader == HIT_FLASH_SHADER:
+		return mat
+	mat = ShaderMaterial.new()
+	mat.shader = HIT_FLASH_SHADER
+	mat.set_shader_parameter("flash_amount", 0.0)
+	spr.material = mat
+	return mat
+
+
+func _set_unit_flash_amount(spr: Sprite2D, amount: float) -> void:
+	var mat := spr.material as ShaderMaterial
+	if mat == null or mat.shader != HIT_FLASH_SHADER:
+		return
+	mat.set_shader_parameter("flash_amount", amount)
+
+
+func _apply_hit_flash_amount(amount: float, mat: ShaderMaterial) -> void:
+	if mat != null and is_instance_valid(mat):
+		mat.set_shader_parameter("flash_amount", amount)
+
+
+func unit_hit_flash_amount(unit: TacticalUnitInstance) -> float:
+	if not _unit_sprites.has(unit):
+		return 0.0
+	var spr := _unit_sprites[unit] as Sprite2D
+	var mat := spr.material as ShaderMaterial
+	if mat == null or mat.shader != HIT_FLASH_SHADER:
+		return 0.0
+	return float(mat.get_shader_parameter("flash_amount"))
 
 
 func play_unit_death(unit: TacticalUnitInstance) -> void:
@@ -659,6 +696,8 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	var base_scale := Vector2(unit_h / tex_h, unit_h / tex_h) if tex_h > 0.0 else Vector2.ONE
 	spr.texture = tex
 	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
+	_ensure_unit_flash_material(spr)
+	_set_unit_flash_amount(spr, 0.0)
 	_unit_base_scales[unit] = base_scale
 	# 拖牌选中脉冲中勿重置 scale，否则每帧 sync 会掐断 tween。
 	if not _unit_select_tweens.has(unit):
