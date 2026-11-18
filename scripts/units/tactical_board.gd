@@ -17,6 +17,12 @@ var _terrain: Dictionary = {}
 var _catalog: TerrainCatalog = TerrainCatalog.load_default()
 ## 视觉：最近一次燃爆/爆燃 AoE 涉及的格子（含空格）；段开始燃烧结算后清除。
 var _ignited_aoe_cells: Dictionary = {}
+## 永久危险区（地图缩圈崩塌格）；Vector2i -> true。
+var _danger_cells: Dictionary = {}
+## 全局缩圈已生效次数 n（第 5 回合起每次 +1）；危险伤 = 2^(n-1)。
+var collapse_stage: int = 0
+## 第几回合起开始缩圈（含该回合）。
+const COLLAPSE_START_TURN: int = 5
 
 
 func setup(p_width: int, p_height: int) -> void:
@@ -25,6 +31,8 @@ func setup(p_width: int, p_height: int) -> void:
 	units.clear()
 	_terrain.clear()
 	_ignited_aoe_cells.clear()
+	_danger_cells.clear()
+	collapse_stage = 0
 
 
 func set_terrain_cells(cells: Dictionary) -> void:
@@ -321,12 +329,105 @@ func _mark_ignited_aoe(origin: Vector2i, radius: int) -> void:
 			_ignited_aoe_cells[cell] = true
 
 
-## 每方行动段开始：对所有燃烧单位先造成=层数伤害，再减 1 层。
+## 到 edge 的最小距离（0=最外圈）。用于缩圈环判定。
+func edge_distance(cell: Vector2i) -> int:
+	return mini(
+		mini(cell.x, cell.y),
+		mini(grid_width - 1 - cell.x, grid_height - 1 - cell.y)
+	)
+
+
+func is_danger_cell(cell: Vector2i) -> bool:
+	return _danger_cells.has(cell)
+
+
+func danger_cells_for_view() -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for key in _danger_cells.keys():
+		if key is Vector2i:
+			out.append(key as Vector2i)
+	return out
+
+
+## 危险区伤害 = 2^(n-1)；n=collapse_stage。stage≤0 时无伤。
+func collapse_danger_damage() -> int:
+	if collapse_stage <= 0:
+		return 0
+	return 1 << (collapse_stage - 1)
+
+
+## 按当前回合数同步缩圈：turn≥5 时目标 stage=turn-4；每升一级把该环（edge_distance==stage-1）标为永久危险区。
+## 返回本拍新崩塌格；已达标则空。
+func sync_map_collapse(turn: int) -> Array[Vector2i]:
+	var target := 0
+	if turn >= COLLAPSE_START_TURN:
+		target = turn - (COLLAPSE_START_TURN - 1)
+	var newly: Array[Vector2i] = []
+	while collapse_stage < target:
+		collapse_stage += 1
+		var ring := collapse_stage - 1
+		for gx in range(grid_width):
+			for gy in range(grid_height):
+				var cell := Vector2i(gx, gy)
+				if edge_distance(cell) != ring:
+					continue
+				if _danger_cells.has(cell):
+					continue
+				_danger_cells[cell] = true
+				newly.append(cell)
+	if newly.size() > 0:
+		changed.emit()
+	return newly
+
+
+## 该方行动段开始：站在危险区的本方单位结算一次扣血（伤害=当前全局 2^(n-1)）。
+func process_danger_ticks(faction: TacticalFaction.Id) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	var dmg := collapse_danger_damage()
+	if dmg <= 0:
+		return events
+	var victims: Array[TacticalUnitInstance] = []
+	for u in living_units():
+		if u.faction != faction:
+			continue
+		if not is_danger_cell(u.cell):
+			continue
+		victims.append(u)
+	for u in victims:
+		if not u.is_alive() or not is_danger_cell(u.cell):
+			continue
+		var cell := u.cell
+		var hurt := apply_damage(u, dmg, null)
+		if hurt.get("ok", false):
+			var killed: bool = bool(hurt.get("killed", false))
+			events.append({
+				"unit": u,
+				"cell": cell,
+				"damage": dmg,
+				"killed": killed,
+				"ok": true,
+				"kind": "danger",
+				"log": "%s 危险区（缩圈×%d）：受到 %d 伤害%s"
+				% [
+					u.def.display_name,
+					collapse_stage,
+					dmg,
+					"（阵亡）" if killed else "",
+				],
+			})
+	if events.size() > 0:
+		changed.emit()
+	return events
+
+
+## 该方行动段开始：仅结算该方燃烧单位——先造成=层数伤害，再减 1 层。敌我各一次，不跨方重复。
 ## 返回事件列表（unit/cell/damage/killed/ok/log），供 UI 飘字；同 tick 内只扫开场 survivors，死亡新燃不重结。
-func process_burn_ticks() -> Array[Dictionary]:
+func process_burn_ticks(faction: TacticalFaction.Id) -> Array[Dictionary]:
 	var events: Array[Dictionary] = []
 	var victims: Array[TacticalUnitInstance] = []
 	for u in living_units():
+		if u.faction != faction:
+			continue
 		if u.burn_stacks > 0:
 			victims.append(u)
 	for u in victims:
@@ -347,6 +448,7 @@ func process_burn_ticks() -> Array[Dictionary]:
 				"damage": stacks,
 				"killed": killed,
 				"ok": true,
+				"kind": "burn",
 				"log": "%s 燃烧 %d：受到 %d 伤害%s"
 				% [
 					u.def.display_name,

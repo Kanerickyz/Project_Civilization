@@ -36,8 +36,8 @@ func _initialize() -> void:
 	sandbox._refresh_all()
 	await create_timer(0.2).timeout
 
-	# 与段开始同一逻辑：process_burn_ticks → 飘字/闪白；截在飘字峰值。
-	var events: Array = sandbox._board.process_burn_ticks()
+	# 与段开始同一逻辑：process_burn_ticks(本方) → 飘字/闪白；截在飘字峰值。
+	var events: Array = sandbox._board.process_burn_ticks(TacticalFactionScript.Id.OPPONENT)
 	if events.is_empty():
 		push_error("PC56 capture: expected burn tick events")
 		quit(1)

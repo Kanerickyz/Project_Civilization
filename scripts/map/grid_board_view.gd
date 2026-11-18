@@ -62,6 +62,8 @@ const OVERLAY_COLORS := {
 	"hx": Color(0.78, 0.32, 0.36, 0.42),
 	## 点燃地块（可与选中/移动/攻击叠显：独立 marker，本色仅作参考）。
 	"b": Color(1.0, 0.42, 0.12, 0.38),
+	## 永久危险区（缩圈）：整格淡紫罩，低于选中/移/攻/意图。
+	"d": Color(0.48, 0.18, 0.62, 0.48),
 	## 狼骑下一意图：路径格 / 攻击目标格（低于选中/红攻/绿移）。
 	"ip": Color(0.55, 0.88, 1.0, 0.38),
 	"it": Color(1.0, 0.62, 0.28, 0.52),
@@ -76,6 +78,11 @@ const BURN_BADGE_COLOR := Color("ff7a2e")
 const FRENZY_BADGE_COLOR := Color("e84b6a")
 const BURN_MARKER_Z := 3
 const BURN_MARKER_PULSE_SEC := 0.55
+## 永久危险区（缩圈崩塌）：深紫空洞菱形，低于点燃标记。
+const DANGER_MARKER_COLOR := Color(0.42, 0.12, 0.55, 0.62)
+const DANGER_MARKER_CORE := Color(0.12, 0.04, 0.18, 0.78)
+const DANGER_MARKER_Z := 2
+const DANGER_MARKER_PULSE_SEC := 0.7
 const GRASS_CHECKER_LIGHT := Color("B4A158")
 const GRASS_CHECKER_DARK := Color("8F884C")
 const WALL_STONE_LIGHT := Color("9c958c")
@@ -109,6 +116,9 @@ var _intent_icons: Dictionary = {} # TacticalUnitInstance -> Control（狼骑下
 var _burn_markers: Dictionary = {} # Vector2i -> Node2D（点燃地块标记）
 var _overlay_burn: Dictionary = {} # Vector2i -> true
 var _burn_pulse_tween: Tween
+var _danger_markers: Dictionary = {} # Vector2i -> Node2D（永久危险区）
+var _overlay_danger: Dictionary = {} # Vector2i -> true
+var _danger_pulse_tween: Tween
 var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
@@ -418,6 +428,8 @@ func _rebuild_board() -> void:
 	_clear_intent_preview()
 	_clear_burn_markers()
 	_overlay_burn.clear()
+	_clear_danger_markers()
+	_overlay_danger.clear()
 	_last_unit_cells.clear()
 	_unit_move_tweens.clear()
 	_unit_idle_tweens.clear()
@@ -472,7 +484,8 @@ func sync_tactical_units(
 	attack_cells: Array,
 	ignited_cells: Array = [],
 	intent_preview: Dictionary = {},
-	intent_unit: TacticalUnitInstance = null
+	intent_unit: TacticalUnitInstance = null,
+	danger_cells: Array = []
 ) -> void:
 	if config == null or _units_root == null:
 		return
@@ -489,6 +502,11 @@ func sync_tactical_units(
 	for c in ignited_cells:
 		if c is Vector2i:
 			_overlay_burn[c] = true
+	_overlay_danger.clear()
+	for c in danger_cells:
+		if c is Vector2i:
+			_overlay_danger[c] = true
+	_sync_danger_markers()
 	_sync_burn_markers()
 	var alive: Dictionary = {}
 	for u in units:
@@ -1336,6 +1354,8 @@ func _apply_overlay(cell: Vector2i) -> void:
 			tag = "hx"
 		else:
 			tag = "h"
+	elif _overlay_danger.has(cell):
+		tag = "d"
 	ov.visible = tag != ""
 	if tag != "":
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
@@ -1497,6 +1517,103 @@ func _spawn_intent_hint(cell: Vector2i, text: String, color: Color) -> void:
 	_position_world_on_label(root, world + head)
 	_clamp_label_in_viewport(root)
 	_intent_preview_hint = root
+
+
+func _clear_danger_markers() -> void:
+	if _danger_pulse_tween != null and is_instance_valid(_danger_pulse_tween):
+		_danger_pulse_tween.kill()
+	_danger_pulse_tween = null
+	for key in _danger_markers.keys():
+		var node: Node = _danger_markers[key] as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+	_danger_markers.clear()
+
+
+func _sync_danger_markers() -> void:
+	if config == null or _tiles_root == null:
+		return
+	var keep: Dictionary = {}
+	for cell in _overlay_danger.keys():
+		if cell is Vector2i:
+			keep[cell] = true
+			_ensure_danger_marker(cell as Vector2i)
+	var stale: Array = []
+	for key in _danger_markers.keys():
+		if not keep.has(key):
+			stale.append(key)
+	for key in stale:
+		var node: Node = _danger_markers[key] as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+		_danger_markers.erase(key)
+	_ensure_danger_pulse()
+
+
+func _ensure_danger_marker(cell: Vector2i) -> void:
+	if _danger_markers.has(cell):
+		var existing := _danger_markers[cell] as Node2D
+		if existing != null and is_instance_valid(existing):
+			existing.position = _cell_to_world(cell, config.cell_size)
+			return
+	var root := Node2D.new()
+	root.name = "Danger_%d_%d" % [cell.x, cell.y]
+	root.z_index = DANGER_MARKER_Z
+	root.position = _cell_to_world(cell, config.cell_size)
+	var half := config.cell_size * 0.42
+	var glow := Polygon2D.new()
+	glow.name = "Glow"
+	glow.color = DANGER_MARKER_COLOR
+	glow.polygon = PackedVector2Array([
+		Vector2(0.0, -half),
+		Vector2(half * 0.95, 0.0),
+		Vector2(0.0, half * 0.85),
+		Vector2(-half * 0.95, 0.0),
+	])
+	root.add_child(glow)
+	var core := Polygon2D.new()
+	core.name = "Core"
+	core.color = DANGER_MARKER_CORE
+	var ch := half * 0.48
+	core.polygon = PackedVector2Array([
+		Vector2(0.0, -ch),
+		Vector2(ch * 0.85, 0.0),
+		Vector2(0.0, ch * 0.7),
+		Vector2(-ch * 0.85, 0.0),
+	])
+	root.add_child(core)
+	_tiles_root.add_child(root)
+	_danger_markers[cell] = root
+
+
+func _ensure_danger_pulse() -> void:
+	if _danger_markers.is_empty():
+		if _danger_pulse_tween != null and is_instance_valid(_danger_pulse_tween):
+			_danger_pulse_tween.kill()
+		_danger_pulse_tween = null
+		return
+	if not is_inside_tree():
+		return
+	if _danger_pulse_tween != null and is_instance_valid(_danger_pulse_tween) and _danger_pulse_tween.is_running():
+		return
+	if _danger_pulse_tween != null and is_instance_valid(_danger_pulse_tween):
+		_danger_pulse_tween.kill()
+	_danger_pulse_tween = create_tween()
+	_danger_pulse_tween.set_loops()
+	_danger_pulse_tween.tween_method(_apply_danger_pulse_alpha, 0.45, 0.92, DANGER_MARKER_PULSE_SEC).set_trans(
+		Tween.TRANS_SINE
+	).set_ease(Tween.EASE_IN_OUT)
+	_danger_pulse_tween.tween_method(_apply_danger_pulse_alpha, 0.92, 0.45, DANGER_MARKER_PULSE_SEC).set_trans(
+		Tween.TRANS_SINE
+	).set_ease(Tween.EASE_IN_OUT)
+
+
+func _apply_danger_pulse_alpha(alpha: float) -> void:
+	for key in _danger_markers.keys():
+		var node := _danger_markers[key] as Node2D
+		if node == null or not is_instance_valid(node):
+			continue
+		node.modulate = Color(1.0, 1.0, 1.0, alpha)
 
 
 func _clear_burn_markers() -> void:
