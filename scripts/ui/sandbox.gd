@@ -172,7 +172,7 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 		await get_tree().create_timer(0.38).timeout
 		for dead in killed_now:
 			_board_view.play_unit_death(dead)
-			_play_kill_impact()
+			_play_kill_impact(dead)
 			if _selected_unit == dead:
 				_selected_unit = null
 			if _focus_unit == dead:
@@ -1058,7 +1058,7 @@ func _feedback_from_attack(
 	if res.get("killed", false):
 		_purge_dead_unit_cards(target)
 		_board_view.play_unit_death(target)
-		_play_kill_impact()
+		_play_kill_impact(target)
 		if _selected_unit == target:
 			_selected_unit = null
 		if _focus_unit == target:
@@ -1072,7 +1072,7 @@ func _feedback_from_attack(
 		if res.get("collision_killed", false):
 			_purge_dead_unit_cards(col)
 			_board_view.play_unit_death(col)
-			_play_kill_impact()
+			_play_kill_impact(col)
 			if _selected_unit == col:
 				_selected_unit = null
 			if _focus_unit == col:
@@ -1092,7 +1092,7 @@ func _feedback_from_attack(
 		if bool((hit as Dictionary).get("killed", false)):
 			_purge_dead_unit_cards(vu)
 			_board_view.play_unit_death(vu)
-			_play_kill_impact()
+			_play_kill_impact(vu)
 			if _selected_unit == vu:
 				_selected_unit = null
 			if _focus_unit == vu:
@@ -1104,18 +1104,32 @@ func _feedback_from_attack(
 		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
 
 
-func _play_kill_impact() -> void:
+func _unit_kill_silhouette_tex(unit: TacticalUnitInstance) -> Texture2D:
+	if unit == null or unit.def == null:
+		return null
+	if unit.faction == TacticalFactionScript.Id.OPPONENT:
+		return unit.def.texture_red
+	return unit.def.texture_blue
+
+
+func _play_kill_impact(unit: TacticalUnitInstance = null) -> void:
 	if _game_over or _kill_impact == null:
 		return
 	if _kill_impact.has_method("play"):
-		_kill_impact.call("play")
+		_kill_impact.call("play", _unit_kill_silhouette_tex(unit))
 
 
-## GUI 截图：强制播一次击杀冲击（不等真实击杀结算）。
-func capture_play_kill_impact() -> bool:
+## GUI 截图：强制播一次击杀冲击（默认红狼骑剪影；可传贴图）。
+func capture_play_kill_impact(silhouette_tex: Texture2D = null) -> bool:
 	if _kill_impact == null:
 		return false
-	_play_kill_impact()
+	var tex := silhouette_tex
+	if tex == null:
+		var rider_def: TacticalUnitDef = load("res://resources/units/rider.tres") as TacticalUnitDef
+		if rider_def != null:
+			tex = rider_def.texture_red
+	if _kill_impact.has_method("play"):
+		_kill_impact.call("play", tex)
 	return _kill_impact.visible
 
 
