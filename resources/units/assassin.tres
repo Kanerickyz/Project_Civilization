@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="TacticalUnitDef" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/units/tactical_unit_def.gd" id="1_def"]
+[ext_resource type="Resource" path="res://resources/abilities/tactical_assassin_stealth.tres" id="2_ab"]
+[ext_resource type="Texture2D" path="res://assets/autochess/sprites/paper_cutout/units/unit_shinobi_blue.png" id="3_tex_b"]
+[ext_resource type="Texture2D" path="res://assets/autochess/sprites/paper_cutout/units/unit_shinobi_red.png" id="4_tex_r"]
+
+[resource]
+script = ExtResource("1_def")
+id = "assassin"
+display_name = "刺客"
+max_hp = 4
+attack = 2
+move_range = 4
+attack_range = 1
+teleports = true
+starts_stealthed = true
+texture_blue = ExtResource("3_tex_b")
+texture_red = ExtResource("4_tex_r")
+triggered_ability = ExtResource("2_ab")

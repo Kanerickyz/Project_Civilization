@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="TacticalActiveAbility" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/units/tactical_active_ability.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+id = "shadow_cloak"
+display_name = "隐身"
+autochess_ability_id = ""
+rules_hint = "默认开启：敌方不可选为目标。自身攻击、受伤或被施加状态时取消。"
+trigger_kind = 1
+range_chebyshev = 0

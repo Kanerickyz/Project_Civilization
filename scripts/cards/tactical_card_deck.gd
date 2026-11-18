@@ -315,6 +315,10 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 			removed += _remove_one_bound_skill(
 				int(TacticalActionCard.Kind.SKILL_BURN_ATTACK), unit_id
 			)
+		"assassin":
+			removed += _remove_one_bound_skill(
+				int(TacticalActionCard.Kind.SKILL_STEALTH), unit_id
+			)
 		"mini_pekka":
 			# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
 			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK))
@@ -365,6 +369,8 @@ static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCar
 			out.append(
 				TacticalActionCardScript.make_skill_burn_attack("boomling", SKILL_BURN_STACKS)
 			)
+		"assassin":
+			out.append(TacticalActionCardScript.make_skill_stealth("assassin"))
 	return out
 
 

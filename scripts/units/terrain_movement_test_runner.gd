@@ -155,9 +155,13 @@ func _test_try_move_into_wall_and_bounds() -> bool:
 
 func _test_no_corner_cutting() -> bool:
 	# (2,2)->(3,3) 斜走须经过 (3,2) 与 (2,3)；(3,2) 是墙，只能绕 2 步。
+	# 用移距 1 的临时盾卫：移距 2 的正式盾卫可绕过角。
 	var walls: Array[Vector2i] = [Vector2i(3, 2)]
 	var knight_board := _board_with("res://resources/units/knight.tres", Vector2i(2, 2), walls)
 	var knight := knight_board.units[0]
+	knight.def = knight.def.duplicate(true) as TacticalUnitDef
+	knight.def.move_range = 1
+	knight.remaining_move_budget = 1
 	if knight_board.path_distance(knight.cell, Vector2i(3, 3)) != 2:
 		push_error("TerrainMove: diagonal past wall corner should cost 2")
 		return false
@@ -226,6 +230,9 @@ func _test_no_wall_matches_legacy() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	for budget_override in [-1, 1, 2, 3, 6]:
 		for u in board.living_units():
+			# 瞬移单位走切比雪夫可达，不适用无墙 legacy 路径模型。
+			if u.def != null and u.def.teleports:
+				continue
 			if budget_override >= 0:
 				u.remaining_move_budget = budget_override
 			var got := board.reachable_move_cells(u)
@@ -381,6 +388,7 @@ func _test_lake_clears_burn_and_immune() -> bool:
 func _test_ai_respects_passable_cells() -> bool:
 	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
 	var board := TacticalSandboxRosterScript.build_board_for_config(cfg, 99)
+	TacticalSandboxRosterScript.spawn_pending_enemies(board, 99)
 	# 临时加墙，确认 AI 不会踩上去。
 	board.set_terrain_cells({Vector2i(3, 3): WALL, Vector2i(4, 3): WALL})
 	for _round in range(4):

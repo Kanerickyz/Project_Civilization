@@ -21,7 +21,8 @@
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
 | [Features/BURN_STATUS.md](./Features/BURN_STATUS.md) | **燃烧状态** · 爆爆燃爆 / 死亡点燃 |
 | [Features/MAP_COLLAPSE.md](./Features/MAP_COLLAPSE.md) | **地图缩圈** · 第 5 回合起四角向内崩塌 · 危险区伤 |
-| [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 拖己方到左半盘 · 确认开战 |
+| [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 全图站位 · 敌潜在点 · 确认开战 |
+| [Features/ASSASSIN_STEALTH.md](./Features/ASSASSIN_STEALTH.md) | **刺客** · 瞬移 · 隐身被动/主动 · 要员保护目标 |
 
 ## 仓库里有什么
 

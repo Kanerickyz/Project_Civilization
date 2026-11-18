@@ -11,6 +11,7 @@ enum Kind {
 	SKILL_BURN_ATTACK,
 	SKILL_ARMOR,
 	SKILL_INSPIRE,
+	SKILL_STEALTH,
 }
 
 var kind: Kind = Kind.MOVE
@@ -44,7 +45,7 @@ func _init(
 
 func is_valid() -> bool:
 	match kind:
-		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE:
+		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH:
 			return true
 		_:
 			return false
@@ -58,6 +59,10 @@ func is_attack_aim() -> bool:
 	)
 
 
+func is_stealth_aim() -> bool:
+	return kind == Kind.SKILL_STEALTH
+
+
 func is_active_skill() -> bool:
 	return (
 		kind == Kind.SKILL_DRAW
@@ -65,6 +70,7 @@ func is_active_skill() -> bool:
 		or kind == Kind.SKILL_BURN_ATTACK
 		or kind == Kind.SKILL_ARMOR
 		or kind == Kind.SKILL_INSPIRE
+		or kind == Kind.SKILL_STEALTH
 	)
 
 
@@ -87,6 +93,8 @@ func kind_label() -> String:
 			return "护甲"
 		Kind.SKILL_INSPIRE:
 			return "鼓舞"
+		Kind.SKILL_STEALTH:
+			return "隐身"
 		_:
 			return "移动"
 
@@ -114,6 +122,8 @@ func rules_detail() -> String:
 			return "拖到任意己方单位：立刻 +%d 护甲（可叠加）。伤害先打护甲，溢出不穿血。" % maxi(1, armor_grant)
 		Kind.SKILL_INSPIRE:
 			return "只能拖到鼓手：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
+		Kind.SKILL_STEALTH:
+			return "只能拖到刺客：再点任意存活单位，令其隐身（敌方不可选为目标；攻击/受伤/加状态取消）。"
 		_:
 			return ""
 
@@ -164,3 +174,8 @@ static func make_skill_armor(amount: int = 2) -> TacticalActionCard:
 ## 鼓手主动技「鼓舞」：必须拖到鼓手自身；周围 1 格友方 +1 狂暴。
 static func make_skill_inspire(bound_id: String = "wardrum") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_INSPIRE, bound_id)
+
+
+## 刺客主动技：必须拖到刺客；再点目标单位令其隐身。
+static func make_skill_stealth(bound_id: String = "assassin") -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_STEALTH, bound_id)

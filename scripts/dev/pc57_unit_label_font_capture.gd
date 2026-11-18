@@ -27,6 +27,7 @@ func _initialize() -> void:
 	view.setup(cfg)
 
 	var board := TacticalSandboxRoster.build_board_for_config(cfg, 20261117)
+	TacticalSandboxRoster.spawn_pending_enemies(board, 20261117)
 	view.set_terrain_cells(board.terrain_cells())
 	# 给一只狼骑兵叠燃烧，露出「燃N」角标；血攻读数全场常驻。
 	var burned := 0

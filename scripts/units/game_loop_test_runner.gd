@@ -54,14 +54,21 @@ func _test_basic_attack() -> bool:
 	var player: TacticalUnitInstance = null
 	var foe: TacticalUnitInstance = null
 	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "knight":
 			player = u
 		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			foe = u
 	if player == null or foe == null:
 		push_error("GameLoop: missing units for attack test")
 		return false
-	foe.cell = player.cell + Vector2i(1, 0)
+	# 放到空邻格，避免与其它友方（刺客等）叠格导致 unit_at 命中隐身单位。
+	var dest := player.cell + Vector2i(1, 0)
+	for d in [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1), Vector2i(1, 1)]:
+		var c: Vector2i = player.cell + d
+		if board.unit_at(c) == null and board.is_passable(c):
+			dest = c
+			break
+	foe.cell = dest
 	var before := foe.hp
 	var res := TacticalCombatScript.try_basic_attack(
 		board, player, foe.cell, TacticalFactionScript.Id.PLAYER

@@ -110,9 +110,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 5 人：鼓手×2（换手+鼓舞）/盾卫/大剑/爆爆有技，游侠无 → 5
-	if skills != 5:
-		push_error("CardActions: expected 5 skill cards, got %d" % skills)
+	# 7 人：鼓手×2 /盾卫/大剑/爆爆/刺客有技，游侠+要员无 → 6
+	if skills != 6:
+		push_error("CardActions: expected 6 skill cards, got %d" % skills)
 		return false
 	var expected := living_players * 2 + skills
 	if deck.draw_pile.size() != expected or deck.total_cards() != expected:

@@ -29,6 +29,7 @@ func _initialize() -> void:
 	var intent_counts: Dictionary = {}
 	for attempt in range(32):
 		board = TacticalSandboxRoster.build_board_for_config(cfg, 20261119 + attempt)
+		TacticalSandboxRoster.spawn_pending_enemies(board, 20261119 + attempt)
 		kinds.clear()
 		intent_counts.clear()
 		for u in board.living_units():

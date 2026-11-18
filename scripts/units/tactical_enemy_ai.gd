@@ -412,8 +412,12 @@ static func _best_step_toward_player(
 		return unreachable
 	var players: Array[TacticalUnitInstance] = []
 	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER:
-			players.append(u)
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		# 隐身单位对敌不可见，不作为靠近目标。
+		if u.is_stealthed():
+			continue
+		players.append(u)
 	if players.is_empty():
 		return reachable[0]
 
