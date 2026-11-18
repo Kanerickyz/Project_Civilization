@@ -329,12 +329,13 @@ func _mark_ignited_aoe(origin: Vector2i, radius: int) -> void:
 			_ignited_aoe_cells[cell] = true
 
 
-## 到 edge 的最小距离（0=最外圈）。用于缩圈环判定。
-func edge_distance(cell: Vector2i) -> int:
-	return mini(
-		mini(cell.x, cell.y),
-		mini(grid_width - 1 - cell.x, grid_height - 1 - cell.y)
-	)
+## 到最近角的 Chebyshev 距离（0=四角）。用于四角向内缩圈判定。
+func corner_distance(cell: Vector2i) -> int:
+	var tl := maxi(cell.x, cell.y)
+	var tr := maxi(grid_width - 1 - cell.x, cell.y)
+	var bl := maxi(cell.x, grid_height - 1 - cell.y)
+	var br := maxi(grid_width - 1 - cell.x, grid_height - 1 - cell.y)
+	return mini(mini(tl, tr), mini(bl, br))
 
 
 func is_danger_cell(cell: Vector2i) -> bool:
@@ -356,8 +357,8 @@ func collapse_danger_damage() -> int:
 	return 1 << (collapse_stage - 1)
 
 
-## 按当前回合数同步缩圈：turn≥5 时目标 stage=turn-4；每升一级把该环（edge_distance==stage-1）标为永久危险区。
-## 返回本拍新崩塌格；已达标则空。
+## 按当前回合数同步缩圈：turn≥5 时目标 stage=turn-4；每升一级把该层（corner_distance==stage-1）标为永久危险区。
+## 从四角向内崩塌（非整边外环）。返回本拍新崩塌格；已达标则空。
 func sync_map_collapse(turn: int) -> Array[Vector2i]:
 	var target := 0
 	if turn >= COLLAPSE_START_TURN:
@@ -369,7 +370,7 @@ func sync_map_collapse(turn: int) -> Array[Vector2i]:
 		for gx in range(grid_width):
 			for gy in range(grid_height):
 				var cell := Vector2i(gx, gy)
-				if edge_distance(cell) != ring:
+				if corner_distance(cell) != ring:
 					continue
 				if _danger_cells.has(cell):
 					continue
