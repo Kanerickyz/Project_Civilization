@@ -32,7 +32,7 @@
 | 爆爆 | **死亡** | 所在格及周围格单位获得 3 层燃烧（见 [BURN_STATUS.md](./BURN_STATUS.md)） |
 | 刺客 | **默认隐身** | 敌方不可选为目标；攻击/受伤/加状态取消（见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md)） |
 
-侧栏仅**只读**说明。伤害/击杀/友方死亡/打出攻击牌/死亡走 `TacticalBoard` / 沙盘挂接触发。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
+侧栏仅**只读**说明。伤害/击杀/友方死亡/打出攻击牌/死亡走 `TacticalBoard` / 沙盘挂接触发。被动生效时沙盘头顶飘字反馈（加攻 `+N攻`、加血 `+N血`、抽牌 `+N牌`）。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 
 ## 狂暴（鼓舞）
 

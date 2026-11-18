@@ -150,6 +150,7 @@ static func try_knight_charge(
 		"wall_stopped": false,
 		"self_damage": 0,
 		"self_killed": false,
+		"passive_fx": [],
 	}
 	if board == null or knight == null or not knight.is_alive():
 		result["log"] = "冲撞需要存活盾卫"
@@ -173,12 +174,14 @@ static func try_knight_charge(
 		if not board.is_passable(next):
 			result["wall_stopped"] = true
 			var self_hurt := board.apply_damage(knight, CHARGE_WALL_SELF_DAMAGE, null)
+			_append_passive_fx(result, self_hurt)
 			result["self_damage"] = CHARGE_WALL_SELF_DAMAGE
 			result["self_killed"] = bool(self_hurt.get("killed", false))
 			break
 		var occupant := board.unit_at(next)
 		if occupant != null and occupant != knight:
 			var hurt := board.apply_damage(occupant, dmg, knight)
+			_append_passive_fx(result, hurt)
 			var hit := {
 				"unit": occupant,
 				"cell": next,
@@ -250,6 +253,7 @@ static func try_basic_attack(
 		"collision_damage": 0,
 		"collision_killed": false,
 		"volley_hits": [],
+		"passive_fx": [],
 	}
 	if not can_basic_attack(attacker, active_faction):
 		result["log"] = "本段行动已攻击过或无法攻击"
@@ -297,6 +301,7 @@ static func try_basic_attack(
 	result["target"] = target
 	result["damage"] = dmg
 	result["killed"] = hurt.get("killed", false)
+	_append_passive_fx(result, hurt)
 	# 仅对手 AI 记「本段已攻」；玩家次数完全由攻击卡驱动。
 	if attacker.faction != TacticalFaction.Id.PLAYER:
 		attacker.attacked_this_side_turn = true
@@ -322,6 +327,7 @@ static func try_basic_attack(
 	# 落点有其他单位：额外 1 点伤害（可为友方）。
 	if do_knockback and knock_blocked and occupant != null and occupant != target and occupant.is_alive():
 		var col := board.apply_damage(occupant, KNOCKBACK_COLLISION_DAMAGE, attacker)
+		_append_passive_fx(result, col)
 		result["collision_target"] = occupant
 		result["collision_damage"] = KNOCKBACK_COLLISION_DAMAGE
 		result["collision_killed"] = col.get("killed", false)
@@ -346,6 +352,7 @@ static func try_basic_attack(
 			if not side_u.is_alive():
 				continue
 			var side_hurt := board.apply_damage(side_u, splash_dmg, attacker)
+			_append_passive_fx(result, side_hurt)
 			var hit := {
 				"unit": side_u,
 				"cell": side,
@@ -365,6 +372,16 @@ static func try_basic_attack(
 		if burned > 0:
 			result["log"] += " · 燃爆：%d 名单位 +%d 燃烧" % [burned, aoe_burn_stacks]
 	return result
+
+
+## 把 apply_damage 返回的被动飘字事件并入攻击/冲撞结算。
+static func _append_passive_fx(into: Dictionary, from_hurt: Dictionary) -> void:
+	var src: Array = from_hurt.get("passive_fx", []) as Array
+	if src.is_empty():
+		return
+	var dest: Array = into.get("passive_fx", []) as Array
+	dest.append_array(src)
+	into["passive_fx"] = dest
 
 
 static func faction_defeated(board: TacticalBoard, faction: TacticalFaction.Id) -> bool:

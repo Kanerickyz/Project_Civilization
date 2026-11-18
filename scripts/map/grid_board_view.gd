@@ -699,7 +699,10 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	play_float_text(cell, "-%d" % maxi(0, amount), Color("ff5533"))
 
 
-func play_float_text(cell: Vector2i, text: String, color: Color = Color("ff5533")) -> void:
+## stack_index：同格多条飘字时错开，避免完全叠死。
+func play_float_text(
+	cell: Vector2i, text: String, color: Color = Color("ff5533"), stack_index: int = 0
+) -> void:
 	if config == null:
 		return
 	# 与常驻 HP 读数同一套世界坐标（格心投影 + 头顶偏移），勿再抬 3D Y / 混像素。
@@ -721,7 +724,8 @@ func play_float_text(cell: Vector2i, text: String, color: Color = Color("ff5533"
 	lbl.pivot_offset = lbl.size * 0.5
 	_position_world_on_label(lbl, world + head)
 	_clamp_label_in_viewport(lbl)
-	var start_pos := lbl.position
+	var start_pos := lbl.position + Vector2(14.0 * float(stack_index), -16.0 * float(stack_index))
+	lbl.position = start_pos
 	var tw := create_tween()
 	tw.set_parallel(true)
 	# 上浮在屏幕空间（Control.position），不再经 world→screen。
