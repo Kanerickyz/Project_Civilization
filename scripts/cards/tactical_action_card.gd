@@ -77,9 +77,10 @@ func is_active_skill() -> bool:
 	)
 
 
-## 松手在棋盘有效格即可打出（不要求落在单位上）。
+## 非通用（绑角色）主动技：松手棋盘/手牌区或短按即可打出，自动绑定施法者。
+## 通用攻/加强攻/护甲仍须拖到己方单位选定持卡者。
 func plays_on_board() -> bool:
-	return kind == Kind.SKILL_DRAW
+	return is_active_skill() and bound_unit_id != ""
 
 
 func kind_label() -> String:
@@ -115,23 +116,23 @@ func rules_detail() -> String:
 		Kind.ATTACK:
 			return "拖到己方单位：选定攻击者，再点红圈内单位（含友方）普攻。可打多张再攻。"
 		Kind.SKILL_DRAW:
-			return "拖到棋盘任意有效格松手：手牌全部进弃，再抽 5 张。"
+			return "短按或拖到棋盘/手牌区打出：手牌全部进弃，再抽 5 张（自动绑定鼓手）。"
 		Kind.SKILL_STRONG_ATTACK:
 			return "拖到任意己方单位：选定攻击者，再点红圈内单位；本次攻击额外 +%d 伤害。" % attack_bonus_damage
 		Kind.SKILL_BURN_ATTACK:
 			return (
-				"只能拖到爆爆：选定后点红圈内单位普攻；对目标及其周围格施加 %d 层燃烧。"
+				"短按或拖到棋盘/手牌区打出（自动绑定爆爆）：再点红圈内单位普攻；对目标及其周围格施加 %d 层燃烧。"
 				% maxi(1, aoe_burn_stacks)
 			)
 		Kind.SKILL_ARMOR:
 			return "拖到任意己方单位：立刻 +%d 护甲（可叠加）。伤害先打护甲，溢出不穿血。" % maxi(1, armor_grant)
 		Kind.SKILL_INSPIRE:
-			return "只能拖到鼓手：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
+			return "短按或拖到棋盘/手牌区打出（自动绑定鼓手）：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
 		Kind.SKILL_STEALTH:
-			return "只能拖到刺客：再点任意存活单位，令其隐身（敌方不可选为目标；攻击/受伤/加状态取消）。"
+			return "短按或拖到棋盘/手牌区打出（自动绑定刺客）：再点任意存活单位，令其隐身（敌方不可选为目标；攻击/受伤/加状态取消）。"
 		Kind.SKILL_VOLLEY:
 			return (
-				"只能拖到游侠：选定后点红圈内单位；对目标格及相对攻击方向垂直左右两格造成伤害。"
+				"短按或拖到棋盘/手牌区打出（自动绑定游侠）：再点红圈内单位；对目标格及相对攻击方向垂直左右两格造成伤害。"
 			)
 		_:
 			return ""
@@ -139,7 +140,7 @@ func rules_detail() -> String:
 
 func can_drop_on(unit: TacticalUnitInstance) -> bool:
 	if plays_on_board():
-		# 棋盘打出；落在单位上也算有效区内。
+		# 自由打出：落在任意存活单位上也算有效松手区。
 		return unit != null and unit.is_alive()
 	if unit == null or not unit.is_alive():
 		return false
@@ -148,6 +149,55 @@ func can_drop_on(unit: TacticalUnitInstance) -> bool:
 	if bound_unit_id == "":
 		return true
 	return unit.def != null and unit.def.id == bound_unit_id
+
+
+## 拖牌时高亮的「可释放/技能规则」格（棋盘逻辑格）。board 须有 living_units / 尺寸。
+func release_preview_cells(board: TacticalBoard) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if board == null or not plays_on_board():
+		return out
+	var caster := find_bound_caster(board)
+	match kind:
+		Kind.SKILL_DRAW:
+			for gx in range(board.grid_width):
+				for gy in range(board.grid_height):
+					out.append(Vector2i(gx, gy))
+		Kind.SKILL_INSPIRE:
+			if caster == null:
+				return out
+			var radius := 1
+			for gx in range(board.grid_width):
+				for gy in range(board.grid_height):
+					var cell := Vector2i(gx, gy)
+					if GridMath.chebyshev(caster.cell, cell) <= radius:
+						out.append(cell)
+		Kind.SKILL_BURN_ATTACK, Kind.SKILL_VOLLEY:
+			if caster == null:
+				return out
+			return board.attack_range_cells(caster)
+		Kind.SKILL_STEALTH:
+			for u in board.living_units():
+				if u != null and u.is_alive():
+					out.append(u.cell)
+		_:
+			pass
+	return out
+
+
+## 绑角色主动技的存活施法者；找不到则 null。
+func find_bound_caster(board: TacticalBoard) -> TacticalUnitInstance:
+	if board == null or bound_unit_id == "":
+		return null
+	for u in board.living_units():
+		if (
+			u != null
+			and u.is_alive()
+			and u.faction == TacticalFaction.Id.PLAYER
+			and u.def != null
+			and u.def.id == bound_unit_id
+		):
+			return u
+	return null
 
 
 static func make_move() -> TacticalActionCard:
@@ -168,7 +218,7 @@ static func make_skill_strong_attack(bonus: int = 2) -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_STRONG_ATTACK, "", bonus)
 
 
-## 爆爆主动技：必须拖到爆爆自身；攻击时对目标及周围施加燃烧。
+## 爆爆主动技：自由打出后自动绑定爆爆；攻击时对目标及周围施加燃烧。
 static func make_skill_burn_attack(
 	bound_id: String = "boomling", burn_stacks: int = 3
 ) -> TacticalActionCard:
@@ -180,16 +230,16 @@ static func make_skill_armor(amount: int = 2) -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_ARMOR, "", 0, false, 0, maxi(1, amount))
 
 
-## 鼓手主动技「鼓舞」：必须拖到鼓手自身；周围 1 格友方 +1 狂暴。
+## 鼓手主动技「鼓舞」：自由打出后自动绑定鼓手；周围 1 格友方 +1 狂暴。
 static func make_skill_inspire(bound_id: String = "wardrum") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_INSPIRE, bound_id)
 
 
-## 刺客主动技：必须拖到刺客；再点目标单位令其隐身。
+## 刺客主动技：自由打出后自动绑定刺客；再点目标单位令其隐身。
 static func make_skill_stealth(bound_id: String = "assassin") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_STEALTH, bound_id)
 
 
-## 游侠主动技「万箭齐发」：必须拖到游侠；目标格 + 攻击方向垂直左右两格受伤。
+## 游侠主动技「万箭齐发」：自由打出后自动绑定游侠；目标格 + 攻击方向垂直左右两格受伤。
 static func make_skill_volley(bound_id: String = "archer") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_VOLLEY, bound_id)

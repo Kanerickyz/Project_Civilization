@@ -6,6 +6,7 @@ const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const TacticalAbilitySystemScript := preload("res://scripts/units/tactical_ability_system.gd")
+const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
 
 func _initialize() -> void:
@@ -52,6 +53,9 @@ func _initialize() -> void:
 		quit(1)
 		return
 	if not _test_wardrum_skill_plays_on_board():
+		quit(1)
+		return
+	if not _test_bound_skills_play_free():
 		quit(1)
 		return
 	if not _test_inspire_adds_frenzy_nearby():
@@ -709,6 +713,14 @@ func _test_wardrum_skill_plays_on_board() -> bool:
 	if strong.plays_on_board():
 		push_error("CardActions: strong attack must still require a unit drop")
 		return false
+	var armor := TacticalActionCardScript.make_skill_armor()
+	if armor.plays_on_board():
+		push_error("CardActions: armor must still require a unit drop")
+		return false
+	var attack := TacticalActionCardScript.make_attack()
+	if attack.plays_on_board():
+		push_error("CardActions: attack must not play free")
+		return false
 	var move := TacticalActionCardScript.make_move()
 	if move.plays_on_board():
 		push_error("CardActions: move must not play on empty board")
@@ -738,8 +750,79 @@ func _test_volley_binds_archer_only() -> bool:
 	if not card.is_attack_aim() or not card.is_active_skill():
 		push_error("CardActions: volley must be attack-aim skill")
 		return false
-	if not card.can_drop_on(archer) or card.can_drop_on(other):
-		push_error("CardActions: volley must drop only on archer")
+	if not card.plays_on_board():
+		push_error("CardActions: volley must play free")
+		return false
+	if card.find_bound_caster(board) != archer:
+		push_error("CardActions: volley caster must resolve to archer")
+		return false
+	# 自由打出：落在任意存活单位也算有效松手区。
+	if not card.can_drop_on(archer) or not card.can_drop_on(other):
+		push_error("CardActions: volley free play accepts any living drop")
+		return false
+	var preview: Array[Vector2i] = card.release_preview_cells(board)
+	if preview.is_empty():
+		push_error("CardActions: volley preview must show attack range")
+		return false
+	return true
+
+
+func _test_bound_skills_play_free() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var inspire := TacticalActionCardScript.make_skill_inspire("wardrum")
+	var burn := TacticalActionCardScript.make_skill_burn_attack("boomling", 3)
+	var stealth := TacticalActionCardScript.make_skill_stealth("assassin")
+	var volley := TacticalActionCardScript.make_skill_volley("archer")
+	if (
+		not inspire.plays_on_board()
+		or not burn.plays_on_board()
+		or not stealth.plays_on_board()
+		or not volley.plays_on_board()
+	):
+		push_error("CardActions: bound skills must play free (plays_on_board)")
+		return false
+	var drum := inspire.find_bound_caster(board)
+	var boom := burn.find_bound_caster(board)
+	var sin := stealth.find_bound_caster(board)
+	var archer := volley.find_bound_caster(board)
+	if drum == null or boom == null or sin == null or archer == null:
+		push_error("CardActions: bound casters missing on demo board")
+		return false
+	var inspire_cells: Array[Vector2i] = inspire.release_preview_cells(board)
+	if inspire_cells.is_empty() or not (drum.cell in inspire_cells):
+		push_error("CardActions: inspire preview must include drummer cell")
+		return false
+	var burn_cells: Array[Vector2i] = burn.release_preview_cells(board)
+	if burn_cells.is_empty():
+		push_error("CardActions: burn preview must show attack range")
+		return false
+	var stealth_cells: Array[Vector2i] = stealth.release_preview_cells(board)
+	if stealth_cells.size() < 2:
+		push_error("CardActions: stealth preview must cover living units")
+		return false
+	# 自由打出后鼓舞仍按鼓手结算。
+	var ally: TacticalUnitInstance = null
+	for u in board.living_units():
+		if (
+			u.faction == TacticalFactionScript.Id.PLAYER
+			and u != drum
+			and GridMathScript.chebyshev(drum.cell, u.cell) <= 1
+		):
+			ally = u
+			break
+	if ally == null:
+		for u in board.living_units():
+			if u.faction == TacticalFactionScript.Id.PLAYER and u != drum:
+				ally = u
+				break
+		if ally == null:
+			push_error("CardActions: need ally for free inspire")
+			return false
+		ally.cell = drum.cell + Vector2i(1, 0)
+	var before := ally.frenzy_stacks
+	var res: Dictionary = board.apply_inspire_frenzy(drum, 1)
+	if not res.get("ok", false) or ally.frenzy_stacks != before + 1:
+		push_error("CardActions: free inspire should buff neighbor via bound caster")
 		return false
 	return true
 
@@ -760,14 +843,15 @@ func _test_inspire_adds_frenzy_nearby() -> bool:
 		return false
 	ally.cell = drum.cell + Vector2i(1, 0)
 	var card := TacticalActionCardScript.make_skill_inspire("wardrum")
-	if card.plays_on_board():
-		push_error("CardActions: inspire must require wardrum drop")
+	if not card.plays_on_board():
+		push_error("CardActions: inspire must play free without unit drop")
 		return false
-	if not card.can_drop_on(drum):
-		push_error("CardActions: inspire must drop on wardrum")
+	if card.find_bound_caster(board) != drum:
+		push_error("CardActions: inspire caster must resolve to wardrum")
 		return false
-	if card.can_drop_on(ally):
-		push_error("CardActions: inspire must not drop on non-wardrum")
+	# 落在任意存活单位上仍算有效松手区（自由打出）。
+	if not card.can_drop_on(drum) or not card.can_drop_on(ally):
+		push_error("CardActions: inspire free play accepts any living drop")
 		return false
 	var before := ally.frenzy_stacks
 	var res: Dictionary = board.apply_inspire_frenzy(drum, 1)
