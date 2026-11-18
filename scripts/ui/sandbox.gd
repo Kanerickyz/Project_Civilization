@@ -141,10 +141,20 @@ func _fire_battle_start_triggers() -> void:
 
 
 func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
-	# 燃烧先于段开始被动与本方行动：先扣血飘字，再被动，再意图/出牌。
-	var burn_events: Array[Dictionary] = _board.process_burn_ticks()
+	# 缩圈（按回合数同步）→ 危险区伤（仅本方）→ 燃烧（仅本方）→ 段开始被动 → 意图/出牌。
+	var newly_collapsed := _board.sync_map_collapse(_clock.turn)
+	if newly_collapsed.size() > 0:
+		_last_log = "地图崩塌 · 第 %d 圈危险区（伤 %d）" % [
+			_board.collapse_stage,
+			_board.collapse_danger_damage(),
+		]
+		_refresh_all()
+		await get_tree().create_timer(0.28).timeout
+	var tick_events: Array[Dictionary] = []
+	tick_events.append_array(_board.process_danger_ticks(faction))
+	tick_events.append_array(_board.process_burn_ticks(faction))
 	var killed_now: Array[TacticalUnitInstance] = []
-	for ev in burn_events:
+	for ev in tick_events:
 		var log_line := str(ev.get("log", ""))
 		if log_line != "":
 			_last_log = log_line
@@ -159,11 +169,11 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 		if bool(ev.get("killed", false)):
 			killed_now.append(unit)
 			_purge_dead_unit_cards(unit)
-	# 燃烧可本 tick 新杀；on_player_unit_died 幂等，旧尸体再扫也不减 MOVE。
+	# 段开始伤可本 tick 新杀；on_player_unit_died 幂等，旧尸体再扫也不减 MOVE。
 	for u in _board.units:
 		if not u.is_alive():
 			_purge_dead_unit_cards(u)
-	if burn_events.size() > 0:
+	if tick_events.size() > 0:
 		_refresh_all()
 		# 给飘字一拍可见窗口，再让本方单位执行意图/出牌。
 		await get_tree().create_timer(0.38).timeout
@@ -494,7 +504,8 @@ func _refresh_all() -> void:
 		attack_cells,
 		_board.ignited_cells_for_view(),
 		intent_preview,
-		intent_unit
+		intent_unit,
+		_board.danger_cells_for_view()
 	)
 
 
