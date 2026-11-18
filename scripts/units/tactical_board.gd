@@ -393,6 +393,22 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	return true
 
 
+## 强制位移（击退等）：不耗移力、不触发移动结束被动；落点须可通行且为空。
+func force_displace(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
+	if unit == null or not unit.is_alive():
+		return false
+	if dest == unit.cell:
+		return true
+	if not is_passable(dest):
+		return false
+	if unit_at(dest) != null:
+		return false
+	unit.cell = dest
+	_apply_terrain_enter_effects(unit)
+	changed.emit()
+	return true
+
+
 ## 开战前部署：左半盘可通行格；可与己方换位；不耗移力、不触发移动结束被动。
 func is_player_deploy_cell(cell: Vector2i) -> bool:
 	if not GridMathScript.in_bounds(cell, grid_width, grid_height):

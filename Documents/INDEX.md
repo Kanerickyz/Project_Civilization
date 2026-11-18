@@ -15,6 +15,7 @@
 | [Features/GRID_BOARD.md](./Features/GRID_BOARD.md) | **方格棋盘** · **2D 斜 45°** · Sprite2D 单位 |
 | [Features/LAKE_FOREST.md](./Features/LAKE_FOREST.md) | **湖泊 / 树林** · 成簇开局 · 湖清燃 · 林挡攻 |
 | [Features/UNITS.md](./Features/UNITS.md) | **战术单位** · 移动距离 / 对手移力池 · 触发被动 |
+| [Features/KNIGHT_KNOCKBACK.md](./Features/KNIGHT_KNOCKBACK.md) | **盾卫击退** · 攻击方向 1 格 · 受阻×1.2 · 碰撞+1 |
 | [Features/COMBAT.md](./Features/COMBAT.md) | **普攻 / 胜负 / 对手 AI** |
 | [Features/WOLF_CAVALRY_INTENT.md](./Features/WOLF_CAVALRY_INTENT.md) | **狼骑兵意图状态机** · 攻/移/血|加 · 意图角标 |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |

@@ -73,6 +73,20 @@ func _initialize() -> void:
 	quit(0)
 
 
+func _vacate_cell(board: TacticalBoard, cell: Vector2i) -> void:
+	var u := board.unit_at(cell)
+	if u != null:
+		u.hp = 0
+
+
+## 邻格目标 + 清空击退落点，避免盾卫受阻×1.2干扰既有伤害/连攻断言。
+func _place_adjacent_clear_knockback(
+	board: TacticalBoard, attacker: TacticalUnitInstance, target: TacticalUnitInstance
+) -> void:
+	target.cell = attacker.cell + Vector2i(0, 1)
+	_vacate_cell(board, target.cell + Vector2i(0, 1))
+
+
 func _living_players(board: TacticalBoard) -> int:
 	var n := 0
 	for u in board.living_units():
@@ -495,7 +509,7 @@ func _test_attack_card_authorizes_repeat_hits() -> bool:
 	if knight == null or foe == null:
 		push_error("CardActions: need knight + foe rider")
 		return false
-	foe.cell = knight.cell + Vector2i(0, 1)
+	_place_adjacent_clear_knockback(board, knight, foe)
 	foe.hp = 99
 	if not deck.authorize_attack(knight):
 		push_error("CardActions: first authorize_attack failed")
@@ -516,7 +530,8 @@ func _test_attack_card_authorizes_repeat_hits() -> bool:
 	if deck.is_attack_authorized(knight):
 		push_error("CardActions: attack auth must clear after one hit")
 		return false
-	# 再打一张攻击卡可再攻。
+	# 再打一张攻击卡可再攻（击退后需摆回邻格）。
+	_place_adjacent_clear_knockback(board, knight, foe)
 	if not deck.authorize_attack(knight):
 		push_error("CardActions: second authorize_attack failed")
 		return false
@@ -547,7 +562,7 @@ func _test_attack_card_stacks_on_same_unit() -> bool:
 	if knight == null or foe == null:
 		push_error("CardActions: stack test need knight + foe")
 		return false
-	foe.cell = knight.cell + Vector2i(0, 1)
+	_place_adjacent_clear_knockback(board, knight, foe)
 	foe.hp = 99
 	if not deck.authorize_attack(knight, 2):
 		push_error("CardActions: stack first authorize failed")
@@ -577,6 +592,7 @@ func _test_attack_card_stacks_on_same_unit() -> bool:
 	if deck.pending_attack_bonus != 0:
 		push_error("CardActions: pending should follow second charge bonus 0")
 		return false
+	_place_adjacent_clear_knockback(board, knight, foe)
 	var second := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true, deck.pending_attack_bonus
 	)
@@ -610,7 +626,7 @@ func _test_ally_can_be_attacked() -> bool:
 	if knight == null or archer == null:
 		push_error("CardActions: need knight+archer")
 		return false
-	archer.cell = knight.cell + Vector2i(0, 1)
+	_place_adjacent_clear_knockback(board, knight, archer)
 	var before := archer.hp
 	var res := TacticalCombatScript.try_basic_attack(
 		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, true
@@ -618,6 +634,7 @@ func _test_ally_can_be_attacked() -> bool:
 	if not res["ok"] or archer.hp >= before:
 		push_error("CardActions: ally should be attackable for player")
 		return false
+	_place_adjacent_clear_knockback(board, knight, archer)
 	var blocked := TacticalCombatScript.try_basic_attack(
 		board, knight, archer.cell, TacticalFactionScript.Id.PLAYER, false
 	)
@@ -790,7 +807,7 @@ func _test_strong_attack_bonus() -> bool:
 			foe = u
 	if knight == null or foe == null:
 		return false
-	foe.cell = knight.cell + Vector2i(0, 1)
+	_place_adjacent_clear_knockback(board, knight, foe)
 	foe.hp = 99
 	var base := knight.attack_power()
 	var res := TacticalCombatScript.try_basic_attack(
