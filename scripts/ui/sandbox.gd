@@ -144,7 +144,7 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 	# 缩圈（按回合数同步）→ 危险区伤（仅本方）→ 燃烧（仅本方）→ 段开始被动 → 意图/出牌。
 	var newly_collapsed := _board.sync_map_collapse(_clock.turn)
 	if newly_collapsed.size() > 0:
-		_last_log = "地图崩塌 · 第 %d 圈危险区（伤 %d）" % [
+		_last_log = "地图崩塌 · 第 %d 层危险区（伤 %d）" % [
 			_board.collapse_stage,
 			_board.collapse_danger_damage(),
 		]
