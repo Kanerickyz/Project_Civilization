@@ -1085,7 +1085,7 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 		if bool(res.get("self_killed", false)):
 			_purge_dead_unit_cards(knight)
 			_board_view.play_unit_death(knight)
-			_play_kill_impact()
+			_play_kill_impact(knight)
 			if _selected_unit == knight:
 				_selected_unit = null
 			if _focus_unit == knight:
@@ -1111,7 +1111,7 @@ func _feedback_from_charge_hit(hit: Dictionary) -> void:
 	if bool(hit.get("killed", false)):
 		_purge_dead_unit_cards(vu)
 		_board_view.play_unit_death(vu)
-		_play_kill_impact()
+		_play_kill_impact(vu)
 		if _selected_unit == vu:
 			_selected_unit = null
 		if _focus_unit == vu:
@@ -1252,16 +1252,34 @@ func _unit_kill_silhouette_screen_size(unit: TacticalUnitInstance, tex: Texture2
 	return Vector2.ZERO
 
 
+## 死亡单位标记 → KillImpactFx 局部坐标；无单位/棋盘时回退 INF（FX 居中）。
+func _unit_kill_silhouette_anchor_local(unit: TacticalUnitInstance) -> Vector2:
+	if unit == null or _board_view == null or _kill_impact == null:
+		return Vector2.INF
+	if not _board_view.has_method("unit_screen_position"):
+		return Vector2.INF
+	var screen: Vector2 = _board_view.unit_screen_position(unit)
+	return _kill_impact.get_global_transform_with_canvas().affine_inverse() * screen
+
+
 func _play_kill_impact(unit: TacticalUnitInstance = null) -> void:
 	if _game_over or _kill_impact == null:
 		return
 	if _kill_impact.has_method("play"):
 		var tex := _unit_kill_silhouette_tex(unit)
-		_kill_impact.call("play", tex, _unit_kill_silhouette_screen_size(unit, tex))
+		_kill_impact.call(
+			"play",
+			tex,
+			_unit_kill_silhouette_screen_size(unit, tex),
+			_unit_kill_silhouette_anchor_local(unit)
+		)
 
 
-## GUI 截图：强制播一次击杀冲击（默认红狼骑剪影；可传贴图）。
-func capture_play_kill_impact(silhouette_tex: Texture2D = null) -> bool:
+## GUI 截图：强制播一次击杀冲击（默认红狼骑剪影；可传贴图与死亡位锚点单位）。
+func capture_play_kill_impact(
+	silhouette_tex: Texture2D = null,
+	anchor_unit: TacticalUnitInstance = null
+) -> bool:
 	if _kill_impact == null:
 		return false
 	var tex := silhouette_tex
@@ -1275,8 +1293,9 @@ func capture_play_kill_impact(silhouette_tex: Texture2D = null) -> bool:
 	var screen_sz := Vector2.ZERO
 	if tex != null and _board_view != null and _board_view.has_method("unit_texture_screen_size"):
 		screen_sz = _board_view.unit_texture_screen_size(tex, vis)
+	var anchor := _unit_kill_silhouette_anchor_local(anchor_unit)
 	if _kill_impact.has_method("play"):
-		_kill_impact.call("play", tex, screen_sz)
+		_kill_impact.call("play", tex, screen_sz, anchor)
 	return _kill_impact.visible
 
 

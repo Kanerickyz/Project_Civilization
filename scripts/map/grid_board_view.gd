@@ -2441,12 +2441,24 @@ func unit_texture_screen_size(tex: Texture2D, visual_scale: float = 1.0) -> Vect
 	return Vector2(vp_sz.x * cs.x / float(vs.x), vp_sz.y * cs.y / float(vs.y))
 
 
+## 单位标记中心（全局屏幕坐标），供击杀剪影锚点。
+func unit_screen_position(unit: TacticalUnitInstance) -> Vector2:
+	if unit == null or not _unit_sprites.has(unit) or _camera == null:
+		return get_global_rect().get_center()
+	var spr := _unit_sprites[unit] as Sprite2D
+	return _world_to_screen(_unit_world_position(spr))
+
+
 ## 单位头顶锚点（全局屏幕坐标），供信息卡定位。
 func unit_head_global_position(unit: TacticalUnitInstance) -> Vector2:
 	if unit == null or not _unit_sprites.has(unit) or _camera == null:
 		return get_global_rect().get_center()
 	var spr := _unit_sprites[unit] as Sprite2D
 	var world := _unit_world_position(spr) + Vector2(0.0, -config.unit_world_height * 1.05)
+	return _world_to_screen(world)
+
+
+func _world_to_screen(world: Vector2) -> Vector2:
 	var canvas := _camera.get_canvas_transform()
 	var vp_pos := canvas * world
 	if _viewport_container == null or _viewport == null:

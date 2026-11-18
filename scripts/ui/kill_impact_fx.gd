@@ -1,5 +1,5 @@
 extends Control
-## 击杀全屏打击感：红斜横带 + 中央被击杀单位黑剪影，短暂闪现。
+## 击杀全屏打击感：红斜横带 + 死亡位被击杀单位黑剪影，短暂闪现。
 ## 纯 2D `_draw` / CanvasItem，无 Light2D/3D。
 
 const BAND_COLOR := Color(0.90, 0.06, 0.10, 1.0)
@@ -20,6 +20,8 @@ var _tween: Tween
 var _silhouette_tex: Texture2D
 ## 与棋盘单位屏幕尺寸对齐；为零则走横带回退。
 var _silhouette_screen_size: Vector2 = Vector2.ZERO
+## 剪影锚点（本 Control 局部坐标）；未设置时回退屏幕中心。
+var _anchor_local: Vector2 = Vector2.INF
 var _punch: float = 1.0
 
 
@@ -36,12 +38,18 @@ func _ready() -> void:
 
 
 ## 重播：瞬显 → 微冲缩放 → 短停 → 淡出。
-## silhouette_tex：被击杀单位精灵；screen_size 与棋盘单位屏幕尺寸一致；缺省贴图时画抽象冲击核。
-func play(silhouette_tex: Texture2D = null, screen_size: Vector2 = Vector2.ZERO) -> void:
+## silhouette_tex：被击杀单位精灵；screen_size 与棋盘单位屏幕尺寸一致；
+## anchor_local：死亡单位在本层局部坐标（INF 则居中回退）；缺省贴图时画抽象冲击核。
+func play(
+	silhouette_tex: Texture2D = null,
+	screen_size: Vector2 = Vector2.ZERO,
+	anchor_local: Vector2 = Vector2.INF
+) -> void:
 	if _tween != null and is_instance_valid(_tween):
 		_tween.kill()
 	_silhouette_tex = silhouette_tex
 	_silhouette_screen_size = screen_size
+	_anchor_local = anchor_local
 	visible = true
 	# 保持 Control.scale=1，冲击用 _punch，避免整层亚像素缩放造成锯齿/糊边。
 	scale = Vector2.ONE
@@ -63,6 +71,7 @@ func play(silhouette_tex: Texture2D = null, screen_size: Vector2 = Vector2.ZERO)
 		_punch = 1.0
 		_silhouette_tex = null
 		_silhouette_screen_size = Vector2.ZERO
+		_anchor_local = Vector2.INF
 	)
 
 
@@ -143,8 +152,15 @@ func _jag_offset(i: int, salt: int) -> float:
 			return 0.4
 
 
+func _silhouette_center(sz: Vector2) -> Vector2:
+	# 优先死亡位锚点；不硬夹到屏缘（贴边单位仍对准标记，剪影可略越界）。
+	if is_finite(_anchor_local.x) and is_finite(_anchor_local.y):
+		return _anchor_local
+	return sz * 0.5
+
+
 func _draw_impact_silhouette(sz: Vector2) -> void:
-	var c := sz * 0.5
+	var c := _silhouette_center(sz)
 	if _silhouette_tex != null:
 		_draw_unit_silhouette(c, sz)
 		return
