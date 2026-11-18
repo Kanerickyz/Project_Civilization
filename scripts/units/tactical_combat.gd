@@ -58,6 +58,25 @@ static func attack_direction_step(from_cell: Vector2i, to_cell: Vector2i) -> Vec
 	return Vector2i(signi(to_cell.x - from_cell.x), signi(to_cell.y - from_cell.y))
 
 
+## 相对攻击方向的垂直左右单位步；无方向时返回空。
+static func perpendicular_steps(step: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if step == Vector2i.ZERO:
+		return out
+	out.append(Vector2i(-step.y, step.x))
+	out.append(Vector2i(step.y, -step.x))
+	return out
+
+
+## 万箭齐发侧格：目标格沿垂直方向左右邻格（不含目标本身）。
+static func volley_side_cells(attacker_cell: Vector2i, target_cell: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var step := attack_direction_step(attacker_cell, target_cell)
+	for perp in perpendicular_steps(step):
+		out.append(target_cell + perp)
+	return out
+
+
 static func try_basic_attack(
 	board: TacticalBoard,
 	attacker: TacticalUnitInstance,
@@ -65,7 +84,8 @@ static func try_basic_attack(
 	active_faction: TacticalFaction.Id,
 	allow_friendly: bool = false,
 	bonus_damage: int = 0,
-	aoe_burn_stacks: int = 0
+	aoe_burn_stacks: int = 0,
+	volley: bool = false
 ) -> Dictionary:
 	var result := {
 		"ok": false,
@@ -81,6 +101,7 @@ static func try_basic_attack(
 		"collision_target": null,
 		"collision_damage": 0,
 		"collision_killed": false,
+		"volley_hits": [],
 	}
 	if not can_basic_attack(attacker, active_faction):
 		result["log"] = "本段行动已攻击过或无法攻击"
@@ -104,8 +125,9 @@ static func try_basic_attack(
 		return result
 	# 攻击取消自身隐身。
 	attacker.break_stealth()
-	# 狂暴倍率作用于基础攻+加强额外，再向上取整。
-	var dmg := attacker.apply_frenzy_to_damage(attacker.attack_power() + maxi(0, bonus_damage))
+	# 狂暴倍率作用于基础攻+加强额外，再向上取整；侧箭溅射用此基础伤（不受主目标击退×1.2）。
+	var splash_dmg := attacker.apply_frenzy_to_damage(attacker.attack_power() + maxi(0, bonus_damage))
+	var dmg := splash_dmg
 	var from_cell := target.cell
 	var step := attack_direction_step(attacker.cell, target.cell)
 	var knock_to := from_cell + step
@@ -134,6 +156,8 @@ static func try_basic_attack(
 	var tag := "加强攻" if bonus_damage > 0 else "普攻"
 	if aoe_burn_stacks > 0:
 		tag = "燃爆攻"
+	if volley:
+		tag = "万箭齐发"
 	result["log"] = "%s %s %s，造成 %d 伤害" % [
 		attacker.def.display_name,
 		tag,
@@ -163,6 +187,27 @@ static func try_basic_attack(
 		if board.force_displace(target, knock_to):
 			result["knockback_moved"] = true
 			result["log"] += " · 击退至 (%d,%d)" % [knock_to.x, knock_to.y]
+	# 万箭齐发：原目标格垂直左右两格溅射（不含主目标本人，即使其被击退落到侧格）。
+	if result["ok"] and volley and splash_dmg > 0:
+		var volley_hits: Array = []
+		for side in volley_side_cells(attacker.cell, target_cell):
+			var side_u := board.unit_at(side)
+			if side_u == null or side_u == attacker or side_u == target:
+				continue
+			if not side_u.is_alive():
+				continue
+			var side_hurt := board.apply_damage(side_u, splash_dmg, attacker)
+			var hit := {
+				"unit": side_u,
+				"cell": side,
+				"damage": splash_dmg,
+				"killed": side_hurt.get("killed", false),
+			}
+			volley_hits.append(hit)
+			result["log"] += " · 齐发 %s +%d" % [side_u.def.display_name, splash_dmg]
+			if hit["killed"]:
+				result["log"] += "（击杀）"
+		result["volley_hits"] = volley_hits
 	# 技能燃爆：对目标格及周围施加燃烧（排除攻击者）。目标已死仍对周围生效。
 	# 击退后仍按原目标格做燃爆 AoE。
 	if result["ok"] and aoe_burn_stacks > 0:
