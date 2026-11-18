@@ -36,6 +36,8 @@ var _pending_kind: PendingKind = PendingKind.NONE
 var _hand_fan: ActionHandFan
 var _last_log: String = ""
 var _input_locked: bool = false
+## 玩家结束行动（含空手自动结束）进行中，防止重入把回合钟多拨一次而跳过对手段。
+var _ending_player_action: bool = false
 var _game_over: bool = false
 var _turn_banner_panel: PanelContainer
 var _turn_banner: Label
@@ -973,6 +975,7 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
 			_input_locked = false
 			_refresh_all()
+			_maybe_auto_end_player_turn_if_hand_empty()
 		else:
 			_last_log = "无法移动到该格"
 			_refresh_all()
@@ -1330,40 +1333,64 @@ func _on_deploy_cell_clicked(cell: Vector2i) -> void:
 
 ## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、游侠猎获等补牌结算之后调用；
 ## 攻/隐身/冲撞瞄准未完成时不触发（卡已离手但仍待点目标）。
+## 先锁输入再 deferred 启动，避免同步结算路径丢弃 async、或间隙里重入把钟多拨一次。
 func _maybe_auto_end_player_turn_if_hand_empty() -> void:
-	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
+	if not _should_auto_end_player_action():
 		return
+	_last_log = "手牌已打完 · 自动结束行动"
+	_input_locked = true
+	_refresh_action_buttons()
+	_refresh_all()
+	call_deferred("_end_player_action_async")
+
+
+func _should_auto_end_player_action() -> bool:
+	if _ending_player_action or _in_deployment or _input_locked or _game_over:
+		return false
+	if _clock == null or not _clock.player_active:
+		return false
 	if _deck == null or not _deck.hand.is_empty():
-		return
+		return false
 	if (
 		_pending_kind == PendingKind.ATTACK
 		or _pending_kind == PendingKind.STEALTH
 		or _pending_kind == PendingKind.CHARGE
 	):
-		return
-	_last_log = "手牌已打完 · 自动结束行动"
-	_on_end_turn_pressed()
+		return false
+	return true
 
 
 func _on_end_turn_pressed() -> void:
-	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
+	await _end_player_action_async()
+
+
+## 玩家结束行动 → 对手段（含 AI）→ 回到玩家。按钮与空手自动结束共用。
+func _end_player_action_async() -> void:
+	if _ending_player_action or _in_deployment or _game_over:
 		return
+	if not _clock.player_active:
+		return
+	_ending_player_action = true
+	# 先锁输入，避免弃牌/refresh 重入再次 end_turn 把钟拨回玩家。
+	_input_locked = true
+	_refresh_action_buttons()
 	_deck.end_player_turn()
 	_pending_kind = PendingKind.NONE
 	_focus_unit = null
+	_selected_unit = null
 	_clock.end_turn()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
-	_input_locked = true
-	_refresh_action_buttons()
+	_show_turn_banner()
+	_refresh_all()
 	await _apply_side_turn_start_triggers(TacticalFactionScript.Id.OPPONENT)
 	if _game_over:
+		_ending_player_action = false
 		_input_locked = false
 		_refresh_all()
 		return
-	_selected_unit = null
-	_show_turn_banner()
 	_refresh_all()
-	_run_opponent_turn_async()
+	await _run_opponent_turn_async()
+	_ending_player_action = false
 
 
 func _run_opponent_turn_async() -> void:
