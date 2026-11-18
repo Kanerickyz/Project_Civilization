@@ -15,10 +15,10 @@ func _initialize() -> void:
 	if not _test_sts_draw_discard_and_reshuffle():
 		quit(1)
 		return
-	if not _test_play_move_then_authorize_any_player():
+	if not _test_player_click_move_uses_budget():
 		quit(1)
 		return
-	if not _test_player_death_removes_move_attack_and_skill():
+	if not _test_player_death_removes_attack_and_skill():
 		quit(1)
 		return
 	if not _test_player_death_cull_is_idempotent():
@@ -33,10 +33,10 @@ func _initialize() -> void:
 	if not _test_end_turn_discards_hand():
 		quit(1)
 		return
-	if not _test_move_card_grants_move_range():
+	if not _test_player_side_turn_resets_move_budget():
 		quit(1)
 		return
-	if not _test_move_card_one_step_only():
+	if not _test_player_move_budget_multi_step():
 		quit(1)
 		return
 	if not _test_attack_card_authorizes_repeat_hits():
@@ -114,15 +114,16 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if skills != 6:
 		push_error("CardActions: expected 6 skill cards, got %d" % skills)
 		return false
-	var expected := living_players * 2 + skills
+	# 每人仅通用攻 1 + 主动技；无移动牌。
+	var expected := living_players + skills
 	if deck.draw_pile.size() != expected or deck.total_cards() != expected:
 		push_error(
 			"CardActions: expected %d cards, got %d"
 			% [expected, deck.draw_pile.size()]
 		)
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.MOVE) != living_players:
-		push_error("CardActions: move count should equal living players")
+	if deck.count_kind(TacticalActionCardScript.Kind.MOVE) != 0:
+		push_error("CardActions: deck must not include MOVE cards")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.ATTACK) != living_players:
 		push_error("CardActions: attack count should equal living players")
@@ -198,53 +199,41 @@ func _test_sts_draw_discard_and_reshuffle() -> bool:
 	return true
 
 
-func _test_play_move_then_authorize_any_player() -> bool:
+func _test_player_click_move_uses_budget() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 3
-	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
-	deck.build_from_living_player_units(board)
-	deck.begin_player_turn()
-	var move_idx := -1
-	for i in deck.hand.size():
-		if deck.hand[i].kind == TacticalActionCardScript.Kind.MOVE:
-			move_idx = i
-			break
-	if move_idx < 0:
-		deck.discard_hand()
-		deck.hand.append(TacticalActionCardScript.make_move())
-		move_idx = 0
-	var players: Array[TacticalUnitInstance] = []
+	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+	var unit: TacticalUnitInstance = null
 	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER:
-			players.append(u)
-	if players.size() < 2:
-		push_error("CardActions: need >=2 player units")
+		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
+			unit = u
+			break
+	if unit == null:
+		push_error("CardActions: need archer for click-move test")
 		return false
-	var played := deck.play_hand_index(move_idx)
-	if played == null or played.kind != TacticalActionCardScript.Kind.MOVE:
-		push_error("CardActions: play move failed")
+	if unit.remaining_move_budget != unit.def.move_range:
+		push_error(
+			"CardActions: player side start budget should be move_range %d, got %d"
+			% [unit.def.move_range, unit.remaining_move_budget]
+		)
 		return false
-	if deck.is_move_authorized(players[0]) or deck.is_move_authorized(players[1]):
-		push_error("CardActions: generic move must not auto-authorize")
+	for u in board.living_units():
+		if u != unit and (u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2)):
+			u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
+	unit.cell = Vector2i(2, 2)
+	var before := unit.remaining_move_budget
+	if not board.try_move(unit, Vector2i(3, 2)):
+		push_error("CardActions: click move should succeed with budget")
 		return false
-	if not deck.authorize_move(players[1]):
-		push_error("CardActions: authorize any player unit failed")
-		return false
-	if not deck.is_move_authorized(players[1]):
-		push_error("CardActions: selected unit should be authorized")
-		return false
-	var cells := board.reachable_move_cells(players[1])
-	if cells.is_empty():
-		push_error("CardActions: authorized unit should have move cells")
-		return false
-	if not board.try_move(players[1], cells[0]):
-		push_error("CardActions: authorized move should succeed")
+	if unit.remaining_move_budget != before - 1:
+		push_error(
+			"CardActions: budget should drop by path steps, got %d"
+			% unit.remaining_move_budget
+		)
 		return false
 	return true
 
 
-func _test_player_death_removes_move_attack_and_skill() -> bool:
+func _test_player_death_removes_attack_and_skill() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11
@@ -261,11 +250,11 @@ func _test_player_death_removes_move_attack_and_skill() -> bool:
 	var before_total := deck.total_cards()
 	var before_armor := deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR)
 	var removed := deck.on_player_unit_died(victim)
-	# 移+攻+盾卫贡献的通用护甲
-	if removed != 3:
-		push_error("CardActions: knight death should remove 3, got %d" % removed)
+	# 攻 + 盾卫贡献的通用护甲
+	if removed != 2:
+		push_error("CardActions: knight death should remove 2, got %d" % removed)
 		return false
-	if deck.total_cards() != before_total - 3:
+	if deck.total_cards() != before_total - 2:
 		push_error("CardActions: total after death mismatch")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != before_armor - 1:
@@ -274,7 +263,7 @@ func _test_player_death_removes_move_attack_and_skill() -> bool:
 	return true
 
 
-## 回归 PC-49：燃烧段开始会对尸体重复 purge；第二次不得再减 MOVE/攻。
+## 回归 PC-49：燃烧段开始会对尸体重复 purge；第二次不得再减攻。
 func _test_player_death_cull_is_idempotent() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var rng := RandomNumberGenerator.new()
@@ -290,19 +279,15 @@ func _test_player_death_cull_is_idempotent() -> bool:
 		push_error("CardActions: knight missing for idempotent cull")
 		return false
 	var first := deck.on_player_unit_died(victim)
-	if first != 3:
-		push_error("CardActions: first knight cull should remove 3, got %d" % first)
+	if first != 2:
+		push_error("CardActions: first knight cull should remove 2, got %d" % first)
 		return false
-	var move_after := deck.count_kind(TacticalActionCardScript.Kind.MOVE)
 	var attack_after := deck.count_kind(TacticalActionCardScript.Kind.ATTACK)
 	var total_after := deck.total_cards()
 	# 模拟段开始燃烧扫尸体：同一尸体再 purge。
 	var second := deck.on_player_unit_died(victim)
 	if second != 0:
 		push_error("CardActions: repeat cull must be no-op, got %d" % second)
-		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.MOVE) != move_after:
-		push_error("CardActions: repeat cull must not drop MOVE")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.ATTACK) != attack_after:
 		push_error("CardActions: repeat cull must not drop ATTACK")
@@ -326,11 +311,9 @@ func _test_wardrum_death_removes_skill_draw_from_hand() -> bool:
 	deck.hand.clear()
 	deck.draw_pile.clear()
 	deck.discard_pile.clear()
-	deck.hand.append(TacticalActionCardScript.make_move())
 	deck.hand.append(TacticalActionCardScript.make_attack())
 	deck.hand.append(TacticalActionCardScript.make_skill_draw("wardrum"))
 	deck.hand.append(TacticalActionCardScript.make_skill_inspire("wardrum"))
-	deck.draw_pile.append(TacticalActionCardScript.make_move())
 	deck.draw_pile.append(TacticalActionCardScript.make_attack())
 	var victim: TacticalUnitInstance = null
 	for u in board.living_units():
@@ -342,10 +325,11 @@ func _test_wardrum_death_removes_skill_draw_from_hand() -> bool:
 		return false
 	var before := deck.total_cards()
 	var removed := deck.on_player_unit_died(victim)
-	if removed != 4:
-		push_error("CardActions: wardrum death should remove 4, got %d" % removed)
+	# 攻 + 鸣鼓 + 鼓舞
+	if removed != 3:
+		push_error("CardActions: wardrum death should remove 3, got %d" % removed)
 		return false
-	if deck.total_cards() != before - 4:
+	if deck.total_cards() != before - 3:
 		push_error("CardActions: wardrum death total mismatch")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_DRAW) != 0:
@@ -410,87 +394,65 @@ func _test_end_turn_discards_hand() -> bool:
 	return true
 
 
-func _test_move_card_grants_move_range() -> bool:
+func _test_player_side_turn_resets_move_budget() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 23
-	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
-	deck.build_from_living_player_units(board)
 	var unit: TacticalUnitInstance = null
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
 			unit = u
 			break
 	if unit == null:
-		push_error("CardActions: need archer for move-range grant test")
+		push_error("CardActions: need archer for budget reset test")
 		return false
 	unit.remaining_move_budget = 0
 	if not board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: no allowance should block reachability")
+		push_error("CardActions: empty budget should block reachability")
 		return false
-	if not deck.authorize_move(unit):
-		push_error("CardActions: authorize_move failed")
-		return false
-	var want := maxi(1, unit.def.move_range)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
+	var want := unit.def.action_move_budget()
 	if unit.remaining_move_budget != want:
 		push_error(
-			"CardActions: move card should grant move_range %d, got %d"
+			"CardActions: side reset should refill budget %d, got %d"
 			% [want, unit.remaining_move_budget]
 		)
 		return false
 	if board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: after authorize should have reachable cells")
-		return false
-	# 玩家无移力池：额度按 move_range，不按 action_move_budget / 满池重置语义。
-	unit.remaining_move_budget = 0
-	if not deck.authorize_move(unit):
-		push_error("CardActions: second authorize_move failed")
-		return false
-	if unit.remaining_move_budget != want:
-		push_error(
-			"CardActions: re-authorize should grant move_range %d, got %d"
-			% [want, unit.remaining_move_budget]
-		)
+		push_error("CardActions: after reset should have reachable cells")
 		return false
 	return true
 
 
-func _test_move_card_one_step_only() -> bool:
+func _test_player_move_budget_multi_step() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
-	deck.build_from_living_player_units(board)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	var unit: TacticalUnitInstance = null
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
 			unit = u
 			break
 	if unit == null:
-		push_error("CardActions: need archer for one-step move test")
+		push_error("CardActions: need archer for multi-step move test")
 		return false
 	if unit.def.move_range != 3:
 		push_error("CardActions: archer move_range should be 3")
 		return false
-	if not deck.authorize_move(unit):
-		push_error("CardActions: authorize_move failed")
-		return false
-	# 挪到开阔格再走一步，避免初始边线/邻友占格。
 	for u in board.living_units():
-		if u != unit and (u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2)):
+		if u != unit and (
+			u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2) or u.cell == Vector2i(4, 2)
+		):
 			u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
 	unit.cell = Vector2i(2, 2)
-	var dest := Vector2i(3, 2)
-	if not board.try_move(unit, dest):
-		push_error("CardActions: first move after card should succeed")
+	if not board.try_move(unit, Vector2i(3, 2)):
+		push_error("CardActions: first budget step should succeed")
 		return false
-	deck.consume_move_authorization(unit)
-	if deck.is_move_authorized(unit):
-		push_error("CardActions: move auth must clear after one step")
+	if unit.remaining_move_budget != 2:
+		push_error("CardActions: after 1 step budget should be 2, got %d" % unit.remaining_move_budget)
 		return false
-	if unit.remaining_move_budget != 0:
-		push_error("CardActions: move allowance must be 0 after consume")
+	if not board.try_move(unit, Vector2i(4, 2)):
+		push_error("CardActions: second budget step should succeed")
 		return false
-	if not board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: no further moves without a new card")
+	if unit.remaining_move_budget != 1:
+		push_error("CardActions: after 2 steps budget should be 1, got %d" % unit.remaining_move_budget)
 		return false
 	return true
 

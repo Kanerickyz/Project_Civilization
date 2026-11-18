@@ -17,8 +17,6 @@ var draw_count: int = 5
 var draw_pile: Array[TacticalActionCard] = []
 var hand: Array[TacticalActionCard] = []
 var discard_pile: Array[TacticalActionCard] = []
-## 本段已获移动授权的己方单位（对象作键）。
-var move_authorized: Dictionary = {}
 ## 本段攻击授权队列：单位 → Array[Dictionary]（bonus / burn 键）。
 ## 同单位连拖多张攻击卡会入队多次，可连续结算多次攻击。
 var attack_bonus_queues: Dictionary = {}
@@ -57,7 +55,6 @@ func clear() -> void:
 	draw_pile.clear()
 	hand.clear()
 	discard_pile.clear()
-	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
@@ -66,7 +63,7 @@ func clear() -> void:
 	changed.emit()
 
 
-## 按场上己方存活：每人通用攻+移各 1；另按角色贡献主动技（游侠无）。绝不收录敌方。
+## 按场上己方存活：每人通用攻 1；另按角色贡献主动技（游侠无）。移动不经牌库。绝不收录敌方。
 func build_from_living_player_units(board: TacticalBoard) -> void:
 	clear()
 	if board == null:
@@ -77,12 +74,11 @@ func build_from_living_player_units(board: TacticalBoard) -> void:
 		if u.faction != TacticalFactionScript.Id.PLAYER:
 			continue
 		player_count += 1
-		draw_pile.append(TacticalActionCardScript.make_move())
 		draw_pile.append(TacticalActionCardScript.make_attack())
 		for skill in _skill_cards_for_unit_id(u.def.id):
 			draw_pile.append(skill)
 			skill_count += 1
-	var expected := player_count * 2 + skill_count
+	var expected := player_count + skill_count
 	if draw_pile.size() != expected:
 		push_error(
 			"TacticalCardDeck: build size %d != expected %d"
@@ -94,7 +90,6 @@ func build_from_living_player_units(board: TacticalBoard) -> void:
 func begin_player_turn() -> void:
 	# 上一段锁定的鸣鼓换手可按 STS 正常参与本段洗牌。
 	_same_turn_locked_discards.clear()
-	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
@@ -103,7 +98,6 @@ func begin_player_turn() -> void:
 
 func end_player_turn() -> void:
 	discard_hand()
-	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
@@ -171,30 +165,6 @@ func resolve_wardrum_redraw() -> int:
 	return draw_up_to(draw_count)
 
 
-## 打出移动卡并选定己方单位：授权本段移动一次（路径步数 ≤ move_range；无移力池）。
-func authorize_move(unit: TacticalUnitInstance) -> bool:
-	if unit == null or not unit.is_alive():
-		return false
-	if unit.faction != TacticalFactionScript.Id.PLAYER:
-		return false
-	move_authorized[unit] = true
-	unit.remaining_move_budget = maxi(1, unit.def.move_range)
-	unit.moved_this_side_turn = false
-	changed.emit()
-	return true
-
-
-## 一次成功移动后消耗授权：清授权并清空本次移动额度（一张移动卡只走一次）。
-func consume_move_authorization(unit: TacticalUnitInstance) -> void:
-	if unit == null:
-		return
-	if move_authorized.has(unit):
-		move_authorized.erase(unit)
-	unit.remaining_move_budget = 0
-	unit.moved_this_side_turn = true
-	changed.emit()
-
-
 ## 打出攻击/加强攻击/燃爆攻卡：入队一次攻击授权；额外伤害与燃烧层数随该次入队。
 ## 同单位可连拖多张，队列累加；不使用 attacked_this_side_turn（玩家无段内攻次预算）。
 func authorize_attack(
@@ -256,12 +226,6 @@ func attack_authorization_count(unit: TacticalUnitInstance) -> int:
 	return (attack_bonus_queues[unit] as Array).size()
 
 
-func is_move_authorized(unit: TacticalUnitInstance) -> bool:
-	if unit == null:
-		return false
-	return bool(move_authorized.get(unit, false))
-
-
 func is_attack_authorized(unit: TacticalUnitInstance) -> bool:
 	return attack_authorization_count(unit) > 0
 
@@ -292,8 +256,8 @@ static func _entry_burn(entry: Variant) -> int:
 	return 0
 
 
-## 己方阵亡：减通用移/攻各 1；绑角色主动技按 owner 减 1；通用加强攻按贡献者减 1；清移/攻授权。
-## 幂等：同一尸体只 cull 一次（燃烧段开始会扫全部尸体，不可重复减 MOVE）。
+## 己方阵亡：减通用攻 1；绑角色主动技按 owner 减 1；通用加强攻按贡献者减 1；清攻授权。
+## 幂等：同一尸体只 cull 一次（燃烧段开始会扫全部尸体，不可重复减攻）。
 func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	if unit == null:
 		return 0
@@ -303,7 +267,6 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 		return 0
 	unit.death_cards_culled = true
 	var removed := 0
-	removed += _remove_one_kind(TacticalActionCard.Kind.MOVE)
 	removed += _remove_one_kind(TacticalActionCard.Kind.ATTACK)
 	var unit_id := unit.def.id if unit.def != null else ""
 	match unit_id:
@@ -326,9 +289,6 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 			# 护甲卡已解绑：按 kind 减 1（盾卫阵亡仍 cull 一张）。
 			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_ARMOR))
 	var cleared_auth := false
-	if move_authorized.has(unit):
-		move_authorized.erase(unit)
-		cleared_auth = true
 	if attack_bonus_queues.has(unit):
 		attack_bonus_queues.erase(unit)
 		_sync_pending_attack_bonus(null)
