@@ -49,6 +49,15 @@ func _initialize() -> void:
 	if not _test_deploy_place_and_swap():
 		quit(1)
 		return
+	if not _test_knight_knockback_free():
+		quit(1)
+		return
+	if not _test_knight_knockback_blocked_mult():
+		quit(1)
+		return
+	if not _test_knight_knockback_collision():
+		quit(1)
+		return
 	print("TACTICAL_UNITS_OK")
 	quit(0)
 
@@ -308,6 +317,20 @@ func _test_pekka_no_passive() -> bool:
 	return true
 
 
+func _vacate_cell(board: TacticalBoard, cell: Vector2i) -> void:
+	var u := board.unit_at(cell)
+	if u != null:
+		u.hp = 0
+
+
+func _place_knight_melee_target(
+	board: TacticalBoard, knight: TacticalUnitInstance, foe: TacticalUnitInstance
+) -> void:
+	# 邻格目标；击退落点清空，避免误触受阻×1.2。
+	foe.cell = knight.cell + Vector2i(0, 1)
+	_vacate_cell(board, foe.cell + Vector2i(0, 1))
+
+
 func _test_basic_attack_flag() -> bool:
 	# 玩家无段内攻次标记；对手 AI 仍每段最多 1 攻。
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
@@ -315,7 +338,7 @@ func _test_basic_attack_flag() -> bool:
 	var foe := _opponent_unit(board, "rider")
 	if knight == null or foe == null:
 		return false
-	foe.cell = knight.cell + Vector2i(0, 1)
+	_place_knight_melee_target(board, knight, foe)
 	foe.hp = 99
 	var res := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
@@ -326,6 +349,8 @@ func _test_basic_attack_flag() -> bool:
 	if knight.attacked_this_side_turn:
 		push_error("TacticalUnits: player attack must not set attacked_this_side_turn")
 		return false
+	# 击退后目标离开邻格：再摆回以验证连攻。
+	_place_knight_melee_target(board, knight, foe)
 	var again := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
 	)
@@ -438,5 +463,113 @@ func _test_deploy_place_and_swap() -> bool:
 		return false
 	if a.cell != b_cell or b.cell != a_cell:
 		push_error("TacticalUnits: deploy swap cells wrong")
+		return false
+	return true
+
+
+func _test_knight_knockback_free() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	var foe := _opponent_unit(board, "rider")
+	if knight == null or foe == null:
+		return false
+	_place_knight_melee_target(board, knight, foe)
+	foe.hp = 99
+	var from := foe.cell
+	var expect_to := from + Vector2i(0, 1)
+	var base := knight.effective_attack()
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"]:
+		push_error("TacticalUnits: knockback free attack should ok")
+		return false
+	if int(res["damage"]) != base:
+		push_error("TacticalUnits: free knockback must keep normal damage")
+		return false
+	if not res.get("knockback_moved", false) or foe.cell != expect_to:
+		push_error("TacticalUnits: free knockback should move target 1 cell")
+		return false
+	if res.get("knockback_blocked", false):
+		push_error("TacticalUnits: free path must not mark blocked")
+		return false
+	return true
+
+
+func _test_knight_knockback_blocked_mult() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	var foe := _opponent_unit(board, "rider")
+	if knight == null or foe == null:
+		return false
+	knight.cell = Vector2i(1, 1)
+	foe.cell = Vector2i(1, 0)
+	foe.hp = 99
+	# 向上打出地图外 → 受阻。
+	var base := knight.effective_attack()
+	var expect := int(ceili(float(base) * TacticalCombatScript.KNIGHT_KNOCKBACK_BLOCK_MULT))
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"] or not res.get("knockback_blocked", false):
+		push_error("TacticalUnits: OOB knockback should block")
+		return false
+	if res.get("knockback_moved", false) or foe.cell != Vector2i(1, 0):
+		push_error("TacticalUnits: blocked knockback must not move")
+		return false
+	if int(res["damage"]) != expect:
+		push_error(
+			"TacticalUnits: blocked dmg want %d got %d" % [expect, int(res["damage"])]
+		)
+		return false
+	# 树林受阻。
+	knight.cell = Vector2i(2, 2)
+	foe.cell = Vector2i(3, 2)
+	_vacate_cell(board, Vector2i(4, 2))
+	board.set_terrain_cells({Vector2i(4, 2): &"forest"})
+	base = knight.effective_attack()
+	expect = int(ceili(float(base) * TacticalCombatScript.KNIGHT_KNOCKBACK_BLOCK_MULT))
+	var hp_before := foe.hp
+	res = TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res.get("knockback_blocked", false) or foe.cell != Vector2i(3, 2):
+		push_error("TacticalUnits: forest knockback should block without move")
+		return false
+	if int(res["damage"]) != expect or foe.hp != hp_before - expect:
+		push_error("TacticalUnits: forest block should deal ceil(final*1.2)")
+		return false
+	return true
+
+
+func _test_knight_knockback_collision() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	var foe := _opponent_unit(board, "rider")
+	var archer := _player_unit(board, "archer")
+	if knight == null or foe == null or archer == null:
+		return false
+	knight.cell = Vector2i(2, 2)
+	foe.cell = Vector2i(3, 2)
+	archer.cell = Vector2i(4, 2)
+	foe.hp = 99
+	archer.hp = 99
+	var base := knight.effective_attack()
+	var expect := int(ceili(float(base) * TacticalCombatScript.KNIGHT_KNOCKBACK_BLOCK_MULT))
+	var archer_before := archer.hp
+	var res := TacticalCombatScript.try_basic_attack(
+		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true
+	)
+	if not res.get("knockback_blocked", false) or res.get("knockback_moved", false):
+		push_error("TacticalUnits: occupied knock landing must block")
+		return false
+	if int(res["damage"]) != expect:
+		push_error("TacticalUnits: occupied landing should use ×1.2 damage")
+		return false
+	if int(res.get("collision_damage", 0)) != 1 or archer.hp != archer_before - 1:
+		push_error("TacticalUnits: collision should deal +1 to occupant")
+		return false
+	if res.get("collision_target") != archer:
+		push_error("TacticalUnits: collision target should be archer")
 		return false
 	return true

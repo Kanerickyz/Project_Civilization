@@ -894,6 +894,9 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		_clear_pending_target(false)
 		_refresh_all()
 		return
+	# 先锁输入，避免击退改格时 board.changed 提前 refresh 掐掉攻击/击退时序。
+	_input_locked = true
+	_refresh_action_buttons()
 	var bonus := _deck.pending_attack_bonus
 	var burn_stacks := _deck.pending_aoe_burn_stacks
 	var atk := TacticalCombatScript.try_basic_attack(
@@ -907,16 +910,15 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	)
 	_last_log = atk["log"]
 	if not atk["ok"]:
+		_input_locked = false
 		_refresh_all()
 		return
 	# 成功后消耗队首授权（玩家无 attacked_this_side_turn 预算）。
 	_deck.consume_attack_authorization(attacker)
-	_input_locked = true
-	_refresh_action_buttons()
 	var tw := _board_view.play_unit_attack(attacker, target_cell)
 	if tw != null:
 		await tw.finished
-	_feedback_from_attack(target, atk)
+	await _feedback_from_attack(target, atk, target_cell)
 	_pending_kind = PendingKind.NONE
 	# 同单位连拖多张攻击卡：仍有余次则继续瞄准，否则若有移动授权则切回移动。
 	if attacker.is_alive() and _deck.is_attack_authorized(attacker):
@@ -930,9 +932,15 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	_refresh_all()
 
 
-func _feedback_from_attack(target: TacticalUnitInstance, res: Dictionary) -> void:
+func _feedback_from_attack(
+	target: TacticalUnitInstance, res: Dictionary, hit_cell: Vector2i = Vector2i(-1, -1)
+) -> void:
 	var dmg: int = int(res.get("damage", 0))
-	_board_view.play_damage_popup(target.cell, dmg)
+	var popup_cell := hit_cell
+	if popup_cell.x < 0:
+		var from_kb: Vector2i = res.get("knockback_from", Vector2i(-1, -1)) as Vector2i
+		popup_cell = from_kb if from_kb.x >= 0 else target.cell
+	_board_view.play_damage_popup(popup_cell, dmg)
 	_board_view.play_unit_hit(target)
 	if res.get("killed", false):
 		_purge_dead_unit_cards(target)
@@ -942,6 +950,23 @@ func _feedback_from_attack(target: TacticalUnitInstance, res: Dictionary) -> voi
 		if _focus_unit == target:
 			_focus_unit = null
 			_pending_kind = PendingKind.NONE
+	var col: TacticalUnitInstance = res.get("collision_target") as TacticalUnitInstance
+	var col_dmg: int = int(res.get("collision_damage", 0))
+	if col != null and col_dmg > 0:
+		_board_view.play_damage_popup(col.cell, col_dmg)
+		_board_view.play_unit_hit(col)
+		if res.get("collision_killed", false):
+			_purge_dead_unit_cards(col)
+			_board_view.play_unit_death(col)
+			if _selected_unit == col:
+				_selected_unit = null
+			if _focus_unit == col:
+				_focus_unit = null
+				_pending_kind = PendingKind.NONE
+	# 击退成功：refresh 触发从旧格到新格的位移 Tween（可见推开，禁止瞬移）。
+	if res.get("knockback_moved", false) and target != null and target.is_alive():
+		_refresh_all()
+		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
 
 
 func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
@@ -1046,19 +1071,11 @@ func _run_opponent_turn_async() -> void:
 				var target: TacticalUnitInstance = res.get("target") as TacticalUnitInstance
 				if target == null:
 					target = _board.unit_at(cell)
+				_last_log = res.get("log", "对手攻击")
 				if target != null:
-					_board_view.play_damage_popup(cell, int(res.get("damage", 0)))
-					_board_view.play_unit_hit(target)
-					_last_log = res.get("log", "对手攻击")
+					await _feedback_from_attack(target, res, cell)
 					if res.get("killed", false):
-						_purge_dead_unit_cards(target)
 						await get_tree().create_timer(0.22).timeout
-						_board_view.play_unit_death(target)
-						if _selected_unit == target:
-							_selected_unit = null
-						if _focus_unit == target:
-							_focus_unit = null
-							_pending_kind = PendingKind.NONE
 				_refresh_all()
 				await get_tree().create_timer(0.28).timeout
 			elif kind == "heal":
