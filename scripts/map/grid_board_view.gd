@@ -62,7 +62,14 @@ const OVERLAY_COLORS := {
 	"hx": Color(0.78, 0.32, 0.36, 0.42),
 	## 点燃地块（可与选中/移动/攻击叠显：独立 marker，本色仅作参考）。
 	"b": Color(1.0, 0.42, 0.12, 0.38),
+	## 狼骑下一意图：路径格 / 攻击目标格（低于选中/红攻/绿移）。
+	"ip": Color(0.55, 0.88, 1.0, 0.38),
+	"it": Color(1.0, 0.62, 0.28, 0.52),
 }
+const INTENT_GHOST_ALPHA := 0.42
+const INTENT_PATH_LINE_COLOR := Color(0.55, 0.9, 1.0, 0.85)
+const INTENT_ATK_LINE_COLOR := Color(1.0, 0.45, 0.32, 0.9)
+const INTENT_HINT_COLOR := Color(0.95, 0.98, 0.7, 1.0)
 const BURN_MARKER_COLOR := Color(1.0, 0.45, 0.1, 0.72)
 const BURN_MARKER_CORE := Color(1.0, 0.85, 0.35, 0.9)
 const BURN_BADGE_COLOR := Color("ff7a2e")
@@ -80,10 +87,17 @@ var _unit_sprites: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _overlay_selected: Vector2i = Vector2i(-1, -1)
 var _overlay_move: Dictionary = {}
 var _overlay_attack: Dictionary = {}
+var _overlay_intent_path: Dictionary = {} # Vector2i -> true
+var _overlay_intent_target: Dictionary = {} # Vector2i -> true
 ## 拖牌悬停当前格；(-1,-1) 表示无。
 var _overlay_drag_hover: Vector2i = Vector2i(-1, -1)
 ## 0=空白/中性，1=可落单位，-1=不可落单位。
 var _overlay_drag_hover_kind: int = 0
+## 点选狼骑：下回合意图虚影（路径线 / 攻击线 / 落点半透明精灵 / 回血加攻提示）。
+var _intent_preview_ghost: Sprite2D = null
+var _intent_preview_line: Line2D = null
+var _intent_preview_hint: Control = null
+var _intent_preview_unit: TacticalUnitInstance = null
 
 var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
@@ -401,6 +415,7 @@ func _rebuild_board() -> void:
 		if intent_icon != null and is_instance_valid(intent_icon):
 			intent_icon.queue_free()
 	_intent_icons.clear()
+	_clear_intent_preview()
 	_clear_burn_markers()
 	_overlay_burn.clear()
 	_last_unit_cells.clear()
@@ -455,7 +470,9 @@ func sync_tactical_units(
 	selected_cell: Vector2i,
 	move_cells: Array,
 	attack_cells: Array,
-	ignited_cells: Array = []
+	ignited_cells: Array = [],
+	intent_preview: Dictionary = {},
+	intent_unit: TacticalUnitInstance = null
 ) -> void:
 	if config == null or _units_root == null:
 		return
@@ -482,6 +499,7 @@ func sync_tactical_units(
 	for key in _unit_sprites.keys():
 		if not alive.has(key):
 			_remove_unit_visual(key)
+	_sync_intent_preview(intent_preview, intent_unit)
 	for cell in _overlay_nodes.keys():
 		_apply_overlay(cell)
 
@@ -1307,6 +1325,10 @@ func _apply_overlay(cell: Vector2i) -> void:
 		tag = "a"
 	elif _overlay_move.has(cell):
 		tag = "m"
+	elif _overlay_intent_target.has(cell):
+		tag = "it"
+	elif _overlay_intent_path.has(cell):
+		tag = "ip"
 	elif cell == _overlay_drag_hover:
 		if _overlay_drag_hover_kind > 0:
 			tag = "hv"
@@ -1317,6 +1339,164 @@ func _apply_overlay(cell: Vector2i) -> void:
 	ov.visible = tag != ""
 	if tag != "":
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
+
+
+func _clear_intent_preview() -> void:
+	_overlay_intent_path.clear()
+	_overlay_intent_target.clear()
+	_intent_preview_unit = null
+	if _intent_preview_ghost != null and is_instance_valid(_intent_preview_ghost):
+		_intent_preview_ghost.queue_free()
+	_intent_preview_ghost = null
+	if _intent_preview_line != null and is_instance_valid(_intent_preview_line):
+		_intent_preview_line.queue_free()
+	_intent_preview_line = null
+	if _intent_preview_hint != null and is_instance_valid(_intent_preview_hint):
+		_intent_preview_hint.queue_free()
+	_intent_preview_hint = null
+
+
+func _sync_intent_preview(preview: Dictionary, unit: TacticalUnitInstance) -> void:
+	_clear_intent_preview()
+	if config == null or _units_root == null:
+		return
+	if preview.is_empty() or unit == null or not unit.is_alive():
+		return
+	var kind := String(preview.get("kind", "idle"))
+	if kind == "idle":
+		return
+	_intent_preview_unit = unit
+	var from_cell: Vector2i = preview.get("from", unit.cell) as Vector2i
+	var to_cell: Vector2i = preview.get("to", Vector2i(-1, -1)) as Vector2i
+	match kind:
+		"move":
+			var path: Array = preview.get("path", []) as Array
+			if path.is_empty() and to_cell.x >= 0:
+				path = [from_cell, to_cell]
+			for c in path:
+				if c is Vector2i:
+					var cell := c as Vector2i
+					if cell == from_cell:
+						continue
+					_overlay_intent_path[cell] = true
+			if to_cell.x >= 0:
+				_spawn_intent_ghost(unit, to_cell)
+				_spawn_intent_path_line(path)
+		"attack":
+			if to_cell.x >= 0:
+				_overlay_intent_target[to_cell] = true
+				_spawn_intent_attack_line(from_cell, to_cell)
+		"heal":
+			var heal_amt := int(preview.get("amount", TacticalEnemyAiScript.HEAL_AMOUNT))
+			_spawn_intent_hint(from_cell, "下回合·回血+%d" % heal_amt, Color("7dff9a"))
+		"buff_atk":
+			var buff_amt := int(preview.get("amount", TacticalEnemyAiScript.BUFF_ATK_AMOUNT))
+			_spawn_intent_hint(from_cell, "下回合·加攻+%d" % buff_amt, Color("ffe08a"))
+		_:
+			pass
+
+
+func _spawn_intent_ghost(unit: TacticalUnitInstance, cell: Vector2i) -> void:
+	var tex := unit.def.texture_red if unit.def != null else null
+	if tex == null:
+		return
+	var spr := Sprite2D.new()
+	spr.name = "IntentGhost"
+	spr.centered = true
+	spr.texture = tex
+	spr.modulate = Color(0.75, 0.9, 1.0, INTENT_GHOST_ALPHA)
+	spr.z_as_relative = false
+	var metrics := _texture_content_metrics(tex)
+	var content_h: float = metrics.content_h
+	var vis := unit.def.visual_scale if unit.def.visual_scale > 0.0 else 1.0
+	var s := (config.unit_world_height / content_h) * vis if content_h > 0.0 else 1.0
+	spr.scale = Vector2(s, s)
+	spr.offset = Vector2(0.0, metrics.offset_y)
+	spr.position = _cell_to_world(cell, config.cell_size)
+	spr.z_index = UNIT_Z_BASE + int(round(spr.position.y * 100.0)) + 2
+	_units_root.add_child(spr)
+	_intent_preview_ghost = spr
+
+
+func _spawn_intent_path_line(path: Array) -> void:
+	if path.size() < 2:
+		return
+	var line := Line2D.new()
+	line.name = "IntentPathLine"
+	line.width = maxf(config.cell_size * 0.12, 0.08)
+	line.default_color = INTENT_PATH_LINE_COLOR
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.joint_mode = Line2D.LINE_JOINT_ROUND
+	line.z_as_relative = false
+	line.z_index = UNIT_Z_BASE - 20
+	for c in path:
+		if c is Vector2i:
+			line.add_point(_cell_to_world(c as Vector2i, config.cell_size))
+	_units_root.add_child(line)
+	_intent_preview_line = line
+
+
+func _spawn_intent_attack_line(from_cell: Vector2i, to_cell: Vector2i) -> void:
+	var line := Line2D.new()
+	line.name = "IntentAttackLine"
+	line.width = maxf(config.cell_size * 0.14, 0.1)
+	line.default_color = INTENT_ATK_LINE_COLOR
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.z_as_relative = false
+	line.z_index = UNIT_Z_BASE - 18
+	var from_w := _cell_to_world(from_cell, config.cell_size)
+	var to_w := _cell_to_world(to_cell, config.cell_size)
+	line.add_point(from_w)
+	line.add_point(to_w)
+	# 箭头两翼（独立短线段叠在同一 Line2D 会折返；改用子 Line2D）。
+	var dir := to_w - from_w
+	if dir.length() > 0.001:
+		var n := dir.normalized()
+		var tip := to_w - n * (config.cell_size * 0.2)
+		var perp := Vector2(-n.y, n.x) * (config.cell_size * 0.18)
+		var wing_l := Line2D.new()
+		wing_l.width = line.width
+		wing_l.default_color = INTENT_ATK_LINE_COLOR
+		wing_l.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		wing_l.end_cap_mode = Line2D.LINE_CAP_ROUND
+		wing_l.add_point(to_w)
+		wing_l.add_point(tip + perp)
+		line.add_child(wing_l)
+		var wing_r := Line2D.new()
+		wing_r.width = line.width
+		wing_r.default_color = INTENT_ATK_LINE_COLOR
+		wing_r.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		wing_r.end_cap_mode = Line2D.LINE_CAP_ROUND
+		wing_r.add_point(to_w)
+		wing_r.add_point(tip - perp)
+		line.add_child(wing_r)
+	_units_root.add_child(line)
+	_intent_preview_line = line
+
+
+func _spawn_intent_hint(cell: Vector2i, text: String, color: Color) -> void:
+	var root := Control.new()
+	root.name = "IntentHint"
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var lbl := Label.new()
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.text = text
+	_apply_ui_label_font(lbl, 14)
+	lbl.add_theme_color_override("font_color", color)
+	lbl.add_theme_color_override("font_outline_color", Color("0a1018"))
+	lbl.add_theme_constant_override("outline_size", 4)
+	root.add_child(lbl)
+	_labels_root.add_child(root)
+	lbl.reset_size()
+	root.size = lbl.size
+	var world := _cell_to_world(cell, config.cell_size)
+	var head := Vector2(0.0, -config.unit_world_height * 1.55)
+	_position_world_on_label(root, world + head)
+	_clamp_label_in_viewport(root)
+	_intent_preview_hint = root
 
 
 func _clear_burn_markers() -> void:

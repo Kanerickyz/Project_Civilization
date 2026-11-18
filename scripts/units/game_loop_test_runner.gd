@@ -21,6 +21,9 @@ func _initialize() -> void:
 	if not _test_wolf_action_preview_overlay_cells():
 		quit(1)
 		return
+	if not _test_wolf_intent_preview_readonly():
+		quit(1)
+		return
 	if not _test_victory_detection():
 		quit(1)
 		return
@@ -151,6 +154,72 @@ func _test_wolf_action_preview_overlay_cells() -> bool:
 		if GridMathScript.chebyshev(rider.cell, c) > rider.def.attack_range:
 			push_error("GameLoop: wolf attack cell out of range")
 			return false
+	return true
+
+
+func _test_wolf_intent_preview_readonly() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var rider: TacticalUnitInstance = null
+	var player: TacticalUnitInstance = null
+	for u in board.living_units():
+		if TacticalEnemyAiScript.uses_behavior_sm(u) and rider == null:
+			rider = u
+		elif u.faction == TacticalFactionScript.Id.PLAYER and player == null:
+			player = u
+		else:
+			# 清场，避免占格干扰路径/目标预览。
+			u.hp = 0
+	if rider == null or player == null:
+		push_error("GameLoop: missing units for intent preview")
+		return false
+	rider.attacked_this_side_turn = true
+	rider.remaining_move_budget = 0
+	player.cell = Vector2i(2, 3)
+	# 邻格可打：攻击意图应预览到玩家格，且不因本段已攻击标志而失效。
+	rider.cell = Vector2i(3, 3)
+	rider.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	var atk_prev := TacticalEnemyAiScript.preview_next_action(board, rider)
+	if String(atk_prev.get("kind", "")) != "attack":
+		push_error("GameLoop: intent preview should attack when adjacent")
+		return false
+	if atk_prev.get("to", Vector2i(-1, -1)) != player.cell:
+		push_error("GameLoop: intent preview attack target mismatch")
+		return false
+	# 远离：移动意图应给出落点与路径，且不改写状态。
+	rider.cell = Vector2i(7, 3)
+	rider.next_intent = TacticalEnemyAiScript.Intent.MOVE
+	var move_prev := TacticalEnemyAiScript.preview_next_action(board, rider)
+	if String(move_prev.get("kind", "")) != "move":
+		push_error("GameLoop: intent preview should move when out of range")
+		return false
+	var dest: Vector2i = move_prev.get("to", Vector2i(-1, -1))
+	if dest.x < 0 or dest == rider.cell:
+		push_error("GameLoop: intent preview move dest invalid")
+		return false
+	if GridMathScript.chebyshev(rider.cell, dest) > TacticalEnemyAiScript.MOVE_STEP_CAP:
+		push_error("GameLoop: intent preview move beyond MOVE_STEP_CAP")
+		return false
+	var path: Array = move_prev.get("path", []) as Array
+	if path.is_empty():
+		push_error("GameLoop: intent preview move path empty")
+		return false
+	# 回血意图。
+	var hurt_hp := maxi(1, rider.effective_max_hp() - 1)
+	rider.hp = hurt_hp
+	rider.next_intent = TacticalEnemyAiScript.Intent.HEAL
+	var heal_prev := TacticalEnemyAiScript.preview_next_action(board, rider)
+	if String(heal_prev.get("kind", "")) != "heal":
+		push_error("GameLoop: intent preview should heal when not full")
+		return false
+	# 只读：意图/血量/格/移力不变。
+	if (
+		rider.next_intent != TacticalEnemyAiScript.Intent.HEAL
+		or rider.hp != hurt_hp
+		or rider.cell != Vector2i(7, 3)
+		or rider.remaining_move_budget != 0
+	):
+		push_error("GameLoop: intent preview mutated rider state")
+		return false
 	return true
 
 
