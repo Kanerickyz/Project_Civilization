@@ -5,58 +5,70 @@ const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 
 ## 时机触发战术能力；不替代 TurnClock.end_turn，无玩家点按释放。
+## 可选 fx_out：追加 Dictionary 飘字事件 {cell, text, color}，供沙盘可见反馈。
 
 
-static func process_battle_start(board: TacticalBoard) -> Array[String]:
+static func process_battle_start(board: TacticalBoard, fx_out: Variant = null) -> Array[String]:
 	var logs: Array[String] = []
 	for u in board.living_units():
-		logs.append_array(_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_SELF_DEPLOY))
+		logs.append_array(
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_SELF_DEPLOY, fx_out)
+		)
 	return logs
 
 
-static func process_side_turn_start(board: TacticalBoard, faction: TacticalFaction.Id) -> Array[String]:
+static func process_side_turn_start(
+	board: TacticalBoard, faction: TacticalFaction.Id, fx_out: Variant = null
+) -> Array[String]:
 	var logs: Array[String] = []
 	for u in board.living_units():
 		if u.faction != faction:
 			continue
 		logs.append_array(
-			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_SIDE_TURN_START)
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_SIDE_TURN_START, fx_out)
 		)
 	return logs
 
 
-static func process_unit_hurt(board: TacticalBoard, unit: TacticalUnitInstance, _damage: int) -> Array[String]:
+static func process_unit_hurt(
+	board: TacticalBoard, unit: TacticalUnitInstance, _damage: int, fx_out: Variant = null
+) -> Array[String]:
 	if unit == null or not unit.is_alive():
 		return []
-	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_HURT)
+	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_HURT, fx_out)
 
 
 static func process_unit_kill(
 	board: TacticalBoard,
 	killer: TacticalUnitInstance,
-	_victim: TacticalUnitInstance
+	_victim: TacticalUnitInstance,
+	fx_out: Variant = null
 ) -> Array[String]:
 	if killer == null or not killer.is_alive():
 		return []
-	return _try_trigger(board, killer, TacticalActiveAbility.TriggerKind.ON_SELF_KILL)
+	return _try_trigger(board, killer, TacticalActiveAbility.TriggerKind.ON_SELF_KILL, fx_out)
 
 
-static func process_unit_move_end(board: TacticalBoard, unit: TacticalUnitInstance) -> Array[String]:
+static func process_unit_move_end(
+	board: TacticalBoard, unit: TacticalUnitInstance, fx_out: Variant = null
+) -> Array[String]:
 	if unit == null or not unit.is_alive():
 		return []
-	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_MOVE_END)
+	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_MOVE_END, fx_out)
 
 
 ## 单位刚阵亡时触发（仍可读 cell / def）；用于爆爆死亡点燃等。
-static func process_unit_death(board: TacticalBoard, unit: TacticalUnitInstance) -> Array[String]:
+static func process_unit_death(
+	board: TacticalBoard, unit: TacticalUnitInstance, fx_out: Variant = null
+) -> Array[String]:
 	if unit == null or unit.def == null:
 		return []
-	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_DEATH)
+	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_DEATH, fx_out)
 
 
 ## 同阵营其他单位阵亡后：扫描仍存活友方的 ON_ALLY_DEATH 被动（不含死者自身）。
 static func process_ally_death(
-	board: TacticalBoard, dead: TacticalUnitInstance
+	board: TacticalBoard, dead: TacticalUnitInstance, fx_out: Variant = null
 ) -> Array[String]:
 	if board == null or dead == null:
 		return []
@@ -64,12 +76,16 @@ static func process_ally_death(
 	for u in board.living_units():
 		if u == dead or u.faction != dead.faction:
 			continue
-		logs.append_array(_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH))
+		logs.append_array(
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH, fx_out)
+		)
 	return logs
 
 
 ## 玩家打出一张攻击瞄准卡后：扫描存活己方单位的 ON_PLAYER_ATTACK_CARD 被动。
-static func process_player_attack_card_played(board: TacticalBoard) -> Array[String]:
+static func process_player_attack_card_played(
+	board: TacticalBoard, fx_out: Variant = null
+) -> Array[String]:
 	if board == null:
 		return []
 	var logs: Array[String] = []
@@ -77,15 +93,22 @@ static func process_player_attack_card_played(board: TacticalBoard) -> Array[Str
 		if u.faction != TacticalFactionScript.Id.PLAYER:
 			continue
 		logs.append_array(
-			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD)
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD, fx_out)
 		)
 	return logs
+
+
+static func _emit_fx(fx_out: Variant, cell: Vector2i, text: String, color: Color) -> void:
+	if text.is_empty() or not (fx_out is Array):
+		return
+	(fx_out as Array).append({"cell": cell, "text": text, "color": color})
 
 
 static func _try_trigger(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
-	kind: TacticalActiveAbility.TriggerKind
+	kind: TacticalActiveAbility.TriggerKind,
+	fx_out: Variant = null
 ) -> Array[String]:
 	var ab := unit.def.triggered_ability
 	if ab == null or ab.trigger_kind != kind:
@@ -95,21 +118,21 @@ static func _try_trigger(
 			if unit.deploy_trigger_fired:
 				return []
 			unit.deploy_trigger_fired = true
-			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "入阵")
+			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "入阵", fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SELF_HURT:
-			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "铁壁")
+			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "铁壁", fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SELF_KILL:
-			return _apply_kill_effects(board, unit, ab)
+			return _apply_kill_effects(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SIDE_TURN_START:
-			return _apply_ally_buff(board, unit, ab, "鸣鼓")
+			return _apply_ally_buff(board, unit, ab, "鸣鼓", fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SELF_MOVE_END:
-			return _apply_ally_buff(board, unit, ab, "鼓阵")
+			return _apply_ally_buff(board, unit, ab, "鼓阵", fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SELF_DEATH:
 			return _apply_death_aoe_burn(board, unit, ab)
 		TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD:
-			return _apply_player_attack_card(board, unit, ab)
+			return _apply_player_attack_card(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
-			return _draw_cards_on_trigger(board, unit, ab)
+			return _draw_cards_on_trigger(board, unit, ab, fx_out)
 		_:
 			return []
 
@@ -117,22 +140,28 @@ static func _try_trigger(
 static func _apply_player_attack_card(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
-	ab: TacticalActiveAbility
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
 ) -> Array[String]:
 	var logs: Array[String] = []
 	logs.append_array(
 		_apply_ally_buff(
-			board, unit, ab, ab.display_name if not ab.display_name.is_empty() else "战鼓"
+			board,
+			unit,
+			ab,
+			ab.display_name if not ab.display_name.is_empty() else "战鼓",
+			fx_out
 		)
 	)
-	logs.append_array(_draw_cards_on_trigger(board, unit, ab))
+	logs.append_array(_draw_cards_on_trigger(board, unit, ab, fx_out))
 	return logs
 
 
 static func _draw_cards_on_trigger(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
-	ab: TacticalActiveAbility
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
 ) -> Array[String]:
 	var n := ab.draw_cards_on_trigger
 	if n <= 0:
@@ -143,6 +172,7 @@ static func _draw_cards_on_trigger(
 	var tag := ab.display_name if not ab.display_name.is_empty() else "抽牌"
 	if drawn <= 0:
 		return ["%s %s：牌库无可抽" % [unit.def.display_name, tag]]
+	_emit_fx(fx_out, unit.cell, "+%d牌" % drawn, Color("7ec8ff"))
 	return ["%s %s：抽 %d 张" % [unit.def.display_name, tag, drawn]]
 
 
@@ -150,12 +180,14 @@ static func _apply_self_atk(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
 	amount: int,
-	tag: String
+	tag: String,
+	fx_out: Variant = null
 ) -> Array[String]:
 	if amount == 0:
 		return []
 	unit.atk_bonus += amount
 	board.changed.emit()
+	_emit_fx(fx_out, unit.cell, "+%d攻" % amount, Color("ffe08a"))
 	return [
 		"%s %s：攻击+%d（本场）" % [unit.def.display_name, tag, amount],
 	]
@@ -164,21 +196,25 @@ static func _apply_self_atk(
 static func _apply_kill_effects(
 	board: TacticalBoard,
 	killer: TacticalUnitInstance,
-	ab: TacticalActiveAbility
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
 ) -> Array[String]:
 	var logs: Array[String] = []
-	logs.append_array(_apply_self_atk(board, killer, ab.self_atk_on_kill, "猎杀"))
+	logs.append_array(_apply_self_atk(board, killer, ab.self_atk_on_kill, "猎杀", fx_out))
 	if ab.grant_ephemeral_attack_on_kill:
-		logs.append_array(_grant_ephemeral_attack(board, killer))
+		logs.append_array(_grant_ephemeral_attack(board, killer, fx_out))
 	return logs
 
 
-static func _grant_ephemeral_attack(board: TacticalBoard, killer: TacticalUnitInstance) -> Array[String]:
+static func _grant_ephemeral_attack(
+	board: TacticalBoard, killer: TacticalUnitInstance, fx_out: Variant = null
+) -> Array[String]:
 	if killer.faction != TacticalFactionScript.Id.PLAYER:
 		return []
 	if board.player_deck == null:
 		return []
 	board.player_deck.add_ephemeral_attack_to_hand()
+	_emit_fx(fx_out, killer.cell, "+1临攻", Color("7ec8ff"))
 	return ["%s 猎获：手牌+1 临时攻击卡（用完销毁）" % killer.def.display_name]
 
 
@@ -186,7 +222,8 @@ static func _apply_ally_buff(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
 	ab: TacticalActiveAbility,
-	tag: String
+	tag: String,
+	fx_out: Variant = null
 ) -> Array[String]:
 	if ab.ally_atk_buff == 0 and ab.ally_hp_buff == 0:
 		return []
@@ -203,6 +240,11 @@ static func _apply_ally_buff(
 			ally.max_hp_bonus += ab.ally_hp_buff
 			ally.hp += ab.ally_hp_buff
 		buffed += 1
+		# 每名受益友方各一条飘字（加攻/加血可并排）。
+		if ab.ally_atk_buff != 0:
+			_emit_fx(fx_out, ally.cell, "+%d攻" % ab.ally_atk_buff, Color("ffe08a"))
+		if ab.ally_hp_buff != 0:
+			_emit_fx(fx_out, ally.cell, "+%d血" % ab.ally_hp_buff, Color("7dff9a"))
 	if buffed == 0:
 		return []
 	board.changed.emit()

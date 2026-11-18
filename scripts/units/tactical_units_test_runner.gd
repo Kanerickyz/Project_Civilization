@@ -251,12 +251,21 @@ func _test_archer_attack_card_draws() -> bool:
 		return false
 	var hand_before := deck.hand.size()
 	var draw_before := deck.draw_pile.size()
-	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board)
+	var fx: Array = []
+	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board, fx)
 	if logs.is_empty():
 		push_error("TacticalUnits: archer attack-card passive should log")
 		return false
 	if deck.hand.size() != hand_before + 1:
 		push_error("TacticalUnits: archer should draw 1 on attack card")
+		return false
+	var saw_draw_fx := false
+	for ev in fx:
+		if ev is Dictionary and str((ev as Dictionary).get("text", "")) == "+1牌":
+			saw_draw_fx = true
+			break
+	if not saw_draw_fx:
+		push_error("TacticalUnits: archer passive should emit +1牌 fx")
 		return false
 	if deck.draw_pile.size() != draw_before - 1 and draw_before > 0:
 		push_error("TacticalUnits: draw should come from draw pile")
@@ -367,7 +376,8 @@ func _test_wardrum_attack_card_buff() -> bool:
 		return false
 	drum.cell = Vector2i(2, 2)
 	archer.cell = Vector2i(3, 2)
-	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board)
+	var fx: Array = []
+	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board, fx)
 	if logs.is_empty():
 		push_error("TacticalUnits: wardrum attack-card buff should log")
 		return false
@@ -376,6 +386,13 @@ func _test_wardrum_attack_card_buff() -> bool:
 		return false
 	if archer.effective_max_hp() != before_max + 1 or archer.hp != before_hp + 1:
 		push_error("TacticalUnits: wardrum attack card should +1 hp nearby")
+		return false
+	var fx_texts: PackedStringArray = []
+	for ev in fx:
+		if ev is Dictionary:
+			fx_texts.append(str((ev as Dictionary).get("text", "")))
+	if not ("+1攻" in fx_texts) or not ("+1血" in fx_texts):
+		push_error("TacticalUnits: wardrum passive should emit +1攻/+1血 fx, got %s" % [fx_texts])
 		return false
 	# 半径 1：距离 2 不吃。
 	var pekka := _player_unit(board, "mini_pekka")

@@ -261,22 +261,30 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 	result["armor_absorbed"] = armor_absorbed
 	result["hp_damage"] = hp_damage
 	var hurt_logs: Array[String] = []
+	var passive_fx: Array = []
 	if armor_absorbed > 0:
 		hurt_logs.append("护甲吸收 %d" % armor_absorbed)
 	# 「受伤」被动仅在实际扣血时触发。
 	if hp_damage > 0:
-		hurt_logs.append_array(TacticalAbilitySystem.process_unit_hurt(self, target, hp_damage))
+		hurt_logs.append_array(
+			TacticalAbilitySystem.process_unit_hurt(self, target, hp_damage, passive_fx)
+		)
 	if not target.is_alive():
 		result["killed"] = true
 		# 先死亡触发（爆燃等），再友方阵亡被动，再记击杀者被动；死亡单位仍可读 cell。
-		var death_logs := TacticalAbilitySystem.process_unit_death(self, target)
+		var death_logs := TacticalAbilitySystem.process_unit_death(self, target, passive_fx)
 		hurt_logs.append_array(death_logs)
-		hurt_logs.append_array(TacticalAbilitySystem.process_ally_death(self, target))
+		hurt_logs.append_array(
+			TacticalAbilitySystem.process_ally_death(self, target, passive_fx)
+		)
 		if source != null and source != target:
-			var kill_logs := TacticalAbilitySystem.process_unit_kill(self, source, target)
+			var kill_logs := TacticalAbilitySystem.process_unit_kill(
+				self, source, target, passive_fx
+			)
 			hurt_logs.append_array(kill_logs)
 	result["ok"] = true
 	result["log"] = " · ".join(hurt_logs) if hurt_logs.size() > 0 else ""
+	result["passive_fx"] = passive_fx
 	changed.emit()
 	return result
 
