@@ -30,13 +30,13 @@ func _initialize() -> void:
 	view.recenter_camera()
 
 	var riders := 0
-	var attack_intents := 0
+	var intent_counts: Dictionary = {}
 	for u in board.living_units():
 		if TacticalEnemyAi.uses_behavior_sm(u):
 			riders += 1
-			if u.next_intent == TacticalEnemyAi.Intent.ATTACK:
-				attack_intents += 1
-	print("wolf_intent_capture: riders=%d attack_intents=%d" % [riders, attack_intents])
+			var key := int(u.next_intent)
+			intent_counts[key] = int(intent_counts.get(key, 0)) + 1
+	print("wolf_intent_capture: riders=%d intents=%s" % [riders, str(intent_counts)])
 
 	await create_timer(0.9, true, false, true).timeout
 	var img: Image = root.get_viewport().get_texture().get_image()

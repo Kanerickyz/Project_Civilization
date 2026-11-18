@@ -42,6 +42,22 @@ static func intent_name(intent: int) -> String:
 			return "?"
 
 
+## 开战初始意图：每只狼骑兵独立从攻击 / 移动 /（回血|加攻）三相中随机起。
+## 落到支援相时再随机二选一写入 HEAL 或 BUFF_ATK。
+static func roll_initial_intent(rng: RandomNumberGenerator = null) -> int:
+	var local_rng := rng
+	if local_rng == null:
+		local_rng = RandomNumberGenerator.new()
+		local_rng.randomize()
+	match local_rng.randi_range(0, 2):
+		0:
+			return Intent.ATTACK
+		1:
+			return Intent.MOVE
+		_:
+			return _roll_support_intent(local_rng)
+
+
 ## 只读预览下一回合将实际执行的行为（含跳过 / 移动改攻击），不改写棋盘、移力与意图。
 ## 返回：kind=attack|move|heal|buff_atk|idle；from/to；path（移动格序，含起终点）；amount。
 static func preview_next_action(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:

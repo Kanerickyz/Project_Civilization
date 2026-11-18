@@ -20,11 +20,12 @@ var frenzy_stacks: int = 0
 var armor: int = 0
 ## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减 MOVE/攻）。
 var death_cards_culled: bool = false
-## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战默认攻击）。
+## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战各自随机初相）。
 var next_intent: int = 0
 
 const FRENZY_MAX_STACKS := 15
 const FRENZY_DAMAGE_MULT := 1.2
+const _RIDER_ID := "rider"
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:
@@ -33,8 +34,15 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 	cell = p_cell
 	hp = p_def.max_hp
 	remaining_move_budget = p_def.action_move_budget()
-	# 狼骑兵开战意图为攻击；其它单位不读此字段。
-	next_intent = 0
+	# 敌方狼骑兵开战各自独立随机初相；其它单位不读此字段。
+	if (
+		p_faction == TacticalFaction.Id.OPPONENT
+		and p_def != null
+		and p_def.id == _RIDER_ID
+	):
+		next_intent = TacticalEnemyAi.roll_initial_intent()
+	else:
+		next_intent = 0
 
 
 ## 不含狂暴倍率的基础战斗力（攻 + 本场加成）。
