@@ -58,6 +58,9 @@ func _initialize() -> void:
 	if not _test_universal_knockback_non_knight():
 		quit(1)
 		return
+	if not _test_ranged_attack_no_knockback():
+		quit(1)
+		return
 	if not _test_archer_volley_side_damage():
 		quit(1)
 		return
@@ -690,9 +693,9 @@ func _test_universal_knockback_non_knight() -> bool:
 		board, pekka, foe.cell, TacticalFactionScript.Id.PLAYER
 	)
 	if not res["ok"] or not res.get("knockback_moved", false) or foe.cell != expect_to:
-		push_error("TacticalUnits: non-knight attack should knockback 1")
+		push_error("TacticalUnits: melee non-knight attack should knockback 1")
 		return false
-	# 敌方攻击同样击退。
+	# 敌方近战攻击同样击退。
 	var rider := foe
 	var ally := _player_unit(board, "wardrum")
 	if ally == null:
@@ -706,7 +709,67 @@ func _test_universal_knockback_non_knight() -> bool:
 		board, rider, ally.cell, TacticalFactionScript.Id.OPPONENT
 	)
 	if not res2["ok"] or not res2.get("knockback_moved", false) or ally.cell != Vector2i(5, 3):
-		push_error("TacticalUnits: enemy attack should knockback too")
+		push_error("TacticalUnits: enemy melee attack should knockback too")
+		return false
+	# 爆爆邻格仍算近战击退。
+	var boom := _player_unit(board, "boomling")
+	if boom == null:
+		return false
+	boom.cell = Vector2i(1, 1)
+	foe.cell = Vector2i(2, 1)
+	_vacate_cell(board, Vector2i(3, 1))
+	foe.hp = 99
+	var res3 := TacticalCombatScript.try_basic_attack(
+		board, boom, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res3["ok"] or not res3.get("knockback_moved", false) or foe.cell != Vector2i(3, 1):
+		push_error("TacticalUnits: boomling adjacent attack should knockback")
+		return false
+	return true
+
+
+func _test_ranged_attack_no_knockback() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer := _player_unit(board, "archer")
+	var boom := _player_unit(board, "boomling")
+	var foe := _opponent_unit(board, "rider")
+	if archer == null or boom == null or foe == null:
+		return false
+	board.set_terrain_cells({})
+	# 游侠距离 2：远程，不击退、无×1.2。
+	archer.cell = Vector2i(2, 2)
+	foe.cell = Vector2i(4, 2)
+	_vacate_cell(board, Vector2i(5, 2))
+	foe.hp = 99
+	var base := archer.effective_attack()
+	var mid_cell := foe.cell
+	var res := TacticalCombatScript.try_basic_attack(
+		board, archer, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"]:
+		push_error("TacticalUnits: ranged archer attack should ok")
+		return false
+	if res.get("knockback_moved", false) or res.get("knockback_blocked", false):
+		push_error("TacticalUnits: ranged archer must not knockback")
+		return false
+	if foe.cell != mid_cell or int(res["damage"]) != base:
+		push_error("TacticalUnits: ranged archer should keep cell and normal dmg")
+		return false
+	# 爆爆距离 2：远程，不击退。
+	boom.cell = Vector2i(1, 1)
+	foe.cell = Vector2i(3, 1)
+	_vacate_cell(board, Vector2i(4, 1))
+	foe.hp = 99
+	var boom_base := boom.effective_attack()
+	var foe_cell := foe.cell
+	var res2 := TacticalCombatScript.try_basic_attack(
+		board, boom, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res2["ok"] or res2.get("knockback_moved", false) or res2.get("knockback_blocked", false):
+		push_error("TacticalUnits: boomling range-2 must not knockback")
+		return false
+	if foe.cell != foe_cell or int(res2["damage"]) != boom_base:
+		push_error("TacticalUnits: boomling range-2 should keep cell and normal dmg")
 		return false
 	return true
 
@@ -749,6 +812,12 @@ func _test_archer_volley_side_damage() -> bool:
 	if not res["ok"]:
 		push_error("TacticalUnits: volley primary should ok")
 		return false
+	if res.get("knockback_moved", false) or res.get("knockback_blocked", false):
+		push_error("TacticalUnits: volley (ranged) must not knockback primary")
+		return false
+	if foe_mid.cell != Vector2i(4, 2):
+		push_error("TacticalUnits: volley primary must stay put")
+		return false
 	var hits: Array = res.get("volley_hits", []) as Array
 	if hits.size() != 2:
 		push_error("TacticalUnits: volley should hit 2 sides, got %d" % hits.size())
@@ -769,6 +838,9 @@ func _test_archer_volley_side_damage() -> bool:
 		return false
 	if foe_left.hp != 99 or foe_right.hp != 99:
 		push_error("TacticalUnits: normal attack must not splash sides")
+		return false
+	if res2.get("knockback_moved", false) or foe_mid.cell != Vector2i(4, 2):
+		push_error("TacticalUnits: ranged normal attack must not knockback")
 		return false
 	return true
 

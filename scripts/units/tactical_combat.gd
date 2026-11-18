@@ -43,7 +43,7 @@ static func attackable_cells(
 	return out
 
 
-## 全员击退：落点不可走时最终伤害 ×1.2 向上取整。
+## 近战击退：落点不可走时最终伤害 ×1.2 向上取整。
 const KNOCKBACK_BLOCK_MULT := 1.2
 ## 兼容旧名。
 const KNIGHT_KNOCKBACK_BLOCK_MULT := KNOCKBACK_BLOCK_MULT
@@ -51,6 +51,15 @@ const KNIGHT_KNOCKBACK_BLOCK_MULT := KNOCKBACK_BLOCK_MULT
 const KNOCKBACK_COLLISION_DAMAGE := 1
 ## 兼容旧名。
 const KNIGHT_KNOCKBACK_COLLISION_DAMAGE := KNOCKBACK_COLLISION_DAMAGE
+
+
+## 近战击退判定：邻格（切比雪夫 ≤1）或单位 attack_range≤1；远程不推。
+static func is_melee_knockback_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> bool:
+	if attacker == null or attacker.def == null:
+		return false
+	if attacker.def.attack_range <= 1:
+		return true
+	return GridMathScript.chebyshev(attacker.cell, target_cell) <= 1
 
 
 ## 攻击方向单位步（切比雪夫邻格）；同格返回 (0,0)。
@@ -272,8 +281,9 @@ static func try_basic_attack(
 	var knock_to := from_cell + step
 	var knock_blocked := false
 	var occupant: TacticalUnitInstance = null
-	# 全员命中后击退（含敌方）；同格无方向则跳过。
-	if step != Vector2i.ZERO:
+	# 仅近战命中后击退（邻格 / attack_range≤1；含敌方）；远程与同格无方向跳过。
+	var do_knockback := step != Vector2i.ZERO and is_melee_knockback_attack(attacker, target.cell)
+	if do_knockback:
 		result["knockback_from"] = from_cell
 		result["knockback_to"] = knock_to
 		occupant = board.unit_at(knock_to)
@@ -303,14 +313,14 @@ static func try_basic_attack(
 		target.def.display_name,
 		dmg,
 	]
-	if step != Vector2i.ZERO and knock_blocked:
+	if do_knockback and knock_blocked:
 		result["log"] += " · 击退受阻×1.2"
 	if extra != "":
 		result["log"] += " · " + extra
 	if result["killed"]:
 		result["log"] += "（击杀）"
 	# 落点有其他单位：额外 1 点伤害（可为友方）。
-	if knock_blocked and occupant != null and occupant != target and occupant.is_alive():
+	if do_knockback and knock_blocked and occupant != null and occupant != target and occupant.is_alive():
 		var col := board.apply_damage(occupant, KNOCKBACK_COLLISION_DAMAGE, attacker)
 		result["collision_target"] = occupant
 		result["collision_damage"] = KNOCKBACK_COLLISION_DAMAGE
@@ -322,7 +332,7 @@ static func try_basic_attack(
 		if result["collision_killed"]:
 			result["log"] += "（击杀）"
 	# 可退后且目标仍存活：位移 1 格（不触发移动结束被动；表现靠视图 Tween）。
-	if step != Vector2i.ZERO and not knock_blocked and target.is_alive():
+	if do_knockback and not knock_blocked and target.is_alive():
 		if board.force_displace(target, knock_to):
 			result["knockback_moved"] = true
 			result["log"] += " · 击退至 (%d,%d)" % [knock_to.x, knock_to.y]

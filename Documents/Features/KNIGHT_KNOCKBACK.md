@@ -1,3 +1,3 @@
-# 攻击击退（已升格为全员）
+# 攻击击退（已改为仅近战）
 
-> 原「仅盾卫」规则已升格。现行规格见 [ATTACK_KNOCKBACK.md](./ATTACK_KNOCKBACK.md)。
+> 原「仅盾卫」曾升格为全员；现行规格为**仅近战**，见 [ATTACK_KNOCKBACK.md](./ATTACK_KNOCKBACK.md)。
