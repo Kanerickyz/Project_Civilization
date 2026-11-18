@@ -18,7 +18,7 @@ var burn_stacks: int = 0
 var frenzy_stacks: int = 0
 ## 护甲：伤害先打护甲；溢出不穿血（见 apply_damage）。
 var armor: int = 0
-## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减 MOVE/攻）。
+## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减攻）。
 var death_cards_culled: bool = false
 ## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战各自随机初相）。
 var next_intent: int = 0

@@ -114,11 +114,8 @@ func reset_side_turn_flags(active_faction: TacticalFaction.Id) -> void:
 		if u.faction == active_faction:
 			u.moved_this_side_turn = false
 			u.attacked_this_side_turn = false
-			# 玩家无移力池：移动只靠卡授权；对手 AI 仍按段重置移力池。
-			if active_faction == TacticalFactionScript.Id.PLAYER:
-				u.remaining_move_budget = 0
-			else:
-				u.remaining_move_budget = u.def.action_move_budget()
+			# 敌我均按段重置移力池（玩家点格移动；对手 AI 同池）。
+			u.remaining_move_budget = u.def.action_move_budget()
 	changed.emit()
 
 
