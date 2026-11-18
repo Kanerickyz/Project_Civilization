@@ -15,6 +15,7 @@ const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
 const ActionHandFanScript := preload("res://scripts/ui/action_hand_fan.gd")
 const TacticalUnitInfoCardScript := preload("res://scripts/ui/tactical_unit_info_card.gd")
+const KillImpactFxScript := preload("res://scripts/ui/kill_impact_fx.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
 enum PendingKind { NONE, MOVE, ATTACK, STEALTH }
@@ -45,6 +46,7 @@ var _side_panel: PanelContainer
 var _bottom_bar: MarginContainer
 var _unit_info_card: TacticalUnitInfoCard
 var _confirm_deploy_button: Button
+var _kill_impact: Control
 ## 开战前部署：确认前不抽手牌、不开战触发。
 var _in_deployment: bool = true
 
@@ -170,6 +172,7 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 		await get_tree().create_timer(0.38).timeout
 		for dead in killed_now:
 			_board_view.play_unit_death(dead)
+			_play_kill_impact()
 			if _selected_unit == dead:
 				_selected_unit = null
 			if _focus_unit == dead:
@@ -338,6 +341,10 @@ func _build() -> void:
 	_turn_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_turn_banner_panel.add_child(_turn_banner)
 
+	_kill_impact = KillImpactFxScript.new()
+	_kill_impact.name = "KillImpactFx"
+	add_child(_kill_impact)
+
 	_game_over_panel = PanelContainer.new()
 	_game_over_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_game_over_panel.offset_left = -140.0
@@ -346,6 +353,7 @@ func _build() -> void:
 	_game_over_panel.offset_bottom = 72.0
 	_game_over_panel.visible = false
 	_game_over_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_game_over_panel.z_index = 50
 	add_child(_game_over_panel)
 
 	var go_box := VBoxContainer.new()
@@ -1050,6 +1058,7 @@ func _feedback_from_attack(
 	if res.get("killed", false):
 		_purge_dead_unit_cards(target)
 		_board_view.play_unit_death(target)
+		_play_kill_impact()
 		if _selected_unit == target:
 			_selected_unit = null
 		if _focus_unit == target:
@@ -1063,6 +1072,7 @@ func _feedback_from_attack(
 		if res.get("collision_killed", false):
 			_purge_dead_unit_cards(col)
 			_board_view.play_unit_death(col)
+			_play_kill_impact()
 			if _selected_unit == col:
 				_selected_unit = null
 			if _focus_unit == col:
@@ -1082,6 +1092,7 @@ func _feedback_from_attack(
 		if bool((hit as Dictionary).get("killed", false)):
 			_purge_dead_unit_cards(vu)
 			_board_view.play_unit_death(vu)
+			_play_kill_impact()
 			if _selected_unit == vu:
 				_selected_unit = null
 			if _focus_unit == vu:
@@ -1091,6 +1102,21 @@ func _feedback_from_attack(
 	if res.get("knockback_moved", false) and target != null and target.is_alive():
 		_refresh_all()
 		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+
+
+func _play_kill_impact() -> void:
+	if _game_over or _kill_impact == null:
+		return
+	if _kill_impact.has_method("play"):
+		_kill_impact.call("play")
+
+
+## GUI 截图：强制播一次击杀冲击（不等真实击杀结算）。
+func capture_play_kill_impact() -> bool:
+	if _kill_impact == null:
+		return false
+	_play_kill_impact()
+	return _kill_impact.visible
 
 
 func _purge_dead_unit_cards(unit: TacticalUnitInstance) -> void:
