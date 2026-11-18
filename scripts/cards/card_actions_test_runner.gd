@@ -845,23 +845,8 @@ func _test_ephemeral_attack_not_in_piles() -> bool:
 	deck.build_from_living_player_units(board)
 	var before := deck.total_cards()
 	deck.begin_player_turn()
-	var archer: TacticalUnitInstance = null
-	var foe: TacticalUnitInstance = null
-	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
-			archer = u
-		elif u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
-			foe = u
-	if archer == null or foe == null:
-		push_error("CardActions: need archer + foe")
-		return false
-	foe.hp = 1
-	foe.cell = archer.cell + Vector2i(0, 1)
-	var hand_before := deck.hand.size()
-	board.apply_damage(foe, 99, archer)
-	if deck.hand.size() != hand_before + 1:
-		push_error("CardActions: kill should add ephemeral attack to hand")
-		return false
+	# 临时攻卡工具仍可用（游侠被动已改为打出攻击牌抽库）。
+	deck.add_ephemeral_attack_to_hand()
 	var eph := deck.hand[deck.hand.size() - 1]
 	if not eph.ephemeral or eph.kind != TacticalActionCardScript.Kind.ATTACK:
 		push_error("CardActions: granted card must be ephemeral attack")

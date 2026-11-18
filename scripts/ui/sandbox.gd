@@ -769,6 +769,7 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 			]
 		else:
 			_last_log = "攻击者：%s · 点红圈内单位（含友方；本卡一次）" % target.def.display_name
+		_append_attack_card_passive_logs()
 	else:
 		_last_log = "未知卡类型"
 		_pending_kind = PendingKind.NONE
@@ -1306,7 +1307,19 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 	elif card.is_attack_aim():
 		_deck.authorize_attack(unit, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK
+		_append_attack_card_passive_logs()
 	else:
 		return false
 	_refresh_all()
 	return true
+
+
+## 鼓手/游侠等：打出攻击牌时的触发被动日志拼到 _last_log。
+func _append_attack_card_passive_logs() -> void:
+	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board)
+	if logs.is_empty():
+		return
+	if _last_log.is_empty():
+		_last_log = "；".join(logs)
+	else:
+		_last_log = "%s · %s" % [_last_log, "；".join(logs)]

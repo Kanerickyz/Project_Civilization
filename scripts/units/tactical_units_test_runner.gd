@@ -19,19 +19,16 @@ func _initialize() -> void:
 	if not _test_archer_min_attack_range():
 		quit(1)
 		return
-	if not _test_archer_kill_grants_card():
+	if not _test_archer_attack_card_draws():
 		quit(1)
 		return
-	if not _test_knight_hurt():
+	if not _test_knight_ally_death_draws():
 		quit(1)
 		return
 	if not _test_armor_absorbs_no_overflow_hp():
 		quit(1)
 		return
-	if not _test_armor_blocks_hurt_passive():
-		quit(1)
-		return
-	if not _test_wardrum_move_end_buff():
+	if not _test_wardrum_attack_card_buff():
 		quit(1)
 		return
 	if not _test_pekka_no_passive():
@@ -56,6 +53,9 @@ func _initialize() -> void:
 		quit(1)
 		return
 	if not _test_knight_knockback_collision():
+		quit(1)
+		return
+	if not _test_universal_knockback_non_knight():
 		quit(1)
 		return
 	print("TACTICAL_UNITS_OK")
@@ -226,39 +226,85 @@ func _test_archer_min_attack_range() -> bool:
 	return true
 
 
-func _test_archer_kill_grants_card() -> bool:
+func _test_archer_attack_card_draws() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
 	board.player_deck = deck
+	deck.build_from_living_player_units(board)
+	# 把库里的牌留在抽牌堆，便于断言抽 1。
+	deck.hand.clear()
+	deck.discard_pile.clear()
 	var archer := _player_unit(board, "archer")
+	if archer == null:
+		return false
+	if archer.def.triggered_ability == null or archer.def.triggered_ability.draw_cards_on_trigger != 1:
+		push_error("TacticalUnits: archer passive should draw 1 on attack card")
+		return false
+	var hand_before := deck.hand.size()
+	var draw_before := deck.draw_pile.size()
+	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board)
+	if logs.is_empty():
+		push_error("TacticalUnits: archer attack-card passive should log")
+		return false
+	if deck.hand.size() != hand_before + 1:
+		push_error("TacticalUnits: archer should draw 1 on attack card")
+		return false
+	if deck.draw_pile.size() != draw_before - 1 and draw_before > 0:
+		push_error("TacticalUnits: draw should come from draw pile")
+		return false
+	# 击杀不再发临时攻卡。
 	var foe := _opponent_unit(board, "rider")
-	if archer == null or foe == null:
+	if foe == null:
 		return false
 	foe.hp = 1
-	var hand_before := deck.hand.size()
+	var hand_mid := deck.hand.size()
 	board.apply_damage(foe, 1, archer)
 	if foe.is_alive():
 		push_error("TacticalUnits: archer should kill weak foe")
 		return false
-	if deck.hand.size() != hand_before + 1:
-		push_error("TacticalUnits: archer kill should grant ephemeral attack")
-		return false
-	var c: TacticalActionCard = deck.hand[deck.hand.size() - 1]
-	if not c.ephemeral or c.kind != TacticalActionCardScript.Kind.ATTACK:
-		push_error("TacticalUnits: granted card must be ephemeral attack")
+	if deck.hand.size() != hand_mid:
+		push_error("TacticalUnits: archer kill must not grant ephemeral attack")
 		return false
 	return true
 
 
-func _test_knight_hurt() -> bool:
+func _test_knight_ally_death_draws() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
+	board.player_deck = deck
+	deck.build_from_living_player_units(board)
+	deck.hand.clear()
+	deck.discard_pile.clear()
 	var knight := _player_unit(board, "knight")
-	if knight == null:
+	var ally := _player_unit(board, "mini_pekka")
+	if knight == null or ally == null:
 		return false
-	var before := knight.effective_attack()
+	if knight.def.triggered_ability == null or knight.def.triggered_ability.draw_cards_on_trigger != 1:
+		push_error("TacticalUnits: knight passive should draw on ally death")
+		return false
+	var before_atk := knight.effective_attack()
 	board.apply_damage(knight, 1, null)
-	if knight.effective_attack() != before + 1:
-		push_error("TacticalUnits: knight hurt should +1 atk")
+	if knight.effective_attack() != before_atk:
+		push_error("TacticalUnits: knight hurt must no longer +1 atk")
+		return false
+	var hand_before := deck.hand.size()
+	ally.hp = 1
+	board.apply_damage(ally, 1, null)
+	if ally.is_alive():
+		push_error("TacticalUnits: ally should die for knight draw test")
+		return false
+	if deck.hand.size() != hand_before + 1:
+		push_error("TacticalUnits: knight should draw 1 on ally death")
+		return false
+	# 敌方死亡不抽。
+	var foe := _opponent_unit(board, "rider")
+	if foe == null:
+		return false
+	var hand_mid := deck.hand.size()
+	foe.hp = 1
+	board.apply_damage(foe, 1, null)
+	if deck.hand.size() != hand_mid:
+		push_error("TacticalUnits: enemy death must not trigger knight draw")
 		return false
 	return true
 
@@ -292,56 +338,51 @@ func _test_armor_absorbs_no_overflow_hp() -> bool:
 	return true
 
 
-func _test_armor_blocks_hurt_passive() -> bool:
-	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	var knight := _player_unit(board, "knight")
-	if knight == null:
-		return false
-	knight.add_armor(2)
-	var before := knight.effective_attack()
-	board.apply_damage(knight, 1, null)
-	if knight.effective_attack() != before:
-		push_error("TacticalUnits: armor-only hit must not trigger hurt atk")
-		return false
-	if knight.armor != 1:
-		push_error("TacticalUnits: armor should drop by 1")
-		return false
-	return true
-
-
-func _test_wardrum_move_end_buff() -> bool:
+func _test_wardrum_attack_card_buff() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var drum := _player_unit(board, "wardrum")
 	var archer := _player_unit(board, "archer")
 	if drum == null or archer == null:
 		return false
-	# 放到开阔格，避免边线/叠邻导致无法移动。
-	_relocate_off_cell(board, Vector2i(2, 2), drum)
-	_relocate_off_cell(board, Vector2i(3, 2), archer)
-	_relocate_off_cell(board, Vector2i(2, 3), drum)
 	drum.cell = Vector2i(2, 2)
 	archer.cell = Vector2i(3, 2)
-	var before_atk := archer.effective_attack()
+	var before_atk := archer.atk_bonus
 	var before_max := archer.effective_max_hp()
 	var before_hp := archer.hp
-	var dest := Vector2i(2, 3)
-	if not board.try_move(drum, dest):
-		push_error("TacticalUnits: wardrum move for buff test failed")
+	# 移动结束不再鼓阵。
+	if not board.try_move(drum, Vector2i(2, 3)):
+		push_error("TacticalUnits: wardrum move setup failed")
 		return false
-	if GridMathScript.chebyshev(drum.cell, archer.cell) > 2:
-		push_error("TacticalUnits: archer should remain in drum radius")
+	if archer.atk_bonus != before_atk:
+		push_error("TacticalUnits: wardrum move end must no longer buff")
 		return false
-	if archer.effective_attack() != before_atk + 1:
-		push_error("TacticalUnits: wardrum move end should +1 atk nearby")
+	drum.cell = Vector2i(2, 2)
+	archer.cell = Vector2i(3, 2)
+	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board)
+	if logs.is_empty():
+		push_error("TacticalUnits: wardrum attack-card buff should log")
+		return false
+	if archer.atk_bonus != before_atk + 1:
+		push_error("TacticalUnits: wardrum attack card should +1 atk nearby")
 		return false
 	if archer.effective_max_hp() != before_max + 1 or archer.hp != before_hp + 1:
-		push_error("TacticalUnits: wardrum move end should +1 hp nearby")
+		push_error("TacticalUnits: wardrum attack card should +1 hp nearby")
 		return false
-	# 行动段开始不再鸣鼓。
-	var atk_mid := archer.effective_attack()
-	TacticalAbilitySystemScript.process_side_turn_start(board, TacticalFactionScript.Id.PLAYER)
-	if archer.effective_attack() != atk_mid:
-		push_error("TacticalUnits: side turn must not buff via wardrum anymore")
+	# 半径 1：距离 2 不吃。
+	var pekka := _player_unit(board, "mini_pekka")
+	if pekka == null:
+		return false
+	pekka.cell = Vector2i(4, 2)
+	var pekka_atk := pekka.atk_bonus
+	TacticalAbilitySystemScript.process_player_attack_card_played(board)
+	if pekka.atk_bonus != pekka_atk:
+		push_error("TacticalUnits: wardrum buff radius is 1, dist 2 must miss")
+		return false
+	# 鼓手自身不吃。
+	var drum_atk := drum.atk_bonus
+	TacticalAbilitySystemScript.process_player_attack_card_played(board)
+	if drum.atk_bonus != drum_atk:
+		push_error("TacticalUnits: wardrum must not buff self")
 		return false
 	return true
 
@@ -624,5 +665,41 @@ func _test_knight_knockback_collision() -> bool:
 		return false
 	if res.get("collision_target") != archer:
 		push_error("TacticalUnits: collision target should be archer")
+		return false
+	return true
+
+
+func _test_universal_knockback_non_knight() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var pekka := _player_unit(board, "mini_pekka")
+	var foe := _opponent_unit(board, "rider")
+	if pekka == null or foe == null:
+		return false
+	pekka.cell = Vector2i(2, 2)
+	foe.cell = Vector2i(3, 2)
+	_vacate_cell(board, Vector2i(4, 2))
+	foe.hp = 99
+	var expect_to := Vector2i(4, 2)
+	var res := TacticalCombatScript.try_basic_attack(
+		board, pekka, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not res["ok"] or not res.get("knockback_moved", false) or foe.cell != expect_to:
+		push_error("TacticalUnits: non-knight attack should knockback 1")
+		return false
+	# 敌方攻击同样击退。
+	var rider := foe
+	var ally := _player_unit(board, "wardrum")
+	if ally == null:
+		return false
+	rider.cell = Vector2i(5, 5)
+	ally.cell = Vector2i(5, 4)
+	_vacate_cell(board, Vector2i(5, 3))
+	ally.hp = 99
+	rider.attacked_this_side_turn = false
+	var res2 := TacticalCombatScript.try_basic_attack(
+		board, rider, ally.cell, TacticalFactionScript.Id.OPPONENT
+	)
+	if not res2["ok"] or not res2.get("knockback_moved", false) or ally.cell != Vector2i(5, 3):
+		push_error("TacticalUnits: enemy attack should knockback too")
 		return false
 	return true

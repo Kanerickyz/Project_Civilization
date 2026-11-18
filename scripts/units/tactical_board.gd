@@ -268,9 +268,10 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 		hurt_logs.append_array(TacticalAbilitySystem.process_unit_hurt(self, target, hp_damage))
 	if not target.is_alive():
 		result["killed"] = true
-		# 先死亡触发（爆燃等），再记击杀者被动；死亡单位仍可读 cell。
+		# 先死亡触发（爆燃等），再友方阵亡被动，再记击杀者被动；死亡单位仍可读 cell。
 		var death_logs := TacticalAbilitySystem.process_unit_death(self, target)
 		hurt_logs.append_array(death_logs)
+		hurt_logs.append_array(TacticalAbilitySystem.process_ally_death(self, target))
 		if source != null and source != target:
 			var kill_logs := TacticalAbilitySystem.process_unit_kill(self, source, target)
 			hurt_logs.append_array(kill_logs)
