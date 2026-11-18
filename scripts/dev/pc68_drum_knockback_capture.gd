@@ -58,7 +58,7 @@ func _initialize() -> void:
 	board.changed.emit()
 	await create_timer(0.2, true, false, true).timeout
 
-	# 模拟打出攻击牌：鼓手邻格 +1/+1，游侠抽牌（有牌库时）。
+	# 模拟打出攻击牌：鼓手邻格 +1/+1（游侠已无出牌抽牌被动）。
 	TacticalAbilitySystem.process_player_attack_card_played(board)
 	board.changed.emit()
 

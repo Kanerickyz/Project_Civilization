@@ -10,7 +10,7 @@ signal changed
 var grid_width: int = 10
 var grid_height: int = 8
 var units: Array[TacticalUnitInstance] = []
-## 玩家牌库弱引用（游侠击杀加临时攻卡）；对手 AI 无。
+## 玩家牌库弱引用（被动抽牌 / 临时攻卡工具）；对手 AI 无。
 var player_deck: TacticalCardDeck = null
 ## Vector2i -> StringName（TerrainCatalog id）；缺省格为默认地块。
 var _terrain: Dictionary = {}

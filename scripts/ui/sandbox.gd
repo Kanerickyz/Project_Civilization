@@ -1168,7 +1168,7 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	_check_victory()
 	_input_locked = false
 	_refresh_all()
-	# 攻击/击杀补牌（如游侠猎获）结算完后再判空手。
+	# 攻击/友方死亡抽牌等补牌结算完后再判空手。
 	_maybe_auto_end_player_turn_if_hand_empty()
 
 
@@ -1350,7 +1350,7 @@ func _on_deploy_cell_clicked(cell: Vector2i) -> void:
 	_refresh_all()
 
 
-## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、游侠猎获等补牌结算之后调用；
+## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、盾卫友方死亡抽牌等补牌结算之后调用；
 ## 攻/隐身/冲撞瞄准未完成时不触发（卡已离手但仍待点目标）。
 ## 先锁输入再 deferred 启动，避免同步结算路径丢弃 async、或间隙里重入把钟多拨一次。
 func _maybe_auto_end_player_turn_if_hand_empty() -> void:
@@ -1692,7 +1692,7 @@ func capture_play_charge_toward(dir_cell: Vector2i) -> bool:
 	return true
 
 
-## 鼓手/游侠等：打出攻击牌时的触发被动日志拼到 _last_log，并播飘字。
+## 鼓手等：打出攻击牌时的触发被动日志拼到 _last_log，并播飘字。
 func _append_attack_card_passive_logs() -> void:
 	var fx: Array = []
 	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board, fx)

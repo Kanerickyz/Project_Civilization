@@ -19,7 +19,7 @@ func _initialize() -> void:
 	if not _test_archer_min_attack_range():
 		quit(1)
 		return
-	if not _test_archer_attack_card_draws():
+	if not _test_archer_no_attack_card_draw_passive():
 		quit(1)
 		return
 	if not _test_knight_ally_death_draws():
@@ -235,42 +235,40 @@ func _test_archer_min_attack_range() -> bool:
 	return true
 
 
-func _test_archer_attack_card_draws() -> bool:
+func _test_archer_no_attack_card_draw_passive() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var deck: TacticalCardDeck = TacticalCardDeckScript.new()
 	board.player_deck = deck
 	deck.build_from_living_player_units(board)
-	# 把库里的牌留在抽牌堆，便于断言抽 1。
 	deck.hand.clear()
 	deck.discard_pile.clear()
 	var archer := _player_unit(board, "archer")
 	if archer == null:
 		return false
-	if archer.def.triggered_ability == null or archer.def.triggered_ability.draw_cards_on_trigger != 1:
-		push_error("TacticalUnits: archer passive should draw 1 on attack card")
+	if archer.def.triggered_ability != null:
+		push_error("TacticalUnits: archer should have no triggered passive")
 		return false
 	var hand_before := deck.hand.size()
 	var draw_before := deck.draw_pile.size()
 	var fx: Array = []
 	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board, fx)
-	if logs.is_empty():
-		push_error("TacticalUnits: archer attack-card passive should log")
-		return false
-	if deck.hand.size() != hand_before + 1:
-		push_error("TacticalUnits: archer should draw 1 on attack card")
-		return false
-	var saw_draw_fx := false
+	for line in logs:
+		if str(line).begins_with("游侠"):
+			push_error("TacticalUnits: archer must not log on attack card, got %s" % [logs])
+			return false
 	for ev in fx:
-		if ev is Dictionary and str((ev as Dictionary).get("text", "")) == "+1牌":
-			saw_draw_fx = true
-			break
-	if not saw_draw_fx:
-		push_error("TacticalUnits: archer passive should emit +1牌 fx")
+		if ev is Dictionary and str((ev as Dictionary).get("text", "")).ends_with("牌"):
+			# 游侠已无箭袋；若仍有抽牌飘字，不得挂在游侠格上。
+			if (ev as Dictionary).get("cell", Vector2i(-1, -1)) == archer.cell:
+				push_error("TacticalUnits: archer must not emit draw fx")
+				return false
+	if deck.hand.size() != hand_before:
+		push_error("TacticalUnits: attack card must not draw via archer")
 		return false
-	if deck.draw_pile.size() != draw_before - 1 and draw_before > 0:
-		push_error("TacticalUnits: draw should come from draw pile")
+	if deck.draw_pile.size() != draw_before:
+		push_error("TacticalUnits: archer must not consume draw pile")
 		return false
-	# 击杀不再发临时攻卡。
+	# 击杀也不发临时攻卡。
 	var foe := _opponent_unit(board, "rider")
 	if foe == null:
 		return false
