@@ -6,7 +6,7 @@
 
 | 显示名 | id | 移动距离 | 对手移力池 | 攻击距离 | 说明 |
 |--------|-----|----------|------------|----------|------|
-| 盾卫 | `knight` | 2 | — | 1 | 前排近战；击退见 [ATTACK_KNOCKBACK.md](./ATTACK_KNOCKBACK.md) |
+| 盾卫 | `knight` | 2 | — | 1 | 前排近战；击退见 [ATTACK_KNOCKBACK.md](./ATTACK_KNOCKBACK.md)；主动冲撞见 [KNIGHT_CHARGE.md](./KNIGHT_CHARGE.md) |
 | 游侠 | `archer` | 3 | — | **2–3**（`attack_range_min=1`） | 远程；不可打邻格（距离 ≤1） |
 | 大剑 | `mini_pekka` | 2 | — | 1 | 慢速重击 |
 | 鼓手 | `wardrum` | 3 | — | 1 | 支援机动 |

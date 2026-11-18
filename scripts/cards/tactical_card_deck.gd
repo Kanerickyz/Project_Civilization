@@ -316,8 +316,11 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 			# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
 			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK))
 		"knight":
-			# 护甲卡已解绑：按 kind 减 1（盾卫阵亡仍 cull 一张）。
+			# 护甲卡已解绑：按 kind 减 1；冲撞按 bound cull。
 			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_ARMOR))
+			removed += _remove_one_bound_skill(
+				int(TacticalActionCard.Kind.SKILL_CHARGE), unit_id
+			)
 	var cleared_auth := false
 	if attack_bonus_queues.has(unit):
 		attack_bonus_queues.erase(unit)
@@ -350,8 +353,9 @@ static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCar
 			out.append(TacticalActionCardScript.make_skill_draw("wardrum"))
 			out.append(TacticalActionCardScript.make_skill_inspire("wardrum"))
 		"knight":
-			# 盾卫贡献 1 张通用护甲（不绑角色）。
+			# 盾卫：通用护甲 1 + 绑定冲撞 1。
 			out.append(TacticalActionCardScript.make_skill_armor(SKILL_ARMOR_GRANT))
+			out.append(TacticalActionCardScript.make_skill_charge("knight"))
 		"mini_pekka":
 			# 大剑贡献 1 张通用加强攻（不绑角色）。
 			out.append(TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS))

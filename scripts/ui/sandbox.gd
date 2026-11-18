@@ -18,7 +18,7 @@ const TacticalUnitInfoCardScript := preload("res://scripts/ui/tactical_unit_info
 const KillImpactFxScript := preload("res://scripts/ui/kill_impact_fx.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
-enum PendingKind { NONE, MOVE, ATTACK, STEALTH }
+enum PendingKind { NONE, MOVE, ATTACK, STEALTH, CHARGE }
 
 var _clock: TurnClock
 var _turn_label: Label
@@ -486,6 +486,8 @@ func _refresh_all() -> void:
 			move_cells = _board.reachable_move_cells(_focus_unit)
 		elif _pending_kind == PendingKind.ATTACK:
 			attack_cells = _board.attack_range_cells(_focus_unit)
+		elif _pending_kind == PendingKind.CHARGE:
+			attack_cells = TacticalCombatScript.charge_preview_cells(_board, _focus_unit.cell)
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
 		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）
@@ -525,6 +527,8 @@ func _compose_hint() -> String:
 		return "攻击中：%s · 点红圈内单位" % _focus_unit.def.display_name
 	if _pending_kind == PendingKind.STEALTH and _focus_unit != null:
 		return "隐身：%s · 点任意存活单位" % _focus_unit.def.display_name
+	if _pending_kind == PendingKind.CHARGE and _focus_unit != null:
+		return "冲撞：%s · 点红圈方向格（最多 3 格）" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
 	return "点己方移动 · 通用卡拖单位 · 技能卡短按/拖棋盘 · 库 %d · 弃 %d" % [
@@ -815,6 +819,9 @@ func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitIns
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_STEALTH:
 		_pending_kind = PendingKind.STEALTH
 		_last_log = "隐身：%s · 点任意存活单位" % target.def.display_name
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_CHARGE:
+		_pending_kind = PendingKind.CHARGE
+		_last_log = "冲撞：%s · 点红圈方向格（最多 3 格；路径单位受伤并撞开）" % target.def.display_name
 	elif card.is_attack_aim():
 		var is_volley := card.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
 		_deck.authorize_attack(
@@ -960,6 +967,18 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		_maybe_auto_end_player_turn_if_hand_empty()
 		return
 
+	# 盾卫冲撞瞄准：点方向格（红圈内）。
+	if _pending_kind == PendingKind.CHARGE and _focus_unit != null:
+		var charge_cells: Array[Vector2i] = TacticalCombatScript.charge_preview_cells(
+			_board, _focus_unit.cell
+		)
+		if cell in charge_cells:
+			_run_player_charge_async(cell)
+			return
+		_last_log = "请点红圈方向格，或取消目标"
+		_refresh_all()
+		return
+
 	# 无待结算卡：点己方进入移动；点敌方查看；点空地提示。
 	if clicked != null:
 		_selected_unit = clicked
@@ -992,6 +1011,69 @@ func _select_player_for_move(unit: TacticalUnitInstance) -> void:
 	else:
 		_pending_kind = PendingKind.NONE
 		_last_log = "%s 本段移力已用尽 · 攻击请拖卡" % unit.def.display_name
+
+
+func _run_player_charge_async(target_cell: Vector2i) -> void:
+	if _input_locked or _focus_unit == null:
+		return
+	var knight := _focus_unit
+	_input_locked = true
+	_refresh_action_buttons()
+	var res := TacticalCombatScript.try_knight_charge(_board, knight, target_cell)
+	_last_log = str(res.get("log", "冲撞"))
+	if not res.get("ok", false):
+		_input_locked = false
+		_refresh_all()
+		return
+	_pending_kind = PendingKind.NONE
+	# 逻辑已落到终格；一次 refresh 播冲撞位移 Tween，再反馈路径命中。
+	_refresh_all()
+	var path: Array = res.get("path", []) as Array
+	if not path.is_empty():
+		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+	var hits: Array = res.get("hits", []) as Array
+	for hit in hits:
+		if hit is Dictionary:
+			await _feedback_from_charge_hit(hit as Dictionary)
+	if int(res.get("self_damage", 0)) > 0 and knight != null:
+		_board_view.play_damage_popup(knight.cell, int(res["self_damage"]))
+		_board_view.play_unit_hit(knight)
+		if bool(res.get("self_killed", false)):
+			_purge_dead_unit_cards(knight)
+			_board_view.play_unit_death(knight)
+			_play_kill_impact()
+			if _selected_unit == knight:
+				_selected_unit = null
+			if _focus_unit == knight:
+				_focus_unit = null
+	if knight != null and knight.is_alive() and knight.remaining_move_budget > 0:
+		_pending_kind = PendingKind.MOVE
+		_focus_unit = knight
+	_check_victory()
+	_input_locked = false
+	_refresh_all()
+	_maybe_auto_end_player_turn_if_hand_empty()
+
+
+func _feedback_from_charge_hit(hit: Dictionary) -> void:
+	var vu: TacticalUnitInstance = hit.get("unit") as TacticalUnitInstance
+	var vcell: Vector2i = hit.get("cell", Vector2i(-1, -1)) as Vector2i
+	var vdmg: int = int(hit.get("damage", 0))
+	if vu == null or vdmg <= 0:
+		return
+	_board_view.play_damage_popup(vcell if vcell.x >= 0 else vu.cell, vdmg)
+	_board_view.play_unit_hit(vu)
+	if bool(hit.get("killed", false)):
+		_purge_dead_unit_cards(vu)
+		_board_view.play_unit_death(vu)
+		_play_kill_impact()
+		if _selected_unit == vu:
+			_selected_unit = null
+		if _focus_unit == vu:
+			_focus_unit = null
+	elif bool(hit.get("knock_moved", false)) and vu.is_alive():
+		_refresh_all()
+		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
 
 
 func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstance) -> void:
@@ -1185,13 +1267,17 @@ func _on_deploy_cell_clicked(cell: Vector2i) -> void:
 
 
 ## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、游侠猎获等补牌结算之后调用；
-## 攻/隐身瞄准未完成时不触发（卡已离手但仍待点目标）。
+## 攻/隐身/冲撞瞄准未完成时不触发（卡已离手但仍待点目标）。
 func _maybe_auto_end_player_turn_if_hand_empty() -> void:
 	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
 		return
 	if _deck == null or not _deck.hand.is_empty():
 		return
-	if _pending_kind == PendingKind.ATTACK or _pending_kind == PendingKind.STEALTH:
+	if (
+		_pending_kind == PendingKind.ATTACK
+		or _pending_kind == PendingKind.STEALTH
+		or _pending_kind == PendingKind.CHARGE
+	):
 		return
 	_last_log = "手牌已打完 · 自动结束行动"
 	_on_end_turn_pressed()
@@ -1383,7 +1469,7 @@ func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
-## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire | skill_stealth | skill_volley
+## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire | skill_stealth | skill_volley | skill_charge
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want := TacticalActionCardScript.Kind.MOVE
 	match kind_name:
@@ -1403,6 +1489,8 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			want = TacticalActionCardScript.Kind.SKILL_STEALTH
 		"skill_volley":
 			want = TacticalActionCardScript.Kind.SKILL_VOLLEY
+		"skill_charge":
+			want = TacticalActionCardScript.Kind.SKILL_CHARGE
 		_:
 			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
@@ -1447,6 +1535,8 @@ func capture_skill_drag_preview(kind_name: String, hover_unit_id: String = "") -
 			want = TacticalActionCardScript.Kind.SKILL_STEALTH
 		"skill_volley":
 			want = TacticalActionCardScript.Kind.SKILL_VOLLEY
+		"skill_charge":
+			want = TacticalActionCardScript.Kind.SKILL_CHARGE
 		_:
 			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
 	var peek: TacticalActionCard = null
@@ -1478,6 +1568,19 @@ func capture_skill_drag_preview(kind_name: String, hover_unit_id: String = "") -
 	_board_view.set_skill_drag_preview(caster.cell, hover_cell, release_cells, true)
 	_last_log = "拖技预览：%s → %s" % [peek.display_label(), hover_cell]
 	_refresh_hand_ui()
+	return true
+
+
+## GUI 验收：打出冲撞卡并瞄准到指定方向格（不等动画跑完时可先置位）。
+func capture_play_charge_toward(dir_cell: Vector2i) -> bool:
+	if not capture_drop_first_card_on_unit("skill_charge", "knight"):
+		return false
+	if _pending_kind != PendingKind.CHARGE or _focus_unit == null:
+		return false
+	var cells: Array[Vector2i] = TacticalCombatScript.charge_preview_cells(_board, _focus_unit.cell)
+	if not (dir_cell in cells):
+		return false
+	_run_player_charge_async(dir_cell)
 	return true
 
 
