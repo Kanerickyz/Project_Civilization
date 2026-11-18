@@ -42,6 +42,9 @@ func _initialize() -> void:
 	if not _test_wolf_melee_range_one():
 		quit(1)
 		return
+	if not _test_wolf_initial_intent_random():
+		quit(1)
+		return
 	print("GAME_LOOP_OK")
 	quit(0)
 
@@ -289,9 +292,8 @@ func _test_wolf_intent_attack_then_advance() -> bool:
 			foe = u
 	if player == null or foe == null:
 		return false
-	if foe.next_intent != TacticalEnemyAiScript.Intent.ATTACK:
-		push_error("GameLoop: rider should start with attack intent")
-		return false
+	# 开战初相已随机；本用例固定攻击以验推进。
+	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
 	player.cell = foe.cell + Vector2i(1, 0)
 	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
 	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
@@ -300,6 +302,63 @@ func _test_wolf_intent_attack_then_advance() -> bool:
 		return false
 	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
 		push_error("GameLoop: after attack intent should advance to move")
+		return false
+	return true
+
+
+## 开战初相：三相独立随机；固定种子应覆盖攻击/移动/支援，且不同种子可不同。
+func _test_wolf_initial_intent_random() -> bool:
+	var seen_attack := false
+	var seen_move := false
+	var seen_support := false
+	for seed_i in range(64):
+		var rng := RandomNumberGenerator.new()
+		rng.seed = seed_i
+		var intent := TacticalEnemyAiScript.roll_initial_intent(rng)
+		match intent:
+			TacticalEnemyAiScript.Intent.ATTACK:
+				seen_attack = true
+			TacticalEnemyAiScript.Intent.MOVE:
+				seen_move = true
+			TacticalEnemyAiScript.Intent.HEAL, TacticalEnemyAiScript.Intent.BUFF_ATK:
+				seen_support = true
+			_:
+				push_error("GameLoop: invalid initial intent %d" % intent)
+				return false
+	if not (seen_attack and seen_move and seen_support):
+		push_error(
+			"GameLoop: initial intent roll must cover attack/move/support over seeds"
+		)
+		return false
+
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var riders: Array[TacticalUnitInstance] = []
+	for u in board.living_units():
+		if TacticalEnemyAiScript.uses_behavior_sm(u):
+			riders.append(u)
+	if riders.size() < 2:
+		push_error("GameLoop: need >=2 riders for independent initial intents")
+		return false
+	for r in riders:
+		var ok_intent := (
+			r.next_intent == TacticalEnemyAiScript.Intent.ATTACK
+			or r.next_intent == TacticalEnemyAiScript.Intent.MOVE
+			or r.next_intent == TacticalEnemyAiScript.Intent.HEAL
+			or r.next_intent == TacticalEnemyAiScript.Intent.BUFF_ATK
+		)
+		if not ok_intent:
+			push_error("GameLoop: spawned rider has invalid next_intent")
+			return false
+
+	# 多局布阵：至少出现过两种不同初相（避免「全员同一操作」回归）。
+	var kinds: Dictionary = {}
+	for _i in range(24):
+		var b2 := TacticalSandboxRosterScript.build_demo_board(10, 8)
+		for u2 in b2.living_units():
+			if TacticalEnemyAiScript.uses_behavior_sm(u2):
+				kinds[u2.next_intent] = true
+	if kinds.size() < 2:
+		push_error("GameLoop: spawned riders should not all share one initial intent")
 		return false
 	return true
 
