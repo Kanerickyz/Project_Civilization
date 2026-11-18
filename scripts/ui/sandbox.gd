@@ -755,7 +755,10 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_pending_kind = PendingKind.STEALTH
 		_last_log = "隐身：%s · 点任意存活单位" % target.def.display_name
 	elif card.is_attack_aim():
-		_deck.authorize_attack(target, card.attack_bonus_damage, card.aoe_burn_stacks)
+		var is_volley := card.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
+		_deck.authorize_attack(
+			target, card.attack_bonus_damage, card.aoe_burn_stacks, is_volley
+		)
 		_pending_kind = PendingKind.ATTACK
 		if card.kind == TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK:
 			_last_log = "加强攻击：%s · 额外+%d · 点红圈内单位（含友方；本卡一次）" % [
@@ -767,6 +770,8 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 				target.def.display_name,
 				card.aoe_burn_stacks,
 			]
+		elif is_volley:
+			_last_log = "万箭齐发：%s · 目标及攻击方向左右两格 · 点红圈内单位" % target.def.display_name
 		else:
 			_last_log = "攻击者：%s · 点红圈内单位（含友方；本卡一次）" % target.def.display_name
 		_append_attack_card_passive_logs()
@@ -938,6 +943,7 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	_refresh_action_buttons()
 	var bonus := _deck.pending_attack_bonus
 	var burn_stacks := _deck.pending_aoe_burn_stacks
+	var volley := _deck.pending_volley
 	var atk := TacticalCombatScript.try_basic_attack(
 		_board,
 		attacker,
@@ -945,7 +951,8 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		TacticalFactionScript.Id.PLAYER,
 		true,
 		bonus,
-		burn_stacks
+		burn_stacks,
+		volley
 	)
 	_last_log = atk["log"]
 	if not atk["ok"]:
@@ -1000,6 +1007,25 @@ func _feedback_from_attack(
 			if _selected_unit == col:
 				_selected_unit = null
 			if _focus_unit == col:
+				_focus_unit = null
+				_pending_kind = PendingKind.NONE
+	var volley_hits: Array = res.get("volley_hits", []) as Array
+	for hit in volley_hits:
+		if not (hit is Dictionary):
+			continue
+		var vu: TacticalUnitInstance = (hit as Dictionary).get("unit") as TacticalUnitInstance
+		var vcell: Vector2i = (hit as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+		var vdmg: int = int((hit as Dictionary).get("damage", 0))
+		if vu == null or vdmg <= 0:
+			continue
+		_board_view.play_damage_popup(vcell if vcell.x >= 0 else vu.cell, vdmg)
+		_board_view.play_unit_hit(vu)
+		if bool((hit as Dictionary).get("killed", false)):
+			_purge_dead_unit_cards(vu)
+			_board_view.play_unit_death(vu)
+			if _selected_unit == vu:
+				_selected_unit = null
+			if _focus_unit == vu:
 				_focus_unit = null
 				_pending_kind = PendingKind.NONE
 	# 击退成功：refresh 触发从旧格到新格的位移 Tween（可见推开，禁止瞬移）。
@@ -1245,7 +1271,7 @@ func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
-## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire | skill_stealth
+## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire | skill_stealth | skill_volley
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want := TacticalActionCardScript.Kind.MOVE
 	match kind_name:
@@ -1263,6 +1289,8 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			want = TacticalActionCardScript.Kind.SKILL_INSPIRE
 		"skill_stealth":
 			want = TacticalActionCardScript.Kind.SKILL_STEALTH
+		"skill_volley":
+			want = TacticalActionCardScript.Kind.SKILL_VOLLEY
 		_:
 			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
@@ -1305,7 +1333,12 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 		_pending_kind = PendingKind.STEALTH
 		_last_log = "隐身：%s · 点任意存活单位" % unit.def.display_name
 	elif card.is_attack_aim():
-		_deck.authorize_attack(unit, card.attack_bonus_damage, card.aoe_burn_stacks)
+		_deck.authorize_attack(
+			unit,
+			card.attack_bonus_damage,
+			card.aoe_burn_stacks,
+			card.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
+		)
 		_pending_kind = PendingKind.ATTACK
 		_append_attack_card_passive_logs()
 	else:

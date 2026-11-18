@@ -12,6 +12,7 @@ enum Kind {
 	SKILL_ARMOR,
 	SKILL_INSPIRE,
 	SKILL_STEALTH,
+	SKILL_VOLLEY,
 }
 
 var kind: Kind = Kind.MOVE
@@ -45,7 +46,7 @@ func _init(
 
 func is_valid() -> bool:
 	match kind:
-		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH:
+		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH, Kind.SKILL_VOLLEY:
 			return true
 		_:
 			return false
@@ -56,6 +57,7 @@ func is_attack_aim() -> bool:
 		kind == Kind.ATTACK
 		or kind == Kind.SKILL_STRONG_ATTACK
 		or kind == Kind.SKILL_BURN_ATTACK
+		or kind == Kind.SKILL_VOLLEY
 	)
 
 
@@ -71,6 +73,7 @@ func is_active_skill() -> bool:
 		or kind == Kind.SKILL_ARMOR
 		or kind == Kind.SKILL_INSPIRE
 		or kind == Kind.SKILL_STEALTH
+		or kind == Kind.SKILL_VOLLEY
 	)
 
 
@@ -95,6 +98,8 @@ func kind_label() -> String:
 			return "鼓舞"
 		Kind.SKILL_STEALTH:
 			return "隐身"
+		Kind.SKILL_VOLLEY:
+			return "万箭齐发"
 		_:
 			return "移动"
 
@@ -124,6 +129,10 @@ func rules_detail() -> String:
 			return "只能拖到鼓手：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
 		Kind.SKILL_STEALTH:
 			return "只能拖到刺客：再点任意存活单位，令其隐身（敌方不可选为目标；攻击/受伤/加状态取消）。"
+		Kind.SKILL_VOLLEY:
+			return (
+				"只能拖到游侠：选定后点红圈内单位；对目标格及相对攻击方向垂直左右两格造成伤害。"
+			)
 		_:
 			return ""
 
@@ -179,3 +188,8 @@ static func make_skill_inspire(bound_id: String = "wardrum") -> TacticalActionCa
 ## 刺客主动技：必须拖到刺客；再点目标单位令其隐身。
 static func make_skill_stealth(bound_id: String = "assassin") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_STEALTH, bound_id)
+
+
+## 游侠主动技「万箭齐发」：必须拖到游侠；目标格 + 攻击方向垂直左右两格受伤。
+static func make_skill_volley(bound_id: String = "archer") -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_VOLLEY, bound_id)

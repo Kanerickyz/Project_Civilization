@@ -17,13 +17,15 @@ var draw_count: int = 5
 var draw_pile: Array[TacticalActionCard] = []
 var hand: Array[TacticalActionCard] = []
 var discard_pile: Array[TacticalActionCard] = []
-## 本段攻击授权队列：单位 → Array[Dictionary]（bonus / burn 键）。
+## 本段攻击授权队列：单位 → Array[Dictionary]（bonus / burn / volley 键）。
 ## 同单位连拖多张攻击卡会入队多次，可连续结算多次攻击。
 var attack_bonus_queues: Dictionary = {}
 ## 当前瞄准中下一次普攻额外伤害（队首）；无队列时为 0。
 var pending_attack_bonus: int = 0
 ## 当前瞄准中下一次攻击的 AoE 燃烧层数（队首）。
 var pending_aoe_burn_stacks: int = 0
+## 当前瞄准中下一次是否万箭齐发（队首）。
+var pending_volley: bool = false
 
 const SKILL_BURN_STACKS := 3
 
@@ -58,12 +60,13 @@ func clear() -> void:
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
+	pending_volley = false
 	_draw_pile_shuffled = false
 	_same_turn_locked_discards.clear()
 	changed.emit()
 
 
-## 按场上己方存活：每人通用攻 1；另按角色贡献主动技（游侠无）。移动不经牌库。绝不收录敌方。
+## 按场上己方存活：每人通用攻 1；另按角色贡献主动技。移动不经牌库。绝不收录敌方。
 func build_from_living_player_units(board: TacticalBoard) -> void:
 	clear()
 	if board == null:
@@ -93,6 +96,7 @@ func begin_player_turn() -> void:
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
+	pending_volley = false
 	draw_up_to(draw_count)
 
 
@@ -101,6 +105,7 @@ func end_player_turn() -> void:
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
+	pending_volley = false
 	# 锁定保留到下一段 begin，避免段末到抽牌之间被其它路径洗回。
 
 
@@ -165,17 +170,26 @@ func resolve_wardrum_redraw() -> int:
 	return draw_up_to(draw_count)
 
 
-## 打出攻击/加强攻击/燃爆攻卡：入队一次攻击授权；额外伤害与燃烧层数随该次入队。
+## 打出攻击/加强攻击/燃爆/万箭齐发卡：入队一次攻击授权；额外伤害、燃烧、齐发随该次入队。
 ## 同单位可连拖多张，队列累加；不使用 attacked_this_side_turn（玩家无段内攻次预算）。
 func authorize_attack(
-	unit: TacticalUnitInstance, bonus_damage: int = 0, aoe_burn_stacks: int = 0
+	unit: TacticalUnitInstance,
+	bonus_damage: int = 0,
+	aoe_burn_stacks: int = 0,
+	volley: bool = false
 ) -> bool:
 	if unit == null or not unit.is_alive():
 		return false
 	if unit.faction != TacticalFactionScript.Id.PLAYER:
 		return false
 	var q: Array = attack_bonus_queues.get(unit, [])
-	q.append({"bonus": maxi(0, bonus_damage), "burn": maxi(0, aoe_burn_stacks)})
+	q.append(
+		{
+			"bonus": maxi(0, bonus_damage),
+			"burn": maxi(0, aoe_burn_stacks),
+			"volley": volley,
+		}
+	)
 	attack_bonus_queues[unit] = q
 	_sync_pending_attack_bonus(unit)
 	changed.emit()
@@ -184,9 +198,12 @@ func authorize_attack(
 
 ## 兼容旧名：等同 authorize_attack。
 func prepare_attack(
-	unit: TacticalUnitInstance, bonus_damage: int = 0, aoe_burn_stacks: int = 0
+	unit: TacticalUnitInstance,
+	bonus_damage: int = 0,
+	aoe_burn_stacks: int = 0,
+	volley: bool = false
 ) -> bool:
-	return authorize_attack(unit, bonus_damage, aoe_burn_stacks)
+	return authorize_attack(unit, bonus_damage, aoe_burn_stacks, volley)
 
 
 ## 一次成功攻击后消耗队首授权（一张攻击卡只结算一次）；若仍有余次则 pending 跟到下一次。
@@ -236,12 +253,15 @@ func _sync_pending_attack_bonus(unit: TacticalUnitInstance) -> void:
 		if q.is_empty():
 			pending_attack_bonus = 0
 			pending_aoe_burn_stacks = 0
+			pending_volley = false
 		else:
 			pending_attack_bonus = _entry_bonus(q[0])
 			pending_aoe_burn_stacks = _entry_burn(q[0])
+			pending_volley = _entry_volley(q[0])
 	else:
 		pending_attack_bonus = 0
 		pending_aoe_burn_stacks = 0
+		pending_volley = false
 
 
 static func _entry_bonus(entry: Variant) -> int:
@@ -254,6 +274,12 @@ static func _entry_burn(entry: Variant) -> int:
 	if entry is Dictionary:
 		return int((entry as Dictionary).get("burn", 0))
 	return 0
+
+
+static func _entry_volley(entry: Variant) -> bool:
+	if entry is Dictionary:
+		return bool((entry as Dictionary).get("volley", false))
+	return false
 
 
 ## 己方阵亡：减通用攻 1；绑角色主动技按 owner 减 1；通用加强攻按贡献者减 1；清攻授权。
@@ -281,6 +307,10 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 		"assassin":
 			removed += _remove_one_bound_skill(
 				int(TacticalActionCard.Kind.SKILL_STEALTH), unit_id
+			)
+		"archer":
+			removed += _remove_one_bound_skill(
+				int(TacticalActionCard.Kind.SKILL_VOLLEY), unit_id
 			)
 		"mini_pekka":
 			# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
@@ -331,6 +361,8 @@ static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCar
 			)
 		"assassin":
 			out.append(TacticalActionCardScript.make_skill_stealth("assassin"))
+		"archer":
+			out.append(TacticalActionCardScript.make_skill_volley("archer"))
 	return out
 
 

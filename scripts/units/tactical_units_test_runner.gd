@@ -58,6 +58,9 @@ func _initialize() -> void:
 	if not _test_universal_knockback_non_knight():
 		quit(1)
 		return
+	if not _test_archer_volley_side_damage():
+		quit(1)
+		return
 	print("TACTICAL_UNITS_OK")
 	quit(0)
 
@@ -701,5 +704,67 @@ func _test_universal_knockback_non_knight() -> bool:
 	)
 	if not res2["ok"] or not res2.get("knockback_moved", false) or ally.cell != Vector2i(5, 3):
 		push_error("TacticalUnits: enemy attack should knockback too")
+		return false
+	return true
+
+
+func _test_archer_volley_side_damage() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer := _player_unit(board, "archer")
+	var foe_mid := _opponent_unit(board, "rider")
+	var foe_left: TacticalUnitInstance = null
+	var foe_right: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.OPPONENT or u == foe_mid:
+			continue
+		if foe_left == null:
+			foe_left = u
+		elif foe_right == null:
+			foe_right = u
+			break
+	if archer == null or foe_mid == null or foe_left == null or foe_right == null:
+		push_error("TacticalUnits: volley needs archer + 3 foes")
+		return false
+	# 游侠在 (2,2) 打 (4,2)：方向 (1,0)，侧格 (4,1)/(4,3)。
+	board.set_terrain_cells({})
+	archer.cell = Vector2i(2, 2)
+	foe_mid.cell = Vector2i(4, 2)
+	foe_left.cell = Vector2i(4, 1)
+	foe_right.cell = Vector2i(4, 3)
+	_vacate_cell(board, Vector2i(5, 2))
+	foe_mid.hp = 99
+	foe_left.hp = 99
+	foe_right.hp = 99
+	var splash := archer.effective_attack()
+	var sides := TacticalCombatScript.volley_side_cells(archer.cell, foe_mid.cell)
+	if sides.size() != 2 or not sides.has(Vector2i(4, 1)) or not sides.has(Vector2i(4, 3)):
+		push_error("TacticalUnits: volley side cells wrong %s" % [sides])
+		return false
+	var res := TacticalCombatScript.try_basic_attack(
+		board, archer, foe_mid.cell, TacticalFactionScript.Id.PLAYER, true, 0, 0, true
+	)
+	if not res["ok"]:
+		push_error("TacticalUnits: volley primary should ok")
+		return false
+	var hits: Array = res.get("volley_hits", []) as Array
+	if hits.size() != 2:
+		push_error("TacticalUnits: volley should hit 2 sides, got %d" % hits.size())
+		return false
+	if foe_left.hp != 99 - splash or foe_right.hp != 99 - splash:
+		push_error("TacticalUnits: volley side dmg want %d" % splash)
+		return false
+	# 无 volley 标志时不溅射。
+	foe_left.hp = 99
+	foe_right.hp = 99
+	foe_mid.cell = Vector2i(4, 2)
+	_vacate_cell(board, Vector2i(5, 2))
+	var res2 := TacticalCombatScript.try_basic_attack(
+		board, archer, foe_mid.cell, TacticalFactionScript.Id.PLAYER, true, 0, 0, false
+	)
+	if not res2["ok"] or (res2.get("volley_hits", []) as Array).size() != 0:
+		push_error("TacticalUnits: normal attack must not volley")
+		return false
+	if foe_left.hp != 99 or foe_right.hp != 99:
+		push_error("TacticalUnits: normal attack must not splash sides")
 		return false
 	return true

@@ -57,6 +57,9 @@ func _initialize() -> void:
 	if not _test_inspire_adds_frenzy_nearby():
 		quit(1)
 		return
+	if not _test_volley_binds_archer_only():
+		quit(1)
+		return
 	if not _test_strong_attack_bonus():
 		quit(1)
 		return
@@ -110,9 +113,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 6 人：鼓手×2 /盾卫/大剑/爆爆/刺客有技，游侠无 → 6
-	if skills != 6:
-		push_error("CardActions: expected 6 skill cards, got %d" % skills)
+	# 6 人：鼓手×2 /盾卫/大剑/爆爆/刺客/游侠齐发 → 7
+	if skills != 7:
+		push_error("CardActions: expected 7 skill cards, got %d" % skills)
 		return false
 	# 每人仅通用攻 1 + 主动技；无移动牌。
 	var expected := living_players + skills
@@ -143,6 +146,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_BURN_ATTACK) != 1:
 		push_error("CardActions: one boomling burn skill expected")
 		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_VOLLEY) != 1:
+		push_error("CardActions: one archer volley skill expected")
+		return false
 	for c in deck.draw_pile:
 		if c.ephemeral:
 			push_error("CardActions: build must not include ephemeral")
@@ -164,6 +170,12 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 			and (c.bound_unit_id != "boomling" or c.aoe_burn_stacks != 3)
 		):
 			push_error("CardActions: burn skill must bind boomling with 3 stacks")
+			return false
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
+			and c.bound_unit_id != "archer"
+		):
+			push_error("CardActions: volley must bind archer")
 			return false
 	return true
 
@@ -704,6 +716,30 @@ func _test_wardrum_skill_plays_on_board() -> bool:
 	# 归属仍绑鼓手，供死亡 cull。
 	if card.bound_unit_id != "wardrum":
 		push_error("CardActions: wardrum skill cull owner must stay wardrum")
+		return false
+	return true
+
+
+func _test_volley_binds_archer_only() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer: TacticalUnitInstance = null
+	var other: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if u.def.id == "archer":
+			archer = u
+		elif other == null:
+			other = u
+	if archer == null or other == null:
+		push_error("CardActions: need archer + other")
+		return false
+	var card := TacticalActionCardScript.make_skill_volley("archer")
+	if not card.is_attack_aim() or not card.is_active_skill():
+		push_error("CardActions: volley must be attack-aim skill")
+		return false
+	if not card.can_drop_on(archer) or card.can_drop_on(other):
+		push_error("CardActions: volley must drop only on archer")
 		return false
 	return true
 
