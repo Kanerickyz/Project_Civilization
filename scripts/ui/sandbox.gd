@@ -459,6 +459,8 @@ func _refresh_all() -> void:
 	var move_cells: Array = []
 	var attack_cells: Array = []
 	var sel_cell := Vector2i(-1, -1)
+	var intent_preview: Dictionary = {}
+	var intent_unit: TacticalUnitInstance = null
 	if _in_deployment:
 		move_cells = _board.player_deploy_cells()
 		if _selected_unit != null and _selected_unit.is_alive():
@@ -476,18 +478,23 @@ func _refresh_all() -> void:
 			attack_cells = _board.attack_range_cells(_focus_unit)
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
-		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）。
+		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）
+		# + 下一回合意图虚影（路径/目标/回血加攻提示）。
 		if TacticalEnemyAiScript.uses_behavior_sm(_selected_unit):
 			move_cells = _board.preview_reachable_move_cells(
 				_selected_unit, TacticalEnemyAiScript.MOVE_STEP_CAP
 			)
 			attack_cells = _board.attack_range_cells(_selected_unit)
+			intent_preview = TacticalEnemyAiScript.preview_next_action(_board, _selected_unit)
+			intent_unit = _selected_unit
 	_board_view.sync_tactical_units(
 		_board.living_units(),
 		sel_cell,
 		move_cells,
 		attack_cells,
-		_board.ignited_cells_for_view()
+		_board.ignited_cells_for_view(),
+		intent_preview,
+		intent_unit
 	)
 
 
@@ -868,7 +875,7 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 	if clicked != null:
 		_selected_unit = clicked
 		if TacticalEnemyAiScript.uses_behavior_sm(clicked):
-			_last_log = "查看 %s · 绿=可移动 · 红=可攻击" % clicked.def.display_name
+			_last_log = "查看 %s · 绿=可移动 · 红=可攻击 · 虚影=下回合意图" % clicked.def.display_name
 		else:
 			_last_log = "查看 %s · 移/攻请拖卡到单位" % clicked.def.display_name
 		_refresh_all()
@@ -1130,14 +1137,14 @@ func capture_select_player_unit(unit_id: String) -> void:
 			return
 
 
-## GUI 验收：选中敌方狼骑兵并刷新行动格 overlay。
+## GUI 验收：选中敌方狼骑兵并刷新行动格 + 意图虚影 overlay。
 func capture_select_opponent_rider() -> bool:
 	for u in _board.living_units():
 		if TacticalEnemyAiScript.uses_behavior_sm(u):
 			_focus_unit = null
 			_pending_kind = PendingKind.NONE
 			_selected_unit = u
-			_last_log = "查看 %s · 绿=可移动 · 红=可攻击" % u.def.display_name
+			_last_log = "查看 %s · 绿=可移动 · 红=可攻击 · 虚影=下回合意图" % u.def.display_name
 			_refresh_all()
 			return true
 	return false

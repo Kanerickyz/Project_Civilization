@@ -42,6 +42,123 @@ static func intent_name(intent: int) -> String:
 			return "?"
 
 
+## 只读预览下一回合将实际执行的行为（含跳过 / 移动改攻击），不改写棋盘、移力与意图。
+## 返回：kind=attack|move|heal|buff_atk|idle；from/to；path（移动格序，含起终点）；amount。
+static func preview_next_action(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:
+	var idle := _preview_idle(unit)
+	if board == null or not uses_behavior_sm(unit):
+		return idle
+	var intent: int = unit.next_intent
+	var scanned: Dictionary = {}
+	while true:
+		if scanned.has(intent):
+			idle["resolved_intent"] = intent
+			return idle
+		scanned[intent] = true
+		match intent:
+			Intent.ATTACK:
+				var atk_to := _preview_attack_target(board, unit)
+				if atk_to.x >= 0:
+					return _preview_payload("attack", Intent.ATTACK, unit.cell, atk_to, [], 0)
+				intent = Intent.MOVE
+			Intent.MOVE:
+				var redirect := _preview_attack_target(board, unit)
+				if redirect.x >= 0:
+					return _preview_payload("attack", Intent.MOVE, unit.cell, redirect, [], 0)
+				var dest := _preview_move_dest(board, unit)
+				if dest.x >= 0 and dest != unit.cell:
+					var path := _preview_move_path(board, unit, dest)
+					return _preview_payload("move", Intent.MOVE, unit.cell, dest, path, 0)
+				# 移动不可行时同回合会随机落到回血|加攻；预览取可执行者（满血则加攻）。
+				if unit.hp < unit.effective_max_hp():
+					intent = Intent.HEAL
+				else:
+					intent = Intent.BUFF_ATK
+			Intent.HEAL:
+				var max_hp := unit.effective_max_hp()
+				if unit.hp < max_hp:
+					var gain := mini(HEAL_AMOUNT, max_hp - unit.hp)
+					return _preview_payload("heal", Intent.HEAL, unit.cell, unit.cell, [], gain)
+				intent = Intent.ATTACK
+			Intent.BUFF_ATK:
+				return _preview_payload(
+					"buff_atk", Intent.BUFF_ATK, unit.cell, unit.cell, [], BUFF_ATK_AMOUNT
+				)
+			_:
+				idle["resolved_intent"] = intent
+				return idle
+	return idle
+
+
+static func _preview_idle(unit: TacticalUnitInstance) -> Dictionary:
+	var cell := unit.cell if unit != null else Vector2i(-1, -1)
+	return {
+		"kind": "idle",
+		"resolved_intent": -1,
+		"from": cell,
+		"to": Vector2i(-1, -1),
+		"path": [] as Array[Vector2i],
+		"amount": 0,
+	}
+
+
+static func _preview_payload(
+	kind: String,
+	resolved_intent: int,
+	from: Vector2i,
+	to: Vector2i,
+	path: Array[Vector2i],
+	amount: int
+) -> Dictionary:
+	return {
+		"kind": kind,
+		"resolved_intent": resolved_intent,
+		"from": from,
+		"to": to,
+		"path": path,
+		"amount": amount,
+	}
+
+
+## 忽略 attacked_this_side_turn：预览的是下一段对手回合（届时会 reset）。
+static func _preview_attack_target(board: TacticalBoard, unit: TacticalUnitInstance) -> Vector2i:
+	var cells: Array[Vector2i] = []
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		var dist := GridMathScript.chebyshev(unit.cell, u.cell)
+		if not unit.def.is_chebyshev_in_attack_band(dist):
+			continue
+		if not board.has_attack_los(unit.cell, u.cell):
+			continue
+		cells.append(u.cell)
+	if cells.is_empty():
+		return Vector2i(-1, -1)
+	return _pick_nearest_attack_target(board, unit, cells)
+
+
+static func _preview_move_dest(board: TacticalBoard, unit: TacticalUnitInstance) -> Vector2i:
+	var budget := mini(unit.def.action_move_budget(), MOVE_STEP_CAP)
+	if budget <= 0:
+		return Vector2i(-1, -1)
+	var saved := unit.remaining_move_budget
+	unit.remaining_move_budget = budget
+	var dest: Vector2i = _best_step_toward_player(board, unit)
+	unit.remaining_move_budget = saved
+	return dest
+
+
+static func _preview_move_path(
+	board: TacticalBoard, unit: TacticalUnitInstance, dest: Vector2i
+) -> Array[Vector2i]:
+	var path := board.shortest_path(unit.cell, dest, MOVE_STEP_CAP)
+	if path.is_empty():
+		path = board.shortest_path(unit.cell, dest)
+	if path.is_empty():
+		return [unit.cell, dest] as Array[Vector2i]
+	return path
+
+
 static func sorted_opponents(board: TacticalBoard) -> Array[TacticalUnitInstance]:
 	var opponents: Array[TacticalUnitInstance] = []
 	for u in board.living_units():
