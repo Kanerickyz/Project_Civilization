@@ -217,17 +217,32 @@ func _skills_bbcode(unit: TacticalUnitInstance) -> String:
 		lines.append("[b]被动 · %s[/b]\n%s" % [title, hint])
 	else:
 		lines.append("[b]被动[/b]\n无")
-	lines.append(
-		"[b]普攻 · 击退[/b]\n命中后沿攻击方向击退 1 格（短 Tween）。"
-		+ "落点不可走：本次伤害改为最终伤害×1.2（向上取整）。"
-		+ "落点有单位：对其额外 1 点伤害。"
-	)
+	lines.append(_knockback_skill_line(unit))
 	var skill := _active_skill_line(unit.def.id)
 	if not skill.is_empty():
 		lines.append(skill)
 	else:
 		lines.append("[b]主动技[/b]\n无（游侠无主动技卡）" if unit.def.id == "archer" else "[b]主动技[/b]\n无")
 	return "\n\n".join(lines)
+
+
+func _knockback_skill_line(unit: TacticalUnitInstance) -> String:
+	if unit == null or unit.def == null:
+		return "[b]普攻[/b]\n—"
+	# attack_range≤1：一律近战击退；有最小射程死区：纯远程不推；否则仅邻格击退。
+	if unit.def.attack_range <= 1:
+		return (
+			"[b]普攻 · 击退[/b]\n近战命中后沿攻击方向击退 1 格（短 Tween）。"
+			+ "落点不可走：本次伤害改为最终伤害×1.2（向上取整）。"
+			+ "落点有单位：对其额外 1 点伤害。"
+		)
+	if unit.def.attack_range_min >= 1:
+		return "[b]普攻[/b]\n远程攻击：命中不击退。"
+	return (
+		"[b]普攻 · 击退（仅邻格）[/b]\n邻格命中后沿攻击方向击退 1 格；远程命中不推。"
+		+ "落点不可走：本次伤害改为最终伤害×1.2（向上取整）。"
+		+ "落点有单位：对其额外 1 点伤害。"
+	)
 
 
 func _active_skill_line(unit_id: String) -> String:
