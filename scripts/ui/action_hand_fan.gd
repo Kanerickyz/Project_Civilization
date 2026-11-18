@@ -411,8 +411,10 @@ func _follow_drag(global_pos: Vector2) -> void:
 func _on_press_released(global_pos: Vector2) -> void:
 	_long_press_timer.stop()
 	if _dragging:
+		# 先清 press，避免松手到 notify 之间 is_busy 挡住棋盘点击；
+		# _dragging/_busy 仍真，等 sandbox notify_drop_resolved。
+		_press_index = -1
 		card_dropped.emit(_drag_index, global_pos)
-		# 等待 sandbox notify_drop_resolved
 		return
 	var clicked := _press_index
 	var was_detail := _detail_open

@@ -776,6 +776,59 @@ func _test_volley_binds_archer_only() -> bool:
 	if not card.can_drop_on(archer) or not card.can_drop_on(other):
 		push_error("CardActions: volley free play accepts any living drop")
 		return false
+	# 授权队列须带上 volley，结算时 pending_volley 为真。
+	var deck := TacticalCardDeckScript.new()
+	if not deck.authorize_attack(archer, 0, 0, true):
+		push_error("CardActions: volley authorize_attack failed")
+		return false
+	if not deck.pending_volley:
+		push_error("CardActions: pending_volley must be true after volley auth")
+		return false
+	var foe: TacticalUnitInstance = null
+	var side_a: TacticalUnitInstance = null
+	var side_b: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.OPPONENT:
+			continue
+		if foe == null:
+			foe = u
+		elif side_a == null:
+			side_a = u
+		elif side_b == null:
+			side_b = u
+			break
+	if foe == null or side_a == null or side_b == null:
+		push_error("CardActions: volley auth needs 3 foes")
+		return false
+	board.set_terrain_cells({})
+	archer.cell = Vector2i(2, 2)
+	foe.cell = Vector2i(4, 2)
+	side_a.cell = Vector2i(4, 1)
+	side_b.cell = Vector2i(4, 3)
+	foe.hp = 99
+	side_a.hp = 99
+	side_b.hp = 99
+	var splash := archer.effective_attack()
+	var atk := TacticalCombatScript.try_basic_attack(
+		board,
+		archer,
+		foe.cell,
+		TacticalFactionScript.Id.PLAYER,
+		true,
+		deck.pending_attack_bonus,
+		deck.pending_aoe_burn_stacks,
+		deck.pending_volley
+	)
+	if not atk.get("ok", false) or (atk.get("volley_hits", []) as Array).size() != 2:
+		push_error("CardActions: authorized volley must splash 2 sides")
+		return false
+	if side_a.hp != 99 - splash or side_b.hp != 99 - splash:
+		push_error("CardActions: authorized volley side dmg want %d" % splash)
+		return false
+	deck.consume_attack_authorization(archer)
+	if deck.pending_volley:
+		push_error("CardActions: pending_volley must clear after consume")
+		return false
 	var preview: Array[Vector2i] = card.release_preview_cells(board)
 	if preview.is_empty():
 		push_error("CardActions: volley preview must show attack range")
