@@ -63,15 +63,14 @@ func _initialize() -> void:
 
 
 func _test_roster_loads() -> bool:
-	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	# 7 友（含刺客+要员）+ 6 狼骑。
-	if board.living_units().size() != 13:
-		push_error("TacticalUnits: expected 13 units, got %d" % board.living_units().size())
+	var board := TacticalSandboxRosterScript.build_demo_board(6, 6)
+	# 6 友（含刺客）+ 6 狼骑。
+	if board.living_units().size() != 12:
+		push_error("TacticalUnits: expected 12 units, got %d" % board.living_units().size())
 		return false
 	var riders := 0
 	var boomling := 0
 	var assassin := 0
-	var vip := 0
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.OPPONENT:
 			if u.def.id != "rider":
@@ -86,27 +85,32 @@ func _test_roster_loads() -> bool:
 					% [u.def.move_range, u.def.attack_range]
 				)
 				return false
+			if u.cell.x < 3:
+				push_error("TacticalUnits: enemy should start on right half, got %s" % str(u.cell))
+				return false
 			riders += 1
-		elif u.def.id == "boomling":
-			boomling += 1
-			if u.def.move_range != 2 or u.def.attack_range != 2 or u.def.max_hp != 6:
-				push_error("TacticalUnits: boomling stats mismatch")
+		elif u.faction == TacticalFactionScript.Id.PLAYER:
+			if u.cell.x >= 3:
+				push_error("TacticalUnits: player should start on left half, got %s" % str(u.cell))
 				return false
-		elif u.def.id == "assassin":
-			assassin += 1
-			if (
-				u.def.max_hp != 4
-				or u.def.attack != 2
-				or u.def.move_range != 4
-				or not u.def.teleports
-				or not u.is_stealthed()
-			):
-				push_error("TacticalUnits: assassin stats/stealth mismatch")
-				return false
-		elif u.def.id == "devman":
-			vip += 1
-			if u.def.max_hp != 5 or not u.is_protect_target():
-				push_error("TacticalUnits: devman protect-target mismatch")
+			if u.def.id == "boomling":
+				boomling += 1
+				if u.def.move_range != 2 or u.def.attack_range != 2 or u.def.max_hp != 6:
+					push_error("TacticalUnits: boomling stats mismatch")
+					return false
+			elif u.def.id == "assassin":
+				assassin += 1
+				if (
+					u.def.max_hp != 4
+					or u.def.attack != 2
+					or u.def.move_range != 4
+					or not u.def.teleports
+					or not u.is_stealthed()
+				):
+					push_error("TacticalUnits: assassin stats/stealth mismatch")
+					return false
+			elif u.def.id == "devman":
+				push_error("TacticalUnits: devman should be removed from roster")
 				return false
 	if riders != 6:
 		push_error("TacticalUnits: expected 6 wolf cavalry, got %d" % riders)
@@ -116,9 +120,6 @@ func _test_roster_loads() -> bool:
 		return false
 	if assassin != 1:
 		push_error("TacticalUnits: expected 1 assassin, got %d" % assassin)
-		return false
-	if vip != 1:
-		push_error("TacticalUnits: expected 1 devman, got %d" % vip)
 		return false
 	return true
 
@@ -135,6 +136,25 @@ func _opponent_unit(board: TacticalBoard, id: String) -> TacticalUnitInstance:
 		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == id:
 			return u
 	return null
+
+
+## 把占用 cell 的其他存活单位挪开，保留 keep（不击杀）。
+func _relocate_off_cell(
+	board: TacticalBoard, cell: Vector2i, keep: TacticalUnitInstance = null
+) -> void:
+	for u in board.living_units():
+		if u == keep or u.cell != cell:
+			continue
+		for gy in range(board.grid_height):
+			for gx in range(board.grid_width):
+				var dest := Vector2i(gx, gy)
+				if dest == cell:
+					continue
+				if board.unit_at(dest) == null:
+					u.cell = dest
+					break
+			if u.cell != cell:
+				break
 
 
 func _test_move_and_attack_ranges() -> bool:
@@ -178,7 +198,11 @@ func _test_archer_min_attack_range() -> bool:
 			% [archer.def.attack_range_min, archer.def.attack_range]
 		)
 		return false
-	foe.cell = archer.cell + Vector2i(1, 0)
+	_relocate_off_cell(board, Vector2i(1, 1), archer)
+	_relocate_off_cell(board, Vector2i(2, 1), foe)
+	_relocate_off_cell(board, Vector2i(3, 1), foe)
+	archer.cell = Vector2i(1, 1)
+	foe.cell = Vector2i(2, 1)
 	foe.hp = 99
 	var near := TacticalCombatScript.try_basic_attack(
 		board, archer, foe.cell, TacticalFactionScript.Id.PLAYER
@@ -186,7 +210,8 @@ func _test_archer_min_attack_range() -> bool:
 	if near.get("ok", false):
 		push_error("TacticalUnits: archer must not attack distance 1")
 		return false
-	foe.cell = archer.cell + Vector2i(2, 0)
+	_relocate_off_cell(board, Vector2i(3, 1), foe)
+	foe.cell = Vector2i(3, 1)
 	var mid := TacticalCombatScript.try_basic_attack(
 		board, archer, foe.cell, TacticalFactionScript.Id.PLAYER
 	)
@@ -290,16 +315,16 @@ func _test_wardrum_move_end_buff() -> bool:
 	var archer := _player_unit(board, "archer")
 	if drum == null or archer == null:
 		return false
-	# 放到鼓手旁一格，确保移动后仍在 2 格内。
-	archer.cell = drum.cell + Vector2i(1, 0)
-	if board.unit_at(archer.cell) != null and board.unit_at(archer.cell) != archer:
-		archer.cell = drum.cell + Vector2i(0, 1)
+	# 放到开阔格，避免边线/叠邻导致无法移动。
+	_relocate_off_cell(board, Vector2i(2, 2), drum)
+	_relocate_off_cell(board, Vector2i(3, 2), archer)
+	_relocate_off_cell(board, Vector2i(2, 3), drum)
+	drum.cell = Vector2i(2, 2)
+	archer.cell = Vector2i(3, 2)
 	var before_atk := archer.effective_attack()
 	var before_max := archer.effective_max_hp()
 	var before_hp := archer.hp
-	var dest := drum.cell + Vector2i(-1, 0)
-	if board.unit_at(dest) != null:
-		dest = drum.cell + Vector2i(0, -1)
+	var dest := Vector2i(2, 3)
 	if not board.try_move(drum, dest):
 		push_error("TacticalUnits: wardrum move for buff test failed")
 		return false
@@ -351,8 +376,10 @@ func _vacate_cell(board: TacticalBoard, cell: Vector2i) -> void:
 func _place_knight_melee_target(
 	board: TacticalBoard, knight: TacticalUnitInstance, foe: TacticalUnitInstance
 ) -> void:
-	# 邻格目标；击退落点清空，避免误触受阻×1.2。
-	foe.cell = knight.cell + Vector2i(0, 1)
+	# 邻格目标；目标格与击退落点清空，避免叠友军或误触受阻×1.2。
+	var target := knight.cell + Vector2i(0, 1)
+	_relocate_off_cell(board, target, foe)
+	foe.cell = target
 	_vacate_cell(board, foe.cell + Vector2i(0, 1))
 
 
@@ -448,13 +475,13 @@ func _test_archer_move_distance_two() -> bool:
 
 
 func _test_deploy_place_and_swap() -> bool:
-	var board := TacticalSandboxRosterScript.build_demo_board(8, 8)
-	# 全图可部署：右半盘也可。
-	if not board.is_player_deploy_cell(Vector2i(4, 0)):
-		push_error("TacticalUnits: full-map deploy should allow right-half passable cell")
+	var board := TacticalSandboxRosterScript.build_demo_board(6, 6)
+	# 左半可部署，右半不可。
+	if board.is_player_deploy_cell(Vector2i(3, 0)):
+		push_error("TacticalUnits: right-half must not be deploy zone")
 		return false
 	if not board.is_player_deploy_cell(Vector2i(0, 0)):
-		push_error("TacticalUnits: passable cell should be deploy zone")
+		push_error("TacticalUnits: left-half passable cell should be deploy zone")
 		return false
 	var players: Array[TacticalUnitInstance] = []
 	var opponent: TacticalUnitInstance = null

@@ -110,7 +110,7 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 7 人：鼓手×2 /盾卫/大剑/爆爆/刺客有技，游侠+要员无 → 6
+	# 6 人：鼓手×2 /盾卫/大剑/爆爆/刺客有技，游侠无 → 6
 	if skills != 6:
 		push_error("CardActions: expected 6 skill cards, got %d" % skills)
 		return false
@@ -473,9 +473,12 @@ func _test_move_card_one_step_only() -> bool:
 	if not deck.authorize_move(unit):
 		push_error("CardActions: authorize_move failed")
 		return false
-	var dest := unit.cell + Vector2i(1, 0)
-	if board.unit_at(dest) != null:
-		dest = unit.cell + Vector2i(0, 1)
+	# 挪到开阔格再走一步，避免初始边线/邻友占格。
+	for u in board.living_units():
+		if u != unit and (u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2)):
+			u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
+	unit.cell = Vector2i(2, 2)
+	var dest := Vector2i(3, 2)
 	if not board.try_move(unit, dest):
 		push_error("CardActions: first move after card should succeed")
 		return false

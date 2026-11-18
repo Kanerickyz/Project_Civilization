@@ -6,7 +6,7 @@
 
 - 主菜单进入**对战沙盘**：中央方格盘。
 - **拖拽**平移镜头、**滚轮**缩放（Camera2D）。
-- 棋盘为 **8×8**（默认）；开局内部 seed **成簇**铺湖泊/树林（各 0%–15%，见 [LAKE_FOREST.md](./LAKE_FOREST.md)）；**5 己方 + 6 狼骑**（见 [UNITS.md](./UNITS.md)）。
+- 棋盘为 **6×6**（默认）；开局内部 seed **成簇**铺湖泊/树林（各 0%–15%，见 [LAKE_FOREST.md](./LAKE_FOREST.md)）；**6 己方 + 6 狼骑**（见 [UNITS.md](./UNITS.md)）。
 - 玩家回合可**点选己方单位**、按移动力移动、查看移动/攻击 overlay；可普攻、结束行动（对手 AI 段见 [COMBAT.md](./COMBAT.md)）。点到不可通行格（城墙/树林）有提示。
 - 默认逻辑分辨率 **竖屏 393×852**（iPhone 14 Pro）；棋盘 **拖动 + 滚轮/双指缩放**。缩放下限取 `BoardConfig.camera_zoom_min` 与「当前视口看全盘」的更小值；平移按 Camera2D 像素→世界 1:1（`camera_pan_sensitivity` 默认 1.0）。**竖向**往下滑动视角往下；左右仍为抓住地图跟手。
 

@@ -174,19 +174,3 @@ static func faction_defeated(board: TacticalBoard, faction: TacticalFaction.Id) 
 		if u.faction == faction and u.is_alive():
 			return false
 	return true
-
-
-## 保护目标（要员）阵亡 → 玩家失败。
-static func protect_target_defeated(board: TacticalBoard) -> bool:
-	if board == null:
-		return false
-	var found := false
-	for u in board.units:
-		if u.faction != TacticalFaction.Id.PLAYER:
-			continue
-		if u.def == null or not u.def.is_protect_target:
-			continue
-		found = true
-		if u.is_alive():
-			return false
-	return found

@@ -5,8 +5,8 @@
 
 [resource]
 script = ExtResource("1_boardcfg")
-grid_width = 8
-grid_height = 8
+grid_width = 6
+grid_height = 6
 cell_size = 1.0
 tile_height = 0.14
 tile_inset = 0.98
