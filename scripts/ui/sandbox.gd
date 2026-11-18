@@ -712,6 +712,8 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		var drawn := _deck.resolve_wardrum_redraw()
 		_last_log = "鸣鼓换手：弃手后抽 %d 张" % drawn
 		_refresh_all()
+		# 换手抽牌后再判空手（通常已补满，不会自动结束）。
+		_maybe_auto_end_player_turn_if_hand_empty()
 		return
 	var target := _board.unit_at(cell)
 	if target == null or target.faction != TacticalFactionScript.Id.PLAYER:
@@ -774,6 +776,8 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_last_log = "未知卡类型"
 		_pending_kind = PendingKind.NONE
 	_refresh_all()
+	# 即时卡结算后判空手；攻/隐身瞄准中会跳过，等结算完再判。
+	_maybe_auto_end_player_turn_if_hand_empty()
 
 
 func _on_cancel_target_pressed() -> void:
@@ -782,6 +786,7 @@ func _on_cancel_target_pressed() -> void:
 	_last_log = "已取消瞄准（已用卡不回手）"
 	_clear_pending_target(true)
 	_refresh_all()
+	_maybe_auto_end_player_turn_if_hand_empty()
 
 
 func _on_unit_long_pressed(unit: TacticalUnitInstance, anchor_global: Vector2) -> void:
@@ -888,6 +893,7 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		_pending_kind = PendingKind.NONE
 		_last_log = str(stealth_res.get("log", "隐身"))
 		_refresh_all()
+		_maybe_auto_end_player_turn_if_hand_empty()
 		return
 
 	# 无待结算卡：点己方进入移动；点敌方查看；点空地提示。
@@ -969,6 +975,8 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	_check_victory()
 	_input_locked = false
 	_refresh_all()
+	# 攻击/击杀补牌（如游侠猎获）结算完后再判空手。
+	_maybe_auto_end_player_turn_if_hand_empty()
 
 
 func _feedback_from_attack(
@@ -1057,6 +1065,19 @@ func _on_deploy_cell_clicked(cell: Vector2i) -> void:
 	else:
 		_last_log = "先点选己方单位，再拖/点到绿区"
 	_refresh_all()
+
+
+## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、游侠猎获等补牌结算之后调用；
+## 攻/隐身瞄准未完成时不触发（卡已离手但仍待点目标）。
+func _maybe_auto_end_player_turn_if_hand_empty() -> void:
+	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
+		return
+	if _deck == null or not _deck.hand.is_empty():
+		return
+	if _pending_kind == PendingKind.ATTACK or _pending_kind == PendingKind.STEALTH:
+		return
+	_last_log = "手牌已打完 · 自动结束行动"
+	_on_end_turn_pressed()
 
 
 func _on_end_turn_pressed() -> void:
@@ -1311,6 +1332,7 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 	else:
 		return false
 	_refresh_all()
+	_maybe_auto_end_player_turn_if_hand_empty()
 	return true
 
 
