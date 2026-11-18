@@ -1087,6 +1087,7 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 				_selected_unit = null
 			if _focus_unit == knight:
 				_focus_unit = null
+	_play_passive_fx(res.get("passive_fx", []) as Array)
 	if knight != null and knight.is_alive() and knight.remaining_move_budget > 0:
 		_pending_kind = PendingKind.MOVE
 		_focus_unit = knight
@@ -1225,6 +1226,8 @@ func _feedback_from_attack(
 	if res.get("knockback_moved", false) and target != null and target.is_alive():
 		_refresh_all()
 		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+	# 友方死亡抽牌 / 击杀加攻等被动飘字。
+	_play_passive_fx(res.get("passive_fx", []) as Array)
 
 
 func _unit_kill_silhouette_tex(unit: TacticalUnitInstance) -> Texture2D:
@@ -1235,11 +1238,23 @@ func _unit_kill_silhouette_tex(unit: TacticalUnitInstance) -> Texture2D:
 	return unit.def.texture_blue
 
 
+func _unit_kill_silhouette_screen_size(unit: TacticalUnitInstance, tex: Texture2D) -> Vector2:
+	if tex == null or _board_view == null:
+		return Vector2.ZERO
+	var vis := 1.0
+	if unit != null and unit.def != null and unit.def.visual_scale > 0.0:
+		vis = unit.def.visual_scale
+	if _board_view.has_method("unit_texture_screen_size"):
+		return _board_view.unit_texture_screen_size(tex, vis)
+	return Vector2.ZERO
+
+
 func _play_kill_impact(unit: TacticalUnitInstance = null) -> void:
 	if _game_over or _kill_impact == null:
 		return
 	if _kill_impact.has_method("play"):
-		_kill_impact.call("play", _unit_kill_silhouette_tex(unit))
+		var tex := _unit_kill_silhouette_tex(unit)
+		_kill_impact.call("play", tex, _unit_kill_silhouette_screen_size(unit, tex))
 
 
 ## GUI 截图：强制播一次击杀冲击（默认红狼骑剪影；可传贴图）。
@@ -1247,12 +1262,18 @@ func capture_play_kill_impact(silhouette_tex: Texture2D = null) -> bool:
 	if _kill_impact == null:
 		return false
 	var tex := silhouette_tex
+	var vis := 1.0
 	if tex == null:
 		var rider_def: TacticalUnitDef = load("res://resources/units/rider.tres") as TacticalUnitDef
 		if rider_def != null:
 			tex = rider_def.texture_red
+			if rider_def.visual_scale > 0.0:
+				vis = rider_def.visual_scale
+	var screen_sz := Vector2.ZERO
+	if tex != null and _board_view != null and _board_view.has_method("unit_texture_screen_size"):
+		screen_sz = _board_view.unit_texture_screen_size(tex, vis)
 	if _kill_impact.has_method("play"):
-		_kill_impact.call("play", tex)
+		_kill_impact.call("play", tex, screen_sz)
 	return _kill_impact.visible
 
 
@@ -1625,12 +1646,33 @@ func capture_play_charge_toward(dir_cell: Vector2i) -> bool:
 	return true
 
 
-## 鼓手/游侠等：打出攻击牌时的触发被动日志拼到 _last_log。
+## 鼓手/游侠等：打出攻击牌时的触发被动日志拼到 _last_log，并播飘字。
 func _append_attack_card_passive_logs() -> void:
-	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board)
+	var fx: Array = []
+	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board, fx)
+	_play_passive_fx(fx)
 	if logs.is_empty():
 		return
 	if _last_log.is_empty():
 		_last_log = "；".join(logs)
 	else:
 		_last_log = "%s · %s" % [_last_log, "；".join(logs)]
+
+
+## 被动触发可见反馈：加攻 / 加血 / 抽牌等短飘字。
+func _play_passive_fx(fx_list: Array) -> void:
+	if _board_view == null or fx_list.is_empty():
+		return
+	var stack_by_cell: Dictionary = {}
+	for ev in fx_list:
+		if not (ev is Dictionary):
+			continue
+		var cell: Vector2i = (ev as Dictionary).get("cell", Vector2i(-999, -999)) as Vector2i
+		var text := str((ev as Dictionary).get("text", ""))
+		if text.is_empty() or cell.x <= -900:
+			continue
+		var color: Color = (ev as Dictionary).get("color", Color("ffe08a")) as Color
+		var key := "%d,%d" % [cell.x, cell.y]
+		var stack := int(stack_by_cell.get(key, 0))
+		stack_by_cell[key] = stack + 1
+		_board_view.play_float_text(cell, text, color, stack)

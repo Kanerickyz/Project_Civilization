@@ -11,16 +11,23 @@ const FADE_SEC := 0.22
 const BAND_TILT_DEG := -9.0
 ## 横带占屏高比例（中心带）。
 const BAND_HEIGHT_RATIO := 0.34
-## 剪影相对横带高度的占比。
-const SILHOUETTE_BAND_FILL := 0.92
+## 无棋盘尺寸时：剪影相对横带高度的回退占比（刻意偏小，避免再次盖满）。
+const SILHOUETTE_BAND_FILL_FALLBACK := 0.28
+## 冲击微冲倍率（只改绘制尺寸，不缩放整个 Control，避免亚像素模糊）。
+const PUNCH_START := 1.12
 
 var _tween: Tween
 var _silhouette_tex: Texture2D
+## 与棋盘单位屏幕尺寸对齐；为零则走横带回退。
+var _silhouette_screen_size: Vector2 = Vector2.ZERO
+var _punch: float = 1.0
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# 像素贴图：最近邻，避免线性放大/缩小起毛边。
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	modulate.a = 0.0
 	visible = false
 	# 盖住棋盘与 HUD 读数，但仍低于终局面板（终局后不播）。
@@ -29,18 +36,21 @@ func _ready() -> void:
 
 
 ## 重播：瞬显 → 微冲缩放 → 短停 → 淡出。
-## silhouette_tex：被击杀单位精灵；缺省时仍画抽象冲击核作回退。
-func play(silhouette_tex: Texture2D = null) -> void:
+## silhouette_tex：被击杀单位精灵；screen_size 与棋盘单位屏幕尺寸一致；缺省贴图时画抽象冲击核。
+func play(silhouette_tex: Texture2D = null, screen_size: Vector2 = Vector2.ZERO) -> void:
 	if _tween != null and is_instance_valid(_tween):
 		_tween.kill()
 	_silhouette_tex = silhouette_tex
+	_silhouette_screen_size = screen_size
 	visible = true
+	# 保持 Control.scale=1，冲击用 _punch，避免整层亚像素缩放造成锯齿/糊边。
+	scale = Vector2.ONE
 	pivot_offset = size * 0.5
 	modulate.a = 1.0
-	scale = Vector2(1.12, 1.12)
+	_punch = PUNCH_START
 	queue_redraw()
 	_tween = create_tween()
-	_tween.tween_property(self, "scale", Vector2.ONE, POP_SEC).set_trans(Tween.TRANS_BACK).set_ease(
+	_tween.tween_method(_set_punch, PUNCH_START, 1.0, POP_SEC).set_trans(Tween.TRANS_BACK).set_ease(
 		Tween.EASE_OUT
 	)
 	_tween.tween_interval(HOLD_SEC)
@@ -50,12 +60,19 @@ func play(silhouette_tex: Texture2D = null) -> void:
 	_tween.finished.connect(func() -> void:
 		visible = false
 		scale = Vector2.ONE
+		_punch = 1.0
 		_silhouette_tex = null
+		_silhouette_screen_size = Vector2.ZERO
 	)
 
 
 func is_flashing() -> bool:
 	return visible and modulate.a > 0.05
+
+
+func _set_punch(value: float) -> void:
+	_punch = value
+	queue_redraw()
 
 
 func _draw() -> void:
@@ -135,21 +152,32 @@ func _draw_impact_silhouette(sz: Vector2) -> void:
 
 
 ## 用单位精灵乘纯黑 modulate：透明区仍透明，实体成黑剪影。
+## 优先按棋盘单位屏幕尺寸绘制；像素对齐 + 最近邻，减少锯齿。
 func _draw_unit_silhouette(c: Vector2, sz: Vector2) -> void:
 	var tex_sz := _silhouette_tex.get_size()
 	if tex_sz.x < 1.0 or tex_sz.y < 1.0:
 		_draw_fallback_burst(c, sz)
 		return
+	var draw_sz := _resolve_silhouette_draw_size(tex_sz, sz)
+	# 整像素对齐：位置与尺寸都取整，避免半像素采样起毛。
+	draw_sz = Vector2(maxf(1.0, roundf(draw_sz.x)), maxf(1.0, roundf(draw_sz.y)))
+	var origin := Vector2(roundf(c.x - draw_sz.x * 0.5), roundf(c.y - draw_sz.y * 0.5))
+	var rect := Rect2(origin, draw_sz)
+	draw_texture_rect(_silhouette_tex, rect, false, SILHOUETTE_COLOR)
+
+
+func _resolve_silhouette_draw_size(tex_sz: Vector2, sz: Vector2) -> Vector2:
+	var punch := maxf(_punch, 0.01)
+	if _silhouette_screen_size.x > 1.0 and _silhouette_screen_size.y > 1.0:
+		return _silhouette_screen_size * punch
+	# 无棋盘尺寸时回退：按横带高度较小占比，避免再次盖满红带。
 	var band_h := sz.y * BAND_HEIGHT_RATIO
-	var target_h := band_h * SILHOUETTE_BAND_FILL
+	var target_h := band_h * SILHOUETTE_BAND_FILL_FALLBACK * punch
 	var s := target_h / tex_sz.y
-	# 过宽时按屏宽再压一点，避免贴边。
-	var max_w := sz.x * 0.72
+	var max_w := sz.x * 0.42
 	if tex_sz.x * s > max_w:
 		s = max_w / tex_sz.x
-	var draw_sz := tex_sz * s
-	var rect := Rect2(c - draw_sz * 0.5, draw_sz)
-	draw_texture_rect(_silhouette_tex, rect, false, SILHOUETTE_COLOR)
+	return tex_sz * s
 
 
 func _draw_fallback_burst(c: Vector2, sz: Vector2) -> void:

@@ -43,7 +43,7 @@ static func attackable_cells(
 	return out
 
 
-## 全员击退：落点不可走时最终伤害 ×1.2 向上取整。
+## 近战击退：落点不可走时最终伤害 ×1.2 向上取整。
 const KNOCKBACK_BLOCK_MULT := 1.2
 ## 兼容旧名。
 const KNIGHT_KNOCKBACK_BLOCK_MULT := KNOCKBACK_BLOCK_MULT
@@ -51,6 +51,15 @@ const KNIGHT_KNOCKBACK_BLOCK_MULT := KNOCKBACK_BLOCK_MULT
 const KNOCKBACK_COLLISION_DAMAGE := 1
 ## 兼容旧名。
 const KNIGHT_KNOCKBACK_COLLISION_DAMAGE := KNOCKBACK_COLLISION_DAMAGE
+
+
+## 近战击退判定：邻格（切比雪夫 ≤1）或单位 attack_range≤1；远程不推。
+static func is_melee_knockback_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> bool:
+	if attacker == null or attacker.def == null:
+		return false
+	if attacker.def.attack_range <= 1:
+		return true
+	return GridMathScript.chebyshev(attacker.cell, target_cell) <= 1
 
 
 ## 攻击方向单位步（切比雪夫邻格）；同格返回 (0,0)。
@@ -141,6 +150,7 @@ static func try_knight_charge(
 		"wall_stopped": false,
 		"self_damage": 0,
 		"self_killed": false,
+		"passive_fx": [],
 	}
 	if board == null or knight == null or not knight.is_alive():
 		result["log"] = "冲撞需要存活盾卫"
@@ -164,12 +174,14 @@ static func try_knight_charge(
 		if not board.is_passable(next):
 			result["wall_stopped"] = true
 			var self_hurt := board.apply_damage(knight, CHARGE_WALL_SELF_DAMAGE, null)
+			_append_passive_fx(result, self_hurt)
 			result["self_damage"] = CHARGE_WALL_SELF_DAMAGE
 			result["self_killed"] = bool(self_hurt.get("killed", false))
 			break
 		var occupant := board.unit_at(next)
 		if occupant != null and occupant != knight:
 			var hurt := board.apply_damage(occupant, dmg, knight)
+			_append_passive_fx(result, hurt)
 			var hit := {
 				"unit": occupant,
 				"cell": next,
@@ -241,6 +253,7 @@ static func try_basic_attack(
 		"collision_damage": 0,
 		"collision_killed": false,
 		"volley_hits": [],
+		"passive_fx": [],
 	}
 	if not can_basic_attack(attacker, active_faction):
 		result["log"] = "本段行动已攻击过或无法攻击"
@@ -286,8 +299,9 @@ static func try_basic_attack(
 	var knock_to := from_cell + step
 	var knock_blocked := false
 	var occupant: TacticalUnitInstance = null
-	# 全员命中后击退（含敌方）；同格无方向则跳过。
-	if step != Vector2i.ZERO:
+	# 仅近战命中后击退（邻格 / attack_range≤1；含敌方）；远程与同格无方向跳过。
+	var do_knockback := step != Vector2i.ZERO and is_melee_knockback_attack(attacker, target.cell)
+	if do_knockback:
 		result["knockback_from"] = from_cell
 		result["knockback_to"] = knock_to
 		occupant = board.unit_at(knock_to)
@@ -301,6 +315,7 @@ static func try_basic_attack(
 	result["target"] = target
 	result["damage"] = dmg
 	result["killed"] = hurt.get("killed", false)
+	_append_passive_fx(result, hurt)
 	# 仅对手 AI 记「本段已攻」；玩家次数完全由攻击卡驱动。
 	if attacker.faction != TacticalFaction.Id.PLAYER:
 		attacker.attacked_this_side_turn = true
@@ -317,13 +332,13 @@ static func try_basic_attack(
 		target.def.display_name,
 		dmg,
 	]
-	if step != Vector2i.ZERO and knock_blocked:
+	if do_knockback and knock_blocked:
 		result["log"] += " · 击退受阻×1.2"
 	if extra != "":
 		result["log"] += " · " + extra
 	if result["killed"]:
 		result["log"] += "（击杀）"
-	# 万箭齐发：对快照侧格单位溅射（不含主目标本人）。
+	# 万箭齐发：对快照侧格单位溅射（不含主目标本人）；先于击退碰撞结算。
 	if result["ok"] and not volley_victims.is_empty():
 		var volley_hits: Array = []
 		for entry in volley_victims:
@@ -332,6 +347,7 @@ static func try_basic_attack(
 			if side_u == null or not side_u.is_alive() or side_u == target:
 				continue
 			var side_hurt := board.apply_damage(side_u, splash_dmg, attacker)
+			_append_passive_fx(result, side_hurt)
 			var hit := {
 				"unit": side_u,
 				"cell": side,
@@ -344,8 +360,9 @@ static func try_basic_attack(
 				result["log"] += "（击杀）"
 		result["volley_hits"] = volley_hits
 	# 落点有其他单位：额外 1 点伤害（可为友方）。侧箭已结算过的单位仍可吃碰撞伤。
-	if knock_blocked and occupant != null and occupant != target and occupant.is_alive():
+	if do_knockback and knock_blocked and occupant != null and occupant != target and occupant.is_alive():
 		var col := board.apply_damage(occupant, KNOCKBACK_COLLISION_DAMAGE, attacker)
+		_append_passive_fx(result, col)
 		result["collision_target"] = occupant
 		result["collision_damage"] = KNOCKBACK_COLLISION_DAMAGE
 		result["collision_killed"] = col.get("killed", false)
@@ -356,7 +373,7 @@ static func try_basic_attack(
 		if result["collision_killed"]:
 			result["log"] += "（击杀）"
 	# 可退后且目标仍存活：位移 1 格（不触发移动结束被动；表现靠视图 Tween）。
-	if step != Vector2i.ZERO and not knock_blocked and target.is_alive():
+	if do_knockback and not knock_blocked and target.is_alive():
 		if board.force_displace(target, knock_to):
 			result["knockback_moved"] = true
 			result["log"] += " · 击退至 (%d,%d)" % [knock_to.x, knock_to.y]
@@ -368,6 +385,16 @@ static func try_basic_attack(
 		if burned > 0:
 			result["log"] += " · 燃爆：%d 名单位 +%d 燃烧" % [burned, aoe_burn_stacks]
 	return result
+
+
+## 把 apply_damage 返回的被动飘字事件并入攻击/冲撞结算。
+static func _append_passive_fx(into: Dictionary, from_hurt: Dictionary) -> void:
+	var src: Array = from_hurt.get("passive_fx", []) as Array
+	if src.is_empty():
+		return
+	var dest: Array = into.get("passive_fx", []) as Array
+	dest.append_array(src)
+	into["passive_fx"] = dest
 
 
 static func faction_defeated(board: TacticalBoard, faction: TacticalFaction.Id) -> bool:

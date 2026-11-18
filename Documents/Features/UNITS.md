@@ -32,7 +32,7 @@
 | 爆爆 | **死亡** | 所在格及周围格单位获得 3 层燃烧（见 [BURN_STATUS.md](./BURN_STATUS.md)） |
 | 刺客 | **默认隐身** | 敌方不可选为目标；攻击/受伤/加状态取消（见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md)） |
 
-侧栏仅**只读**说明。伤害/击杀/友方死亡/打出攻击牌/死亡走 `TacticalBoard` / 沙盘挂接触发。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
+侧栏仅**只读**说明。伤害/击杀/友方死亡/打出攻击牌/死亡走 `TacticalBoard` / 沙盘挂接触发。被动生效时沙盘头顶飘字反馈（加攻 `+N攻`、加血 `+N血`、抽牌 `+N牌`）。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 
 ## 狂暴（鼓舞）
 
@@ -42,7 +42,7 @@
 
 ## 规则（与 TurnClock）
 
-- 沙盘预置 6 蓝（盾卫/游侠/大剑/鼓手/爆爆/刺客）+ 6 红狼骑兵（开局右半盘）；刺客用 `unit_shinobi_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；隐身附 `隐`；`effective_attack`，含 buff/狂暴；显式 `ui_font`；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；敌方狼骑兵另有**下一意图**角标（色菱形 + 攻/移/血/加）；燃烧为色菱形 + `燃N`；狂暴为色菱形 + `狂N`；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween（刺客瞬移为直达 hop）；待机轻微上下浮动；攻击/受击/死亡带 Tween；击杀另闪全屏红斜横带 + 被击杀单位精灵黑剪影冲击（见 [COMBAT.md](./COMBAT.md)）。
+- 沙盘预置 6 蓝（盾卫/游侠/大剑/鼓手/爆爆/刺客）+ 6 红狼骑兵（开局右半盘）；刺客用 `unit_shinobi_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；隐身附 `隐`；`effective_attack`，含 buff/狂暴；显式 `ui_font`；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；敌方狼骑兵另有**下一意图**角标（色菱形 + 攻/移/血/加）；燃烧为色菱形 + `燃N`；狂暴为色菱形 + `狂N`；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween（刺客瞬移为直达 hop）；待机轻微上下浮动；攻击/受击/死亡带 Tween；击杀另闪全屏红斜横带 + 被击杀单位精灵黑剪影冲击（尺寸对齐棋盘单位；见 [COMBAT.md](./COMBAT.md)）。
 - **开战前部署**：先进部署阶段，左半盘拖己方；敌方已在右半；确认后抽手牌（见 [DEPLOYMENT.md](./DEPLOYMENT.md)）。
 - **胜负**：敌方全灭 → 胜利；己方全灭 → 失败。
 - **玩家行动段**抽手牌；点选移动或打出攻击/主动技卡后再点目标；点「结束行动」或手牌打完自动结束 → 先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。

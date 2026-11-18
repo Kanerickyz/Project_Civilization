@@ -699,7 +699,10 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	play_float_text(cell, "-%d" % maxi(0, amount), Color("ff5533"))
 
 
-func play_float_text(cell: Vector2i, text: String, color: Color = Color("ff5533")) -> void:
+## stack_index：同格多条飘字时错开，避免完全叠死。
+func play_float_text(
+	cell: Vector2i, text: String, color: Color = Color("ff5533"), stack_index: int = 0
+) -> void:
 	if config == null:
 		return
 	# 与常驻 HP 读数同一套世界坐标（格心投影 + 头顶偏移），勿再抬 3D Y / 混像素。
@@ -721,7 +724,8 @@ func play_float_text(cell: Vector2i, text: String, color: Color = Color("ff5533"
 	lbl.pivot_offset = lbl.size * 0.5
 	_position_world_on_label(lbl, world + head)
 	_clamp_label_in_viewport(lbl)
-	var start_pos := lbl.position
+	var start_pos := lbl.position + Vector2(14.0 * float(stack_index), -16.0 * float(stack_index))
+	lbl.position = start_pos
 	var tw := create_tween()
 	tw.set_parallel(true)
 	# 上浮在屏幕空间（Control.position），不再经 world→screen。
@@ -2415,6 +2419,26 @@ func _local_to_world(local_pos: Vector2) -> Vector2:
 		return local_pos
 	var vp_pos := _to_viewport_pos(local_pos)
 	return _camera.get_canvas_transform().affine_inverse() * vp_pos
+
+
+## 单位贴图在沙盘屏幕上的显示尺寸（与棋盘 Sprite2D 一致，含相机 zoom 与 SubViewport stretch）。
+func unit_texture_screen_size(tex: Texture2D, visual_scale: float = 1.0) -> Vector2:
+	if tex == null or config == null:
+		return Vector2.ZERO
+	var metrics := _texture_content_metrics(tex)
+	var content_h: float = metrics.content_h
+	var vis := visual_scale if visual_scale > 0.0 else 1.0
+	var s := (config.unit_world_height / content_h) * vis if content_h > 0.0 else 1.0
+	var world_sz := tex.get_size() * s
+	var cam_z := _camera.zoom.y if _camera != null and _camera.zoom.y > 0.0 else 1.0
+	var vp_sz := world_sz * cam_z
+	if _viewport == null or _viewport_container == null:
+		return vp_sz
+	var vs := _viewport.size
+	var cs := _viewport_container.size
+	if vs.x <= 0 or vs.y <= 0 or cs.x <= 0.0 or cs.y <= 0.0:
+		return vp_sz
+	return Vector2(vp_sz.x * cs.x / float(vs.x), vp_sz.y * cs.y / float(vs.y))
 
 
 ## 单位头顶锚点（全局屏幕坐标），供信息卡定位。
