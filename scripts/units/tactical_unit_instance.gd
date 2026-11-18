@@ -14,12 +14,17 @@ var attacked_this_side_turn: bool = false
 var deploy_trigger_fired: bool = false
 ## 燃烧层数：每方行动段开始时先造成=层数伤害，再减 1 层。
 var burn_stacks: int = 0
+## 狂暴层数：战局内永久；叠层上限 15；每层伤害 ×1.2（向上取整）。
+var frenzy_stacks: int = 0
 ## 护甲：伤害先打护甲；溢出不穿血（见 apply_damage）。
 var armor: int = 0
 ## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减 MOVE/攻）。
 var death_cards_culled: bool = false
 ## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战默认攻击）。
 var next_intent: int = 0
+
+const FRENZY_MAX_STACKS := 15
+const FRENZY_DAMAGE_MULT := 1.2
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:
@@ -32,8 +37,13 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 	next_intent = 0
 
 
-func effective_attack() -> int:
+## 不含狂暴倍率的基础战斗力（攻 + 本场加成）。
+func attack_power() -> int:
 	return def.attack + atk_bonus
+
+
+func effective_attack() -> int:
+	return apply_frenzy_to_damage(attack_power())
 
 
 func effective_max_hp() -> int:
@@ -54,3 +64,19 @@ func add_burn_stacks(amount: int) -> void:
 	if amount <= 0:
 		return
 	burn_stacks += amount
+
+
+## 叠加狂暴；返回实际新增层数（受上限截断）。
+func add_frenzy_stacks(amount: int) -> int:
+	if amount <= 0:
+		return 0
+	var before := frenzy_stacks
+	frenzy_stacks = mini(FRENZY_MAX_STACKS, frenzy_stacks + amount)
+	return frenzy_stacks - before
+
+
+## 每层 ×1.2，向上取整；stacks≤0 原样返回。
+func apply_frenzy_to_damage(base: int) -> int:
+	if frenzy_stacks <= 0 or base <= 0:
+		return base
+	return ceili(float(base) * pow(FRENZY_DAMAGE_MULT, float(frenzy_stacks)))

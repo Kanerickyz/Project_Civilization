@@ -79,8 +79,7 @@ func build_from_living_player_units(board: TacticalBoard) -> void:
 		player_count += 1
 		draw_pile.append(TacticalActionCardScript.make_move())
 		draw_pile.append(TacticalActionCardScript.make_attack())
-		var skill := _skill_card_for_unit_id(u.def.id)
-		if skill != null:
+		for skill in _skill_cards_for_unit_id(u.def.id):
 			draw_pile.append(skill)
 			skill_count += 1
 	var expected := player_count * 2 + skill_count
@@ -307,17 +306,21 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	removed += _remove_one_kind(TacticalActionCard.Kind.MOVE)
 	removed += _remove_one_kind(TacticalActionCard.Kind.ATTACK)
 	var unit_id := unit.def.id if unit.def != null else ""
-	var skill_kind := _skill_kind_for_unit_id(unit_id)
-	if skill_kind == int(TacticalActionCard.Kind.SKILL_DRAW):
-		removed += _remove_one_bound_skill(skill_kind, unit_id)
-	elif skill_kind == int(TacticalActionCard.Kind.SKILL_BURN_ATTACK):
-		removed += _remove_one_bound_skill(skill_kind, unit_id)
-	elif skill_kind == int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK):
-		# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
-		removed += _remove_one_skill_kind(skill_kind)
-	elif skill_kind == int(TacticalActionCard.Kind.SKILL_ARMOR):
-		# 护甲卡已解绑：按 kind 减 1（盾卫阵亡仍 cull 一张）。
-		removed += _remove_one_skill_kind(skill_kind)
+	match unit_id:
+		"wardrum":
+			# 鼓手贡献鸣鼓换手 + 鼓舞，均按 bound 各 cull 1。
+			removed += _remove_one_bound_skill(int(TacticalActionCard.Kind.SKILL_DRAW), unit_id)
+			removed += _remove_one_bound_skill(int(TacticalActionCard.Kind.SKILL_INSPIRE), unit_id)
+		"boomling":
+			removed += _remove_one_bound_skill(
+				int(TacticalActionCard.Kind.SKILL_BURN_ATTACK), unit_id
+			)
+		"mini_pekka":
+			# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
+			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK))
+		"knight":
+			# 护甲卡已解绑：按 kind 减 1（盾卫阵亡仍 cull 一张）。
+			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_ARMOR))
 	var cleared_auth := false
 	if move_authorized.has(unit):
 		move_authorized.erase(unit)
@@ -342,39 +345,27 @@ static func expected_skill_count_for_board(board: TacticalBoard) -> int:
 	for u in board.living_units():
 		if u.faction != TacticalFactionScript.Id.PLAYER:
 			continue
-		if _skill_kind_for_unit_id(u.def.id) >= 0:
-			n += 1
+		n += _skill_cards_for_unit_id(u.def.id).size()
 	return n
 
 
-static func _skill_card_for_unit_id(unit_id: String) -> TacticalActionCard:
+static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCard]:
+	var out: Array[TacticalActionCard] = []
 	match unit_id:
 		"wardrum":
-			return TacticalActionCardScript.make_skill_draw("wardrum")
+			out.append(TacticalActionCardScript.make_skill_draw("wardrum"))
+			out.append(TacticalActionCardScript.make_skill_inspire("wardrum"))
 		"knight":
 			# 盾卫贡献 1 张通用护甲（不绑角色）。
-			return TacticalActionCardScript.make_skill_armor(SKILL_ARMOR_GRANT)
+			out.append(TacticalActionCardScript.make_skill_armor(SKILL_ARMOR_GRANT))
 		"mini_pekka":
 			# 大剑贡献 1 张通用加强攻（不绑角色）。
-			return TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS)
+			out.append(TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS))
 		"boomling":
-			return TacticalActionCardScript.make_skill_burn_attack("boomling", SKILL_BURN_STACKS)
-		_:
-			return null
-
-
-static func _skill_kind_for_unit_id(unit_id: String) -> int:
-	match unit_id:
-		"wardrum":
-			return int(TacticalActionCard.Kind.SKILL_DRAW)
-		"knight":
-			return int(TacticalActionCard.Kind.SKILL_ARMOR)
-		"mini_pekka":
-			return int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK)
-		"boomling":
-			return int(TacticalActionCard.Kind.SKILL_BURN_ATTACK)
-		_:
-			return -1
+			out.append(
+				TacticalActionCardScript.make_skill_burn_attack("boomling", SKILL_BURN_STACKS)
+			)
+	return out
 
 
 func _remove_one_kind(kind: TacticalActionCard.Kind) -> int:

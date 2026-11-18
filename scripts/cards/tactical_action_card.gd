@@ -10,10 +10,11 @@ enum Kind {
 	SKILL_STRONG_ATTACK,
 	SKILL_BURN_ATTACK,
 	SKILL_ARMOR,
+	SKILL_INSPIRE,
 }
 
 var kind: Kind = Kind.MOVE
-## 绑角色 id（空=不绑）；鸣鼓换手/燃爆攻用于死亡 cull 归属；加强攻/护甲为空。
+## 绑角色 id（空=不绑）；鸣鼓换手/燃爆/鼓舞用于死亡 cull 归属；加强攻/护甲为空。
 var bound_unit_id: String = ""
 ## 强攻卡额外伤害。
 var attack_bonus_damage: int = 0
@@ -43,7 +44,7 @@ func _init(
 
 func is_valid() -> bool:
 	match kind:
-		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR:
+		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE:
 			return true
 		_:
 			return false
@@ -63,6 +64,7 @@ func is_active_skill() -> bool:
 		or kind == Kind.SKILL_STRONG_ATTACK
 		or kind == Kind.SKILL_BURN_ATTACK
 		or kind == Kind.SKILL_ARMOR
+		or kind == Kind.SKILL_INSPIRE
 	)
 
 
@@ -83,6 +85,8 @@ func kind_label() -> String:
 			return "燃爆"
 		Kind.SKILL_ARMOR:
 			return "护甲"
+		Kind.SKILL_INSPIRE:
+			return "鼓舞"
 		_:
 			return "移动"
 
@@ -108,6 +112,8 @@ func rules_detail() -> String:
 			)
 		Kind.SKILL_ARMOR:
 			return "拖到任意己方单位：立刻 +%d 护甲（可叠加）。伤害先打护甲，溢出不穿血。" % maxi(1, armor_grant)
+		Kind.SKILL_INSPIRE:
+			return "只能拖到鼓手：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
 		_:
 			return ""
 
@@ -153,3 +159,8 @@ static func make_skill_burn_attack(
 ## 盾卫主动技：通用护甲卡，拖到任意己方立刻加护甲（默认 +2，可配置）。
 static func make_skill_armor(amount: int = 2) -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_ARMOR, "", 0, false, 0, maxi(1, amount))
+
+
+## 鼓手主动技「鼓舞」：必须拖到鼓手自身；周围 1 格友方 +1 狂暴。
+static func make_skill_inspire(bound_id: String = "wardrum") -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_INSPIRE, bound_id)

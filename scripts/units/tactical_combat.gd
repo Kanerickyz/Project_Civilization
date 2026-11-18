@@ -31,7 +31,8 @@ static func attackable_cells(
 			continue
 		if not allow_friendly and u.faction == attacker.faction:
 			continue
-		if GridMathScript.chebyshev(attacker.cell, u.cell) > attacker.def.attack_range:
+		var dist := GridMathScript.chebyshev(attacker.cell, u.cell)
+		if not attacker.def.is_chebyshev_in_attack_band(dist):
 			continue
 		if not board.has_attack_los(attacker.cell, u.cell):
 			continue
@@ -66,13 +67,15 @@ static func try_basic_attack(
 	if not allow_friendly and target.faction == attacker.faction:
 		result["log"] = "需要敌方单位"
 		return result
-	if GridMathScript.chebyshev(attacker.cell, target.cell) > attacker.def.attack_range:
+	var dist := GridMathScript.chebyshev(attacker.cell, target.cell)
+	if not attacker.def.is_chebyshev_in_attack_band(dist):
 		result["log"] = "目标不在攻击范围内"
 		return result
 	if not board.has_attack_los(attacker.cell, target.cell):
 		result["log"] = "树林挡住攻击"
 		return result
-	var dmg := attacker.effective_attack() + maxi(0, bonus_damage)
+	# 狂暴倍率作用于基础攻+加强额外，再向上取整。
+	var dmg := attacker.apply_frenzy_to_damage(attacker.attack_power() + maxi(0, bonus_damage))
 	var hurt := board.apply_damage(target, dmg, attacker)
 	result["target"] = target
 	result["damage"] = dmg

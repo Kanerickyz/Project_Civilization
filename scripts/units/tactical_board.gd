@@ -178,18 +178,42 @@ func attack_range_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	if unit == null or not unit.is_alive():
 		return out
-	var r := unit.def.attack_range
 	for gx in range(grid_width):
 		for gy in range(grid_height):
 			var cell := Vector2i(gx, gy)
-			if GridMathScript.chebyshev(unit.cell, cell) > r:
-				continue
-			if cell == unit.cell:
+			var dist := GridMathScript.chebyshev(unit.cell, cell)
+			if not unit.def.is_chebyshev_in_attack_band(dist):
 				continue
 			if not has_attack_los(unit.cell, cell):
 				continue
 			out.append(cell)
 	return out
+
+
+## 鼓手「鼓舞」：周围 radius 格内其他友方各 +1 狂暴（不含自身）。
+func apply_inspire_frenzy(drummer: TacticalUnitInstance, radius: int = 1) -> Dictionary:
+	var result := {"ok": false, "buffed": 0, "log": ""}
+	if drummer == null or not drummer.is_alive() or drummer.def == null:
+		result["log"] = "无效鼓舞"
+		return result
+	if drummer.def.id != "wardrum":
+		result["log"] = "鼓舞只能由鼓手触发"
+		return result
+	var allies := allies_in_radius(drummer.cell, drummer.faction, radius, drummer.cell)
+	var buffed := 0
+	for ally in allies:
+		if ally == drummer:
+			continue
+		if ally.add_frenzy_stacks(1) > 0:
+			buffed += 1
+	result["buffed"] = buffed
+	result["ok"] = true
+	if buffed == 0:
+		result["log"] = "%s 鼓舞：周围无友方可叠狂暴" % drummer.def.display_name
+	else:
+		result["log"] = "%s 鼓舞：%d 名周围友方 +1 狂暴" % [drummer.def.display_name, buffed]
+	changed.emit()
+	return result
 
 
 func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUnitInstance = null) -> Dictionary:

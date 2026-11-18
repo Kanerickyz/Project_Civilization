@@ -16,6 +16,9 @@ func _initialize() -> void:
 	if not _test_move_and_attack_ranges():
 		quit(1)
 		return
+	if not _test_archer_min_attack_range():
+		quit(1)
+		return
 	if not _test_archer_kill_grants_card():
 		quit(1)
 		return
@@ -74,7 +77,7 @@ func _test_roster_loads() -> bool:
 			riders += 1
 		elif u.def.id == "boomling":
 			boomling += 1
-			if u.def.move_range != 1 or u.def.attack_range != 2 or u.def.max_hp != 6:
+			if u.def.move_range != 2 or u.def.attack_range != 2 or u.def.max_hp != 6:
 				push_error("TacticalUnits: boomling stats mismatch")
 				return false
 	if riders != 6:
@@ -118,13 +121,49 @@ func _test_move_and_attack_ranges() -> bool:
 		push_error("TacticalUnits: archer should show attack footprint")
 		return false
 	for c in attacks:
-		if GridMathScript.chebyshev(archer.cell, c) > archer.def.attack_range:
-			push_error("TacticalUnits: attack cell out of range")
+		var dist := GridMathScript.chebyshev(archer.cell, c)
+		if not archer.def.is_chebyshev_in_attack_band(dist):
+			push_error("TacticalUnits: attack cell outside band dist=%d" % dist)
 			return false
 	archer.remaining_move_budget = 0
 	if not board.reachable_move_cells(archer).is_empty():
 		push_error("TacticalUnits: exhausted move budget should have no move overlay")
 		return false
+	return true
+
+
+func _test_archer_min_attack_range() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer := _player_unit(board, "archer")
+	var foe := _opponent_unit(board, "rider")
+	if archer == null or foe == null:
+		return false
+	if archer.def.attack_range_min != 1 or archer.def.attack_range != 3:
+		push_error(
+			"TacticalUnits: archer min/max range should be 1/3, got %d/%d"
+			% [archer.def.attack_range_min, archer.def.attack_range]
+		)
+		return false
+	foe.cell = archer.cell + Vector2i(1, 0)
+	foe.hp = 99
+	var near := TacticalCombatScript.try_basic_attack(
+		board, archer, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if near.get("ok", false):
+		push_error("TacticalUnits: archer must not attack distance 1")
+		return false
+	foe.cell = archer.cell + Vector2i(2, 0)
+	var mid := TacticalCombatScript.try_basic_attack(
+		board, archer, foe.cell, TacticalFactionScript.Id.PLAYER
+	)
+	if not mid.get("ok", false):
+		push_error("TacticalUnits: archer should attack distance 2")
+		return false
+	var footprint := board.attack_range_cells(archer)
+	for c in footprint:
+		if GridMathScript.chebyshev(archer.cell, c) <= archer.def.attack_range_min:
+			push_error("TacticalUnits: footprint must exclude min-range dead zone")
+			return false
 	return true
 
 
@@ -338,22 +377,22 @@ func _test_archer_move_distance_two() -> bool:
 	var archer := _player_unit(board, "archer")
 	if archer == null:
 		return false
-	if archer.def.move_range != 2 or archer.def.action_move_budget() != 2:
+	if archer.def.move_range != 3 or archer.def.action_move_budget() != 3:
 		push_error(
-			"TacticalUnits: archer move_range/budget should be 2, got %d/%d"
+			"TacticalUnits: archer move_range/budget should be 3, got %d/%d"
 			% [archer.def.move_range, archer.def.action_move_budget()]
 		)
 		return false
-	var far := archer.cell + Vector2i(3, 0)
+	var far := archer.cell + Vector2i(4, 0)
 	if board.is_passable(far) and board.unit_at(far) == null:
 		if board.try_move(archer, far):
-			push_error("TacticalUnits: archer must not move 3 with range 2")
+			push_error("TacticalUnits: archer must not move 4 with range 3")
 			return false
-	var mid := archer.cell + Vector2i(2, 0)
+	var mid := archer.cell + Vector2i(3, 0)
 	if board.unit_at(mid) != null:
-		mid = archer.cell + Vector2i(0, 2)
+		mid = archer.cell + Vector2i(0, 3)
 	if not board.try_move(archer, mid):
-		push_error("TacticalUnits: archer should move distance 2")
+		push_error("TacticalUnits: archer should move distance 3")
 		return false
 	return true
 

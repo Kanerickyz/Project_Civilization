@@ -54,6 +54,9 @@ func _initialize() -> void:
 	if not _test_wardrum_skill_plays_on_board():
 		quit(1)
 		return
+	if not _test_inspire_adds_frenzy_nearby():
+		quit(1)
+		return
 	if not _test_strong_attack_bonus():
 		quit(1)
 		return
@@ -93,9 +96,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 5 人：鼓手/盾卫/大剑/爆爆有技，游侠无 → 4
-	if skills != 4:
-		push_error("CardActions: expected 4 skill cards, got %d" % skills)
+	# 5 人：鼓手×2（换手+鼓舞）/盾卫/大剑/爆爆有技，游侠无 → 5
+	if skills != 5:
+		push_error("CardActions: expected 5 skill cards, got %d" % skills)
 		return false
 	var expected := living_players * 2 + skills
 	if deck.draw_pile.size() != expected or deck.total_cards() != expected:
@@ -111,7 +114,10 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: attack count should equal living players")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_DRAW) != 1:
-		push_error("CardActions: one wardrum skill expected")
+		push_error("CardActions: one wardrum draw skill expected")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_INSPIRE) != 1:
+		push_error("CardActions: one wardrum inspire skill expected")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 1:
 		push_error("CardActions: one pekka strong attack expected")
@@ -309,6 +315,7 @@ func _test_wardrum_death_removes_skill_draw_from_hand() -> bool:
 	deck.hand.append(TacticalActionCardScript.make_move())
 	deck.hand.append(TacticalActionCardScript.make_attack())
 	deck.hand.append(TacticalActionCardScript.make_skill_draw("wardrum"))
+	deck.hand.append(TacticalActionCardScript.make_skill_inspire("wardrum"))
 	deck.draw_pile.append(TacticalActionCardScript.make_move())
 	deck.draw_pile.append(TacticalActionCardScript.make_attack())
 	var victim: TacticalUnitInstance = null
@@ -321,17 +328,23 @@ func _test_wardrum_death_removes_skill_draw_from_hand() -> bool:
 		return false
 	var before := deck.total_cards()
 	var removed := deck.on_player_unit_died(victim)
-	if removed != 3:
-		push_error("CardActions: wardrum death should remove 3, got %d" % removed)
+	if removed != 4:
+		push_error("CardActions: wardrum death should remove 4, got %d" % removed)
 		return false
-	if deck.total_cards() != before - 3:
+	if deck.total_cards() != before - 4:
 		push_error("CardActions: wardrum death total mismatch")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_DRAW) != 0:
-		push_error("CardActions: wardrum skill must leave all piles")
+		push_error("CardActions: wardrum draw skill must leave all piles")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_INSPIRE) != 0:
+		push_error("CardActions: wardrum inspire skill must leave all piles")
 		return false
 	for c in deck.hand:
-		if c.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_DRAW
+			or c.kind == TacticalActionCardScript.Kind.SKILL_INSPIRE
+		):
 			push_error("CardActions: wardrum skill still in hand after death")
 			return false
 	return true
@@ -440,8 +453,8 @@ func _test_move_card_one_step_only() -> bool:
 	if unit == null:
 		push_error("CardActions: need archer for one-step move test")
 		return false
-	if unit.def.move_range != 2:
-		push_error("CardActions: archer move_range should be 2")
+	if unit.def.move_range != 3:
+		push_error("CardActions: archer move_range should be 3")
 		return false
 	if not deck.authorize_move(unit):
 		push_error("CardActions: authorize_move failed")
@@ -713,6 +726,59 @@ func _test_wardrum_skill_plays_on_board() -> bool:
 	return true
 
 
+func _test_inspire_adds_frenzy_nearby() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var drum: TacticalUnitInstance = null
+	var ally: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if u.def.id == "wardrum":
+			drum = u
+		elif ally == null:
+			ally = u
+	if drum == null or ally == null:
+		push_error("CardActions: need wardrum + ally for inspire")
+		return false
+	ally.cell = drum.cell + Vector2i(1, 0)
+	var card := TacticalActionCardScript.make_skill_inspire("wardrum")
+	if card.plays_on_board():
+		push_error("CardActions: inspire must require wardrum drop")
+		return false
+	if not card.can_drop_on(drum):
+		push_error("CardActions: inspire must drop on wardrum")
+		return false
+	if card.can_drop_on(ally):
+		push_error("CardActions: inspire must not drop on non-wardrum")
+		return false
+	var before := ally.frenzy_stacks
+	var res: Dictionary = board.apply_inspire_frenzy(drum, 1)
+	if not res.get("ok", false):
+		push_error("CardActions: inspire apply failed")
+		return false
+	if ally.frenzy_stacks != before + 1:
+		push_error("CardActions: inspire should +1 frenzy on neighbor")
+		return false
+	if drum.frenzy_stacks != 0:
+		push_error("CardActions: inspire must not buff drummer self")
+		return false
+	# 伤害倍率：1 层 → ceil(base * 1.2)
+	var power := ally.attack_power()
+	var want := ceili(float(power) * 1.2)
+	if ally.effective_attack() != want:
+		push_error(
+			"CardActions: frenzy effective_attack want %d got %d"
+			% [want, ally.effective_attack()]
+		)
+		return false
+	# 上限 15
+	ally.frenzy_stacks = 15
+	if ally.add_frenzy_stacks(3) != 0 or ally.frenzy_stacks != 15:
+		push_error("CardActions: frenzy cap should be 15")
+		return false
+	return true
+
+
 func _test_strong_attack_bonus() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var knight: TacticalUnitInstance = null
@@ -726,7 +792,7 @@ func _test_strong_attack_bonus() -> bool:
 		return false
 	foe.cell = knight.cell + Vector2i(0, 1)
 	foe.hp = 99
-	var base := knight.effective_attack()
+	var base := knight.attack_power()
 	var res := TacticalCombatScript.try_basic_attack(
 		board, knight, foe.cell, TacticalFactionScript.Id.PLAYER, true, 2
 	)

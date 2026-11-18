@@ -66,6 +66,7 @@ const OVERLAY_COLORS := {
 const BURN_MARKER_COLOR := Color(1.0, 0.45, 0.1, 0.72)
 const BURN_MARKER_CORE := Color(1.0, 0.85, 0.35, 0.9)
 const BURN_BADGE_COLOR := Color("ff7a2e")
+const FRENZY_BADGE_COLOR := Color("e84b6a")
 const BURN_MARKER_Z := 3
 const BURN_MARKER_PULSE_SEC := 0.55
 const GRASS_CHECKER_LIGHT := Color("B4A158")
@@ -89,6 +90,7 @@ var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label（常驻 HP + 攻）
 var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 燃N）
+var _frenzy_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 狂N）
 var _intent_icons: Dictionary = {} # TacticalUnitInstance -> Control（狼骑下一意图角标）
 var _burn_markers: Dictionary = {} # Vector2i -> Node2D（点燃地块标记）
 var _overlay_burn: Dictionary = {} # Vector2i -> true
@@ -389,6 +391,11 @@ func _rebuild_board() -> void:
 		if burn_root != null and is_instance_valid(burn_root):
 			burn_root.queue_free()
 	_burn_badges.clear()
+	for key in _frenzy_badges.keys():
+		var frenzy_root: Control = _frenzy_badges[key] as Control
+		if frenzy_root != null and is_instance_valid(frenzy_root):
+			frenzy_root.queue_free()
+	_frenzy_badges.clear()
 	for key in _intent_icons.keys():
 		var intent_icon: Control = _intent_icons[key] as Control
 		if intent_icon != null and is_instance_valid(intent_icon):
@@ -647,6 +654,10 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 		var badge: Control = _burn_badges[unit] as Control
 		badge.queue_free()
 		_burn_badges.erase(unit)
+	if _frenzy_badges.has(unit):
+		var frenzy_badge: Control = _frenzy_badges[unit] as Control
+		frenzy_badge.queue_free()
+		_frenzy_badges.erase(unit)
 	if _intent_icons.has(unit):
 		var intent_icon: Control = _intent_icons[unit] as Control
 		intent_icon.queue_free()
@@ -935,6 +946,7 @@ func _process(_delta: float) -> void:
 		if _unit_sprites.has(unit):
 			_update_hp_bar(unit as TacticalUnitInstance)
 			_update_burn_badge(unit as TacticalUnitInstance)
+			_update_frenzy_badge(unit as TacticalUnitInstance)
 			_update_intent_icon(unit as TacticalUnitInstance)
 	for unit in _unit_blobs:
 		var spr := _unit_sprites.get(unit) as Sprite2D
@@ -964,6 +976,7 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 	_apply_ui_label_font(bar, 12)
 	_update_hp_bar(unit)
 	_ensure_burn_badge(unit)
+	_ensure_frenzy_badge(unit)
 	_ensure_intent_icon(unit)
 
 
@@ -1057,6 +1070,65 @@ func _update_burn_badge(unit: TacticalUnitInstance) -> void:
 	)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var side_off := Vector2(config.unit_world_height * 0.55, -config.unit_world_height * 0.55)
+	_position_world_on_label(root, _unit_world_position(spr) + side_off)
+	_clamp_label_in_viewport(root)
+
+
+func _ensure_frenzy_badge(unit: TacticalUnitInstance) -> void:
+	if _frenzy_badges.has(unit):
+		_update_frenzy_badge(unit)
+		return
+	var root := Control.new()
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.visible = false
+	var gem := ColorRect.new()
+	gem.name = "Gem"
+	gem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gem.size = Vector2(8, 8)
+	gem.pivot_offset = Vector2(4, 4)
+	gem.rotation_degrees = 45.0
+	gem.color = FRENZY_BADGE_COLOR
+	root.add_child(gem)
+	var text := Label.new()
+	text.name = "Text"
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_ui_label_font(text, 12)
+	text.add_theme_color_override("font_color", FRENZY_BADGE_COLOR)
+	text.add_theme_color_override("font_outline_color", Color("2a0810"))
+	text.add_theme_constant_override("outline_size", 4)
+	root.add_child(text)
+	_labels_root.add_child(root)
+	_frenzy_badges[unit] = root
+	_update_frenzy_badge(unit)
+
+
+func _update_frenzy_badge(unit: TacticalUnitInstance) -> void:
+	if not _frenzy_badges.has(unit) or not _unit_sprites.has(unit):
+		return
+	var root := _frenzy_badges[unit] as Control
+	if unit.frenzy_stacks <= 0 or not unit.is_alive():
+		root.visible = false
+		return
+	root.visible = true
+	var gem := root.get_node("Gem") as ColorRect
+	var text := root.get_node("Text") as Label
+	_apply_ui_label_font(text, 12)
+	text.text = "狂%d" % unit.frenzy_stacks
+	text.add_theme_color_override("font_color", FRENZY_BADGE_COLOR)
+	gem.color = FRENZY_BADGE_COLOR
+	text.reset_size()
+	var gem_span := 11.0
+	var gap := 2.0
+	gem.position = Vector2(1.5, (maxf(text.size.y, gem_span) - 8.0) * 0.5)
+	text.position = Vector2(gem_span + gap, 0.0)
+	root.size = Vector2(
+		gem_span + gap + text.size.x,
+		maxf(text.size.y, gem_span)
+	)
+	var spr := _unit_sprites[unit] as Sprite2D
+	# 左侧角标，避开右侧燃烧。
+	var side_off := Vector2(-config.unit_world_height * 0.7, -config.unit_world_height * 0.55)
 	_position_world_on_label(root, _unit_world_position(spr) + side_off)
 	_clamp_label_in_viewport(root)
 
