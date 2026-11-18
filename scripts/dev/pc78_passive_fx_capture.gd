@@ -1,5 +1,5 @@
 extends SceneTree
-## PC-78 GUI：打出攻击牌触发鼓手加攻/加血 + 游侠抽牌飘字。
+## PC-78 GUI：打出攻击牌触发鼓手加攻/加血飘字。
 ## godot --path . --display-driver x11 --rendering-driver opengl3 --resolution 786x1704 \
 ##   --script res://scripts/dev/pc78_passive_fx_capture.gd -- <out.png>
 
@@ -53,17 +53,11 @@ func _initialize() -> void:
 		return
 
 	board.set_terrain_cells({})
-	# 鼓手居中，邻格放游侠/大剑，便于同屏看到 +攻/+血 与 +牌。
+	# 鼓手居中，邻格放游侠/大剑，便于同屏看到 +攻/+血。
 	drum.cell = Vector2i(2, 3)
 	archer.cell = Vector2i(3, 3)
 	pekka.cell = Vector2i(2, 4)
 	board.changed.emit()
-
-	var deck: Variant = board.player_deck
-	if deck != null:
-		# 保证箭袋可抽到可见反馈。
-		if deck.draw_pile.is_empty() and not deck.discard_pile.is_empty():
-			deck._reshuffle_discard_into_draw()
 	await create_timer(0.2, true, false, true).timeout
 
 	var view_cam: Variant = view
