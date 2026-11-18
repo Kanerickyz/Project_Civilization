@@ -13,6 +13,7 @@ enum Kind {
 	SKILL_INSPIRE,
 	SKILL_STEALTH,
 	SKILL_VOLLEY,
+	SKILL_CHARGE,
 }
 
 var kind: Kind = Kind.MOVE
@@ -46,7 +47,7 @@ func _init(
 
 func is_valid() -> bool:
 	match kind:
-		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH, Kind.SKILL_VOLLEY:
+		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH, Kind.SKILL_VOLLEY, Kind.SKILL_CHARGE:
 			return true
 		_:
 			return false
@@ -65,6 +66,10 @@ func is_stealth_aim() -> bool:
 	return kind == Kind.SKILL_STEALTH
 
 
+func is_charge_aim() -> bool:
+	return kind == Kind.SKILL_CHARGE
+
+
 func is_active_skill() -> bool:
 	return (
 		kind == Kind.SKILL_DRAW
@@ -74,6 +79,7 @@ func is_active_skill() -> bool:
 		or kind == Kind.SKILL_INSPIRE
 		or kind == Kind.SKILL_STEALTH
 		or kind == Kind.SKILL_VOLLEY
+		or kind == Kind.SKILL_CHARGE
 	)
 
 
@@ -101,6 +107,8 @@ func kind_label() -> String:
 			return "隐身"
 		Kind.SKILL_VOLLEY:
 			return "万箭齐发"
+		Kind.SKILL_CHARGE:
+			return "冲撞"
 		_:
 			return "移动"
 
@@ -133,6 +141,11 @@ func rules_detail() -> String:
 		Kind.SKILL_VOLLEY:
 			return (
 				"短按或拖到棋盘/手牌区打出（自动绑定游侠）：再点红圈内单位；对目标格及相对攻击方向垂直左右两格造成伤害。"
+			)
+		Kind.SKILL_CHARGE:
+			return (
+				"短按或拖到棋盘/手牌区打出（自动绑定盾卫）：再点方向格；朝该方向冲撞最多 3 格。"
+				+ "路径单位（含友军）受当前攻击力伤害并撞开；遇不可走格则停在前一格且自身受 3 点伤害。"
 			)
 		_:
 			return ""
@@ -175,6 +188,10 @@ func release_preview_cells(board: TacticalBoard) -> Array[Vector2i]:
 			if caster == null:
 				return out
 			return board.attack_range_cells(caster)
+		Kind.SKILL_CHARGE:
+			if caster == null:
+				return out
+			return TacticalCombat.charge_preview_cells(board, caster.cell)
 		Kind.SKILL_STEALTH:
 			for u in board.living_units():
 				if u != null and u.is_alive():
@@ -243,3 +260,8 @@ static func make_skill_stealth(bound_id: String = "assassin") -> TacticalActionC
 ## 游侠主动技「万箭齐发」：自由打出后自动绑定游侠；目标格 + 攻击方向垂直左右两格受伤。
 static func make_skill_volley(bound_id: String = "archer") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_VOLLEY, bound_id)
+
+
+## 盾卫主动技「冲撞」：自由打出后自动绑定盾卫；再点方向格冲撞最多 3 格。
+static func make_skill_charge(bound_id: String = "knight") -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_CHARGE, bound_id)

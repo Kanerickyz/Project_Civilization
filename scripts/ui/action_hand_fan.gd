@@ -166,7 +166,7 @@ func _make_card(text: String, kind: int, index: int) -> Panel:
 		style.bg_color = Color(0.42, 0.14, 0.16, 0.97)
 		style.border_color = Color(0.85, 0.45, 0.4, 1.0)
 	elif kind >= 2:
-		# 主动技（换手 / 加强攻 / 燃爆 / 护甲 / 鼓舞 / 隐身）
+		# 主动技（换手 / 加强攻 / 燃爆 / 护甲 / 鼓舞 / 隐身 / 齐发 / 冲撞）
 		style.bg_color = Color(0.28, 0.22, 0.12, 0.97)
 		style.border_color = Color(0.9, 0.72, 0.35, 1.0)
 	else:

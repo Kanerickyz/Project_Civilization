@@ -64,6 +64,9 @@ func _initialize() -> void:
 	if not _test_volley_binds_archer_only():
 		quit(1)
 		return
+	if not _test_charge_binds_knight_only():
+		quit(1)
+		return
 	if not _test_strong_attack_bonus():
 		quit(1)
 		return
@@ -117,9 +120,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 6 人：鼓手×2 /盾卫/大剑/爆爆/刺客/游侠齐发 → 7
-	if skills != 7:
-		push_error("CardActions: expected 7 skill cards, got %d" % skills)
+	# 6 人：鼓手×2 /盾卫护甲+冲撞 /大剑/爆爆/刺客/游侠齐发 → 8
+	if skills != 8:
+		push_error("CardActions: expected 8 skill cards, got %d" % skills)
 		return false
 	# 每人仅通用攻 1 + 主动技；无移动牌。
 	var expected := living_players + skills
@@ -147,6 +150,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != 1:
 		push_error("CardActions: one knight armor skill expected")
 		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_CHARGE) != 1:
+		push_error("CardActions: one knight charge skill expected")
+		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_BURN_ATTACK) != 1:
 		push_error("CardActions: one boomling burn skill expected")
 		return false
@@ -168,6 +174,12 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 			and (c.bound_unit_id != "" or c.armor_grant != 2)
 		):
 			push_error("CardActions: armor must be unbound with grant 2")
+			return false
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_CHARGE
+			and c.bound_unit_id != "knight"
+		):
+			push_error("CardActions: charge must bind knight")
 			return false
 		if (
 			c.kind == TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
@@ -265,16 +277,20 @@ func _test_player_death_removes_attack_and_skill() -> bool:
 		return false
 	var before_total := deck.total_cards()
 	var before_armor := deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR)
+	var before_charge := deck.count_kind(TacticalActionCardScript.Kind.SKILL_CHARGE)
 	var removed := deck.on_player_unit_died(victim)
-	# 攻 + 盾卫贡献的通用护甲
-	if removed != 2:
-		push_error("CardActions: knight death should remove 2, got %d" % removed)
+	# 攻 + 通用护甲 + 绑定冲撞
+	if removed != 3:
+		push_error("CardActions: knight death should remove 3, got %d" % removed)
 		return false
-	if deck.total_cards() != before_total - 2:
+	if deck.total_cards() != before_total - 3:
 		push_error("CardActions: total after death mismatch")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != before_armor - 1:
 		push_error("CardActions: armor skill should drop by 1")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_CHARGE) != before_charge - 1:
+		push_error("CardActions: charge skill should drop by 1")
 		return false
 	return true
 
@@ -295,8 +311,8 @@ func _test_player_death_cull_is_idempotent() -> bool:
 		push_error("CardActions: knight missing for idempotent cull")
 		return false
 	var first := deck.on_player_unit_died(victim)
-	if first != 2:
-		push_error("CardActions: first knight cull should remove 2, got %d" % first)
+	if first != 3:
+		push_error("CardActions: first knight cull should remove 3, got %d" % first)
 		return false
 	var attack_after := deck.count_kind(TacticalActionCardScript.Kind.ATTACK)
 	var total_after := deck.total_cards()
@@ -767,17 +783,53 @@ func _test_volley_binds_archer_only() -> bool:
 	return true
 
 
+func _test_charge_binds_knight_only() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight: TacticalUnitInstance = null
+	var other: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if u.def.id == "knight":
+			knight = u
+		elif other == null:
+			other = u
+	if knight == null or other == null:
+		push_error("CardActions: need knight + other")
+		return false
+	var card := TacticalActionCardScript.make_skill_charge("knight")
+	if card.is_attack_aim() or not card.is_charge_aim() or not card.is_active_skill():
+		push_error("CardActions: charge must be charge-aim skill")
+		return false
+	if not card.plays_on_board():
+		push_error("CardActions: charge must play free")
+		return false
+	if card.find_bound_caster(board) != knight:
+		push_error("CardActions: charge caster must resolve to knight")
+		return false
+	if not card.can_drop_on(knight) or not card.can_drop_on(other):
+		push_error("CardActions: charge free play accepts any living drop")
+		return false
+	var preview: Array[Vector2i] = card.release_preview_cells(board)
+	if preview.is_empty() or not (knight.cell + Vector2i(1, 0) in preview):
+		push_error("CardActions: charge preview must show direction cells")
+		return false
+	return true
+
+
 func _test_bound_skills_play_free() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var inspire := TacticalActionCardScript.make_skill_inspire("wardrum")
 	var burn := TacticalActionCardScript.make_skill_burn_attack("boomling", 3)
 	var stealth := TacticalActionCardScript.make_skill_stealth("assassin")
 	var volley := TacticalActionCardScript.make_skill_volley("archer")
+	var charge := TacticalActionCardScript.make_skill_charge("knight")
 	if (
 		not inspire.plays_on_board()
 		or not burn.plays_on_board()
 		or not stealth.plays_on_board()
 		or not volley.plays_on_board()
+		or not charge.plays_on_board()
 	):
 		push_error("CardActions: bound skills must play free (plays_on_board)")
 		return false
@@ -785,7 +837,8 @@ func _test_bound_skills_play_free() -> bool:
 	var boom := burn.find_bound_caster(board)
 	var sin := stealth.find_bound_caster(board)
 	var archer := volley.find_bound_caster(board)
-	if drum == null or boom == null or sin == null or archer == null:
+	var knight := charge.find_bound_caster(board)
+	if drum == null or boom == null or sin == null or archer == null or knight == null:
 		push_error("CardActions: bound casters missing on demo board")
 		return false
 	var inspire_cells: Array[Vector2i] = inspire.release_preview_cells(board)

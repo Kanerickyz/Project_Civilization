@@ -61,6 +61,9 @@ func _initialize() -> void:
 	if not _test_archer_volley_side_damage():
 		quit(1)
 		return
+	if not _test_knight_charge_path_hit_and_wall():
+		quit(1)
+		return
 	print("TACTICAL_UNITS_OK")
 	quit(0)
 
@@ -766,5 +769,74 @@ func _test_archer_volley_side_damage() -> bool:
 		return false
 	if foe_left.hp != 99 or foe_right.hp != 99:
 		push_error("TacticalUnits: normal attack must not splash sides")
+		return false
+	return true
+
+
+func _test_knight_charge_path_hit_and_wall() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var knight := _player_unit(board, "knight")
+	var foe := _opponent_unit(board, "rider")
+	var ally := _player_unit(board, "archer")
+	if knight == null or foe == null or ally == null:
+		push_error("TacticalUnits: charge needs knight+foe+ally")
+		return false
+	board.set_terrain_cells({})
+	# 全体先挪开，再摆冲撞轴（勿用 vacate 杀单位）。
+	var park_i := 0
+	for u in board.living_units():
+		u.cell = Vector2i(park_i % 10, 7 if park_i < 10 else 6)
+		park_i += 1
+	knight.cell = Vector2i(1, 3)
+	foe.cell = Vector2i(2, 3)
+	ally.cell = Vector2i(3, 3)
+	foe.hp = 99
+	ally.hp = 99
+	var atk := knight.effective_attack()
+	var hp_before := knight.hp
+	var res := TacticalCombatScript.try_knight_charge(board, knight, Vector2i(4, 3))
+	if not res.get("ok", false):
+		push_error("TacticalUnits: charge should ok")
+		return false
+	if knight.cell != Vector2i(4, 3):
+		push_error("TacticalUnits: charge should end 3 steps at (4,3), got %s" % knight.cell)
+		return false
+	if foe.hp != 99 - atk or ally.hp != 99 - atk:
+		push_error("TacticalUnits: charge path units should take effective_attack")
+		return false
+	var hits: Array = res.get("hits", []) as Array
+	if hits.size() != 2:
+		push_error("TacticalUnits: charge should hit foe+ally, got %d" % hits.size())
+		return false
+	if foe.cell == Vector2i(2, 3) or ally.cell == Vector2i(3, 3):
+		push_error("TacticalUnits: charge should knock victims aside")
+		return false
+	# 撞墙：前方 2 格放树林 → 前进 1 格后停并自伤 3。
+	board.set_terrain_cells({Vector2i(3, 3): &"forest"})
+	park_i = 0
+	for u in board.living_units():
+		u.cell = Vector2i(park_i % 10, 7 if park_i < 10 else 6)
+		park_i += 1
+	knight.cell = Vector2i(1, 3)
+	knight.hp = hp_before
+	knight.armor = 0
+	var res2 := TacticalCombatScript.try_knight_charge(board, knight, Vector2i(5, 3))
+	if not res2.get("ok", false) or not res2.get("wall_stopped", false):
+		push_error("TacticalUnits: charge into forest should wall-stop")
+		return false
+	if knight.cell != Vector2i(2, 3):
+		push_error("TacticalUnits: wall charge should stop before forest at (2,3), got %s" % knight.cell)
+		return false
+	if int(res2.get("self_damage", 0)) != TacticalCombatScript.CHARGE_WALL_SELF_DAMAGE:
+		push_error("TacticalUnits: wall self damage want 3")
+		return false
+	if knight.hp != hp_before - TacticalCombatScript.CHARGE_WALL_SELF_DAMAGE:
+		push_error("TacticalUnits: knight should lose 3 hp on wall")
+		return false
+	# 非盾卫不可冲撞。
+	ally.cell = Vector2i(1, 4)
+	var bad := TacticalCombatScript.try_knight_charge(board, ally, Vector2i(5, 4))
+	if bad.get("ok", false):
+		push_error("TacticalUnits: non-knight must not charge")
 		return false
 	return true

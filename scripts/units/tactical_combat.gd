@@ -77,6 +77,145 @@ static func volley_side_cells(attacker_cell: Vector2i, target_cell: Vector2i) ->
 	return out
 
 
+## 盾卫冲撞：最多前进格数。
+const CHARGE_MAX_STEPS := 3
+## 冲撞撞上不可走格时自身伤害。
+const CHARGE_WALL_SELF_DAMAGE := 3
+
+
+## 冲撞瞄准预览：自 origin 沿 8 向各最多 CHARGE_MAX_STEPS 格（含不可走，便于点方向）。
+static func charge_preview_cells(board: TacticalBoard, origin: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if board == null:
+		return out
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var step := Vector2i(dx, dy)
+			for k in range(1, CHARGE_MAX_STEPS + 1):
+				var cell := origin + step * k
+				if not GridMathScript.in_bounds(cell, board.grid_width, board.grid_height):
+					break
+				out.append(cell)
+	return out
+
+
+## 冲撞撞开：优先垂直左右，再沿冲撞方向；落点须可通行且空。
+static func _charge_knock_aside(
+	board: TacticalBoard, victim: TacticalUnitInstance, charge_step: Vector2i
+) -> Dictionary:
+	var result := {"moved": false, "to": victim.cell if victim != null else Vector2i(-1, -1)}
+	if board == null or victim == null or not victim.is_alive() or charge_step == Vector2i.ZERO:
+		return result
+	var candidates: Array[Vector2i] = []
+	for perp in perpendicular_steps(charge_step):
+		candidates.append(victim.cell + perp)
+	candidates.append(victim.cell + charge_step)
+	for dest in candidates:
+		if not board.is_passable(dest):
+			continue
+		if board.unit_at(dest) != null:
+			continue
+		if board.force_displace(victim, dest):
+			result["moved"] = true
+			result["to"] = dest
+			return result
+	return result
+
+
+## 盾卫主动「冲撞」：朝 target_cell 方向最多前进 CHARGE_MAX_STEPS 格。
+## 路径单位（含友军）受当前攻击力伤害并撞开；遇不可走格停在前一格且自身 CHARGE_WALL_SELF_DAMAGE。
+static func try_knight_charge(
+	board: TacticalBoard,
+	knight: TacticalUnitInstance,
+	target_cell: Vector2i
+) -> Dictionary:
+	var result := {
+		"ok": false,
+		"log": "",
+		"from_cell": Vector2i(-1, -1),
+		"to_cell": Vector2i(-1, -1),
+		"path": [],
+		"hits": [],
+		"wall_stopped": false,
+		"self_damage": 0,
+		"self_killed": false,
+	}
+	if board == null or knight == null or not knight.is_alive():
+		result["log"] = "冲撞需要存活盾卫"
+		return result
+	if knight.def == null or knight.def.id != "knight":
+		result["log"] = "冲撞仅盾卫可用"
+		return result
+	var step := attack_direction_step(knight.cell, target_cell)
+	if step == Vector2i.ZERO:
+		result["log"] = "请点方向格（不能点自身）"
+		return result
+	knight.break_stealth()
+	var dmg := knight.effective_attack()
+	var from_cell := knight.cell
+	var cursor := from_cell
+	var path: Array[Vector2i] = []
+	var hits: Array = []
+	result["from_cell"] = from_cell
+	for _i in range(CHARGE_MAX_STEPS):
+		var next := cursor + step
+		if not board.is_passable(next):
+			result["wall_stopped"] = true
+			var self_hurt := board.apply_damage(knight, CHARGE_WALL_SELF_DAMAGE, null)
+			result["self_damage"] = CHARGE_WALL_SELF_DAMAGE
+			result["self_killed"] = bool(self_hurt.get("killed", false))
+			break
+		var occupant := board.unit_at(next)
+		if occupant != null and occupant != knight:
+			var hurt := board.apply_damage(occupant, dmg, knight)
+			var hit := {
+				"unit": occupant,
+				"cell": next,
+				"damage": dmg,
+				"killed": bool(hurt.get("killed", false)),
+				"knock_moved": false,
+				"knock_to": next,
+			}
+			if occupant.is_alive():
+				var knock := _charge_knock_aside(board, occupant, step)
+				hit["knock_moved"] = bool(knock.get("moved", false))
+				hit["knock_to"] = knock.get("to", next)
+			hits.append(hit)
+			# 仍占格则无法继续前进（已造成伤害；非不可走故不自伤）。
+			if board.unit_at(next) != null:
+				break
+		if not board.force_displace(knight, next):
+			break
+		cursor = next
+		path.append(cursor)
+		if not knight.is_alive():
+			break
+	result["path"] = path
+	result["hits"] = hits
+	result["to_cell"] = cursor
+	result["ok"] = true
+	var log := "%s 冲撞 → (%d,%d)" % [knight.def.display_name, cursor.x, cursor.y]
+	if path.is_empty() and not result["wall_stopped"]:
+		log = "%s 冲撞受阻于 (%d,%d)" % [knight.def.display_name, (cursor + step).x, (cursor + step).y]
+	for hit in hits:
+		var u: TacticalUnitInstance = hit.get("unit") as TacticalUnitInstance
+		var name := u.def.display_name if u != null and u.def != null else "单位"
+		log += " · 撞 %s +%d" % [name, int(hit.get("damage", 0))]
+		if bool(hit.get("killed", false)):
+			log += "（击杀）"
+		elif bool(hit.get("knock_moved", false)):
+			var kto: Vector2i = hit.get("knock_to", Vector2i(-1, -1)) as Vector2i
+			log += " · 撞开至 (%d,%d)" % [kto.x, kto.y]
+	if result["wall_stopped"]:
+		log += " · 撞墙自伤 %d" % int(result["self_damage"])
+		if result["self_killed"]:
+			log += "（阵亡）"
+	result["log"] = log
+	return result
+
+
 static func try_basic_attack(
 	board: TacticalBoard,
 	attacker: TacticalUnitInstance,
