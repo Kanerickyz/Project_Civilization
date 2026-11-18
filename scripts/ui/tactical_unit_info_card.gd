@@ -269,7 +269,7 @@ func _active_skill_line(unit_id: String) -> String:
 			)
 		"archer":
 			return (
-				"[b]主动技 · 万箭齐发[/b]\n只能拖到游侠：对目标格及相对攻击方向垂直左右两格造成伤害。"
+				"[b]主动技 · 万箭齐发[/b]\n短按或拖棋盘（可直接松到红圈目标）：对目标格及相对攻击方向垂直左右两格造成伤害。"
 			)
 		_:
 			return ""

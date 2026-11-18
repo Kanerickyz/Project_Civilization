@@ -280,8 +280,22 @@ static func try_basic_attack(
 	# 狂暴倍率作用于基础攻+加强额外，再向上取整；侧箭溅射用此基础伤（不受主目标击退×1.2）。
 	var splash_dmg := attacker.apply_frenzy_to_damage(attacker.attack_power() + maxi(0, bonus_damage))
 	var dmg := splash_dmg
+	# 侧格与击退一律按攻击前目标格；勿用可能被击退改写后的 target.cell。
 	var from_cell := target.cell
-	var step := attack_direction_step(attacker.cell, target.cell)
+	var volley_sides: Array[Vector2i] = (
+		volley_side_cells(attacker.cell, from_cell) if volley else ([] as Array[Vector2i])
+	)
+	# 主目标伤害/死亡 AoE 前快照侧格单位，避免邻格被挪走或先死导致齐发漏伤。
+	var volley_victims: Array = []
+	if volley and splash_dmg > 0:
+		for side in volley_sides:
+			var side_u := board.unit_at(side)
+			if side_u == null or side_u == attacker or side_u == target:
+				continue
+			if not side_u.is_alive():
+				continue
+			volley_victims.append({"unit": side_u, "cell": side})
+	var step := attack_direction_step(attacker.cell, from_cell)
 	var knock_to := from_cell + step
 	var knock_blocked := false
 	var occupant: TacticalUnitInstance = null
@@ -324,7 +338,28 @@ static func try_basic_attack(
 		result["log"] += " · " + extra
 	if result["killed"]:
 		result["log"] += "（击杀）"
-	# 落点有其他单位：额外 1 点伤害（可为友方）。
+	# 万箭齐发：对快照侧格单位溅射（不含主目标本人）；先于击退碰撞结算。
+	if result["ok"] and not volley_victims.is_empty():
+		var volley_hits: Array = []
+		for entry in volley_victims:
+			var side_u: TacticalUnitInstance = (entry as Dictionary).get("unit") as TacticalUnitInstance
+			var side: Vector2i = (entry as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+			if side_u == null or not side_u.is_alive() or side_u == target:
+				continue
+			var side_hurt := board.apply_damage(side_u, splash_dmg, attacker)
+			_append_passive_fx(result, side_hurt)
+			var hit := {
+				"unit": side_u,
+				"cell": side,
+				"damage": splash_dmg,
+				"killed": side_hurt.get("killed", false),
+			}
+			volley_hits.append(hit)
+			result["log"] += " · 齐发 %s +%d" % [side_u.def.display_name, splash_dmg]
+			if hit["killed"]:
+				result["log"] += "（击杀）"
+		result["volley_hits"] = volley_hits
+	# 落点有其他单位：额外 1 点伤害（可为友方）。侧箭已结算过的单位仍可吃碰撞伤。
 	if do_knockback and knock_blocked and occupant != null and occupant != target and occupant.is_alive():
 		var col := board.apply_damage(occupant, KNOCKBACK_COLLISION_DAMAGE, attacker)
 		_append_passive_fx(result, col)
@@ -342,32 +377,10 @@ static func try_basic_attack(
 		if board.force_displace(target, knock_to):
 			result["knockback_moved"] = true
 			result["log"] += " · 击退至 (%d,%d)" % [knock_to.x, knock_to.y]
-	# 万箭齐发：原目标格垂直左右两格溅射（不含主目标本人，即使其被击退落到侧格）。
-	if result["ok"] and volley and splash_dmg > 0:
-		var volley_hits: Array = []
-		for side in volley_side_cells(attacker.cell, target_cell):
-			var side_u := board.unit_at(side)
-			if side_u == null or side_u == attacker or side_u == target:
-				continue
-			if not side_u.is_alive():
-				continue
-			var side_hurt := board.apply_damage(side_u, splash_dmg, attacker)
-			_append_passive_fx(result, side_hurt)
-			var hit := {
-				"unit": side_u,
-				"cell": side,
-				"damage": splash_dmg,
-				"killed": side_hurt.get("killed", false),
-			}
-			volley_hits.append(hit)
-			result["log"] += " · 齐发 %s +%d" % [side_u.def.display_name, splash_dmg]
-			if hit["killed"]:
-				result["log"] += "（击杀）"
-		result["volley_hits"] = volley_hits
 	# 技能燃爆：对目标格及周围施加燃烧（排除攻击者）。目标已死仍对周围生效。
 	# 击退后仍按原目标格做燃爆 AoE。
 	if result["ok"] and aoe_burn_stacks > 0:
-		var burned := board.apply_burn_aoe(target_cell, aoe_burn_stacks, 1, attacker)
+		var burned := board.apply_burn_aoe(from_cell, aoe_burn_stacks, 1, attacker)
 		result["burn_applied"] = burned
 		if burned > 0:
 			result["log"] += " · 燃爆：%d 名单位 +%d 燃烧" % [burned, aoe_burn_stacks]

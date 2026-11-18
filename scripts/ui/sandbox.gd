@@ -448,6 +448,8 @@ func _clear_pending_target(keep_move_focus: bool = true) -> void:
 		_deck.clear_attack_authorization(_focus_unit)
 	else:
 		_deck.pending_attack_bonus = 0
+		_deck.pending_aoe_burn_stacks = 0
+		_deck.pending_volley = false
 	if not keep_move_focus:
 		_focus_unit = null
 	elif _focus_unit != null and _focus_unit.is_alive() and _focus_unit.remaining_move_budget > 0:
@@ -718,6 +720,7 @@ func _on_hand_card_activated(index: int) -> void:
 
 
 ## 单位目标卡拖到己方单位；非通用技松手在棋盘/手牌区即可。无效回手。
+## 瞄准类技若松手落在合法目标格上：打出后立刻结算，无需再点一次。
 func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if _board_view != null:
 		_board_view.clear_card_drag_hover()
@@ -738,6 +741,7 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 			return
 		_hand_fan.notify_drop_resolved(true)
 		_resolve_free_skill_play(index)
+		_try_complete_aim_at_drop_cell(cell_v)
 		return
 	if cell_v == null:
 		_last_log = "未落到单位上 · 卡已回手"
@@ -764,6 +768,43 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_refresh_all()
 		return
 	_apply_unit_targeted_card(card, target)
+	# 通用攻击/加强攻拖到己方后仍须点红圈；此处不自动结算。
+
+
+## 自由打出瞄准技后：若松手格已是合法目标，立刻结算（万箭/燃爆/隐身/冲撞）。
+func _try_complete_aim_at_drop_cell(cell_v: Variant) -> void:
+	if cell_v == null or _focus_unit == null or _input_locked or _game_over:
+		return
+	var cell: Vector2i = cell_v
+	if _pending_kind == PendingKind.ATTACK:
+		if not _deck.is_attack_authorized(_focus_unit):
+			return
+		var clicked := _board.unit_at(cell)
+		if clicked == null or clicked == _focus_unit or not clicked.is_alive():
+			return
+		var atk_dist := GridMathScript.chebyshev(_focus_unit.cell, clicked.cell)
+		if not _focus_unit.def.is_chebyshev_in_attack_band(atk_dist):
+			return
+		if not _board.has_attack_los(_focus_unit.cell, clicked.cell):
+			return
+		_run_player_attack_async(clicked.cell, clicked)
+		return
+	if _pending_kind == PendingKind.STEALTH:
+		var stealth_target := _board.unit_at(cell)
+		if stealth_target == null or not stealth_target.is_alive():
+			return
+		var stealth_res: Dictionary = _board.apply_grant_stealth(_focus_unit, stealth_target)
+		_pending_kind = PendingKind.NONE
+		_last_log = str(stealth_res.get("log", "隐身"))
+		_refresh_all()
+		_maybe_auto_end_player_turn_if_hand_empty()
+		return
+	if _pending_kind == PendingKind.CHARGE:
+		var charge_cells: Array[Vector2i] = TacticalCombatScript.charge_preview_cells(
+			_board, _focus_unit.cell
+		)
+		if cell in charge_cells:
+			_run_player_charge_async(cell)
 
 
 ## 非通用绑角色技：自动找施法者结算。

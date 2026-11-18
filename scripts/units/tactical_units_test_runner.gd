@@ -859,6 +859,32 @@ func _test_archer_volley_side_damage() -> bool:
 	if res2.get("knockback_moved", false) or foe_mid.cell != Vector2i(4, 2):
 		push_error("TacticalUnits: ranged normal attack must not knockback")
 		return false
+	# 竖直攻击方向：游侠 (2,2)→(2,4)，侧格 (1,4)/(3,4)。
+	archer.cell = Vector2i(2, 2)
+	foe_mid.cell = Vector2i(2, 4)
+	foe_left.cell = Vector2i(1, 4)
+	foe_right.cell = Vector2i(3, 4)
+	_vacate_cell(board, Vector2i(2, 5))
+	foe_mid.hp = 99
+	foe_left.hp = 99
+	foe_right.hp = 99
+	var sides_v := TacticalCombatScript.volley_side_cells(archer.cell, foe_mid.cell)
+	if (
+		sides_v.size() != 2
+		or not sides_v.has(Vector2i(1, 4))
+		or not sides_v.has(Vector2i(3, 4))
+	):
+		push_error("TacticalUnits: vertical volley side cells wrong %s" % [sides_v])
+		return false
+	var res_v := TacticalCombatScript.try_basic_attack(
+		board, archer, foe_mid.cell, TacticalFactionScript.Id.PLAYER, true, 0, 0, true
+	)
+	if not res_v["ok"] or (res_v.get("volley_hits", []) as Array).size() != 2:
+		push_error("TacticalUnits: vertical volley should splash 2 sides")
+		return false
+	if foe_left.hp != 99 - splash or foe_right.hp != 99 - splash:
+		push_error("TacticalUnits: vertical volley side dmg want %d" % splash)
+		return false
 	return true
 
 
