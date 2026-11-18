@@ -1,5 +1,5 @@
 extends Control
-## 击杀全屏打击感：红斜横带 + 中央黑剪影冲击，短暂闪现。
+## 击杀全屏打击感：红斜横带 + 中央被击杀单位黑剪影，短暂闪现。
 ## 纯 2D `_draw` / CanvasItem，无 Light2D/3D。
 
 const BAND_COLOR := Color(0.90, 0.06, 0.10, 1.0)
@@ -11,8 +11,11 @@ const FADE_SEC := 0.22
 const BAND_TILT_DEG := -9.0
 ## 横带占屏高比例（中心带）。
 const BAND_HEIGHT_RATIO := 0.34
+## 剪影相对横带高度的占比。
+const SILHOUETTE_BAND_FILL := 0.92
 
 var _tween: Tween
+var _silhouette_tex: Texture2D
 
 
 func _ready() -> void:
@@ -26,9 +29,11 @@ func _ready() -> void:
 
 
 ## 重播：瞬显 → 微冲缩放 → 短停 → 淡出。
-func play() -> void:
+## silhouette_tex：被击杀单位精灵；缺省时仍画抽象冲击核作回退。
+func play(silhouette_tex: Texture2D = null) -> void:
 	if _tween != null and is_instance_valid(_tween):
 		_tween.kill()
+	_silhouette_tex = silhouette_tex
 	visible = true
 	pivot_offset = size * 0.5
 	modulate.a = 1.0
@@ -45,6 +50,7 @@ func play() -> void:
 	_tween.finished.connect(func() -> void:
 		visible = false
 		scale = Vector2.ONE
+		_silhouette_tex = null
 	)
 
 
@@ -122,6 +128,31 @@ func _jag_offset(i: int, salt: int) -> float:
 
 func _draw_impact_silhouette(sz: Vector2) -> void:
 	var c := sz * 0.5
+	if _silhouette_tex != null:
+		_draw_unit_silhouette(c, sz)
+		return
+	_draw_fallback_burst(c, sz)
+
+
+## 用单位精灵乘纯黑 modulate：透明区仍透明，实体成黑剪影。
+func _draw_unit_silhouette(c: Vector2, sz: Vector2) -> void:
+	var tex_sz := _silhouette_tex.get_size()
+	if tex_sz.x < 1.0 or tex_sz.y < 1.0:
+		_draw_fallback_burst(c, sz)
+		return
+	var band_h := sz.y * BAND_HEIGHT_RATIO
+	var target_h := band_h * SILHOUETTE_BAND_FILL
+	var s := target_h / tex_sz.y
+	# 过宽时按屏宽再压一点，避免贴边。
+	var max_w := sz.x * 0.72
+	if tex_sz.x * s > max_w:
+		s = max_w / tex_sz.x
+	var draw_sz := tex_sz * s
+	var rect := Rect2(c - draw_sz * 0.5, draw_sz)
+	draw_texture_rect(_silhouette_tex, rect, false, SILHOUETTE_COLOR)
+
+
+func _draw_fallback_burst(c: Vector2, sz: Vector2) -> void:
 	var r := mini(sz.x, sz.y) * 0.16
 	# 不规则冲击核心（星形扰动圆）。
 	var core := PackedVector2Array()
