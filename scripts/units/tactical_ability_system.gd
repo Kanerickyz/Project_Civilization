@@ -54,6 +54,34 @@ static func process_unit_death(board: TacticalBoard, unit: TacticalUnitInstance)
 	return _try_trigger(board, unit, TacticalActiveAbility.TriggerKind.ON_SELF_DEATH)
 
 
+## 同阵营其他单位阵亡后：扫描仍存活友方的 ON_ALLY_DEATH 被动（不含死者自身）。
+static func process_ally_death(
+	board: TacticalBoard, dead: TacticalUnitInstance
+) -> Array[String]:
+	if board == null or dead == null:
+		return []
+	var logs: Array[String] = []
+	for u in board.living_units():
+		if u == dead or u.faction != dead.faction:
+			continue
+		logs.append_array(_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH))
+	return logs
+
+
+## 玩家打出一张攻击瞄准卡后：扫描存活己方单位的 ON_PLAYER_ATTACK_CARD 被动。
+static func process_player_attack_card_played(board: TacticalBoard) -> Array[String]:
+	if board == null:
+		return []
+	var logs: Array[String] = []
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		logs.append_array(
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD)
+		)
+	return logs
+
+
 static func _try_trigger(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
@@ -78,8 +106,44 @@ static func _try_trigger(
 			return _apply_ally_buff(board, unit, ab, "鼓阵")
 		TacticalActiveAbility.TriggerKind.ON_SELF_DEATH:
 			return _apply_death_aoe_burn(board, unit, ab)
+		TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD:
+			return _apply_player_attack_card(board, unit, ab)
+		TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
+			return _draw_cards_on_trigger(board, unit, ab)
 		_:
 			return []
+
+
+static func _apply_player_attack_card(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility
+) -> Array[String]:
+	var logs: Array[String] = []
+	logs.append_array(
+		_apply_ally_buff(
+			board, unit, ab, ab.display_name if not ab.display_name.is_empty() else "战鼓"
+		)
+	)
+	logs.append_array(_draw_cards_on_trigger(board, unit, ab))
+	return logs
+
+
+static func _draw_cards_on_trigger(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility
+) -> Array[String]:
+	var n := ab.draw_cards_on_trigger
+	if n <= 0:
+		return []
+	if board.player_deck == null:
+		return []
+	var drawn := board.player_deck.draw_up_to(n)
+	var tag := ab.display_name if not ab.display_name.is_empty() else "抽牌"
+	if drawn <= 0:
+		return ["%s %s：牌库无可抽" % [unit.def.display_name, tag]]
+	return ["%s %s：抽 %d 张" % [unit.def.display_name, tag, drawn]]
 
 
 static func _apply_self_atk(

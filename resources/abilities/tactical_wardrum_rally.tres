@@ -5,14 +5,15 @@
 [resource]
 script = ExtResource("1_ab")
 id = "forward_drums"
-display_name = "鼓阵激励"
-autochess_ability_id = "move_end_nearby_atk_hp_small"
-rules_hint = "移动结束时：以自身为中心 2 格内其他角色攻击+1、生命+1（本场）。"
-trigger_kind = 4
+display_name = "战鼓同频"
+autochess_ability_id = "attack_card_nearby_atk_hp_small"
+rules_hint = "玩家每打出一张攻击牌：周围 1 格其他友方攻击+1、生命+1（本场；生命抬上限并回等量）。"
+trigger_kind = 6
 range_chebyshev = 0
 self_atk_on_trigger = 0
 self_atk_on_kill = 0
 ally_atk_buff = 1
 ally_hp_buff = 1
-ally_buff_radius = 2
+ally_buff_radius = 1
 grant_ephemeral_attack_on_kill = false
+draw_cards_on_trigger = 0

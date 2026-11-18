@@ -10,6 +10,10 @@ enum TriggerKind {
 	ON_SELF_KILL,
 	ON_SELF_MOVE_END,
 	ON_SELF_DEATH,
+	## 玩家打出一张攻击瞄准卡（普攻/加强/燃爆）时，由存活己方单位触发。
+	ON_PLAYER_ATTACK_CARD,
+	## 同阵营其他单位阵亡时，由仍存活的友方触发。
+	ON_ALLY_DEATH,
 }
 
 
@@ -27,6 +31,8 @@ enum TriggerKind {
 @export var ally_buff_radius: int = 2
 ## 击杀时往玩家手牌加 1 张临时攻击卡（仅玩家击杀生效）。
 @export var grant_ephemeral_attack_on_kill: bool = false
+## 玩家打出攻击牌时从牌库抽 N 张（需 board.player_deck）。
+@export var draw_cards_on_trigger: int = 0
 ## 触发时对中心格及周围（切比雪夫 ≤ aoe_burn_radius）存活单位施加燃烧层数。
 @export var aoe_burn_stacks: int = 0
 @export var aoe_burn_radius: int = 1

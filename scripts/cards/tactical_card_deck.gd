@@ -151,7 +151,7 @@ func play_hand_index(index: int) -> TacticalActionCard:
 	return card
 
 
-## 游侠击杀：立刻往手牌加 1 张临时攻击卡（用完销毁、不进三库）。
+## 临时攻击卡工具：立刻往手牌加 1 张（用完销毁、不进三库）。
 func add_ephemeral_attack_to_hand() -> TacticalActionCard:
 	var card := TacticalActionCardScript.make_attack(true)
 	hand.append(card)

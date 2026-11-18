@@ -4,15 +4,16 @@
 
 [resource]
 script = ExtResource("1_ab")
-id = "iron_wall"
-display_name = "铁壁"
-autochess_ability_id = "hurt_gain_atk_small"
-rules_hint = "受伤时：自身攻击+1（本场，可叠加）。"
-trigger_kind = 1
+id = "shield_vigil"
+display_name = "守望"
+autochess_ability_id = "ally_death_draw_one"
+rules_hint = "友方死亡时：从牌库抽 1 张。"
+trigger_kind = 7
 range_chebyshev = 1
-self_atk_on_trigger = 1
+self_atk_on_trigger = 0
 self_atk_on_kill = 0
 ally_atk_buff = 0
 ally_hp_buff = 0
 ally_buff_radius = 2
 grant_ephemeral_attack_on_kill = false
+draw_cards_on_trigger = 1

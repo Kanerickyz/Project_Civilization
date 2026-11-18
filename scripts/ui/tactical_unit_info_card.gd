@@ -217,6 +217,11 @@ func _skills_bbcode(unit: TacticalUnitInstance) -> String:
 		lines.append("[b]被动 · %s[/b]\n%s" % [title, hint])
 	else:
 		lines.append("[b]被动[/b]\n无")
+	lines.append(
+		"[b]普攻 · 击退[/b]\n命中后沿攻击方向击退 1 格（短 Tween）。"
+		+ "落点不可走：本次伤害改为最终伤害×1.2（向上取整）。"
+		+ "落点有单位：对其额外 1 点伤害。"
+	)
 	var skill := _active_skill_line(unit.def.id)
 	if not skill.is_empty():
 		lines.append(skill)
@@ -234,10 +239,7 @@ func _active_skill_line(unit_id: String) -> String:
 			)
 		"knight":
 			return (
-				"[b]普攻 · 击退[/b]\n命中后沿攻击方向击退 1 格（短 Tween）。"
-				+ "落点不可走：本次伤害改为最终伤害×1.2（向上取整）。"
-				+ "落点有单位：对其额外 1 点伤害。\n\n"
-				+ "[b]主动技 · 护甲[/b]\n通用卡：拖到任意己方；立刻 +2 护甲（可叠加）。伤害先打护甲，溢出不穿血。"
+				"[b]主动技 · 护甲[/b]\n通用卡：拖到任意己方；立刻 +2 护甲（可叠加）。伤害先打护甲，溢出不穿血。"
 			)
 		"mini_pekka":
 			return "[b]主动技 · 加强攻击[/b]\n通用卡：拖到任意己方；本次攻击额外 +2 伤害。"
