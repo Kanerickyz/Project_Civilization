@@ -276,6 +276,7 @@ func _build() -> void:
 	_hand_fan.custom_minimum_size = Vector2(0, 118)
 	_hand_fan.card_dropped.connect(_on_hand_card_dropped)
 	_hand_fan.card_drag_moved.connect(_on_hand_card_drag_moved)
+	_hand_fan.card_activated.connect(_on_hand_card_activated)
 	bottom_col.add_child(_hand_fan)
 
 	var actions := HBoxContainer.new()
@@ -518,7 +519,7 @@ func _compose_hint() -> String:
 		return "隐身：%s · 点任意存活单位" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
-	return "点己方移动 · 拖攻击/技能卡到单位 · 库 %d · 弃 %d" % [
+	return "点己方移动 · 通用卡拖单位 · 技能卡短按/拖棋盘 · 库 %d · 弃 %d" % [
 		_deck.draw_pile.size(),
 		_deck.discard_pile.size(),
 	]
@@ -657,16 +658,30 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 	var cell_v: Variant = _board_view.pick_cell_at_global(global_pos)
 	if cell_v == null:
 		_board_view.clear_card_drag_hover()
+		# 拖出棋盘仍保留可释放格高亮（无箭头）。
+		if peek != null and peek.plays_on_board():
+			_board_view.set_skill_drag_preview(
+				null, null, peek.release_preview_cells(_board), false
+			)
 		return
 	var cell: Vector2i = cell_v
 	var unit := _board.unit_at(cell)
 	var hover_unit: TacticalUnitInstance = null
 	var valid := false
 	if peek != null and peek.plays_on_board():
-		# 鸣鼓换手：棋盘任意有效格可落。
+		var release_cells: Array[Vector2i] = peek.release_preview_cells(_board)
+		var in_release := cell in release_cells
+		# 自由打出：棋盘任意有效格可松手；高亮按技能规则格。
 		valid = true
 		if unit != null and unit.is_alive():
 			hover_unit = unit
+		var caster := peek.find_bound_caster(_board)
+		_board_view.set_card_drag_hover(cell, hover_unit, valid)
+		if caster != null:
+			_board_view.set_skill_drag_preview(caster.cell, cell, release_cells, in_release)
+		else:
+			_board_view.set_skill_drag_preview(null, null, release_cells, false)
+		return
 	elif unit != null and unit.is_alive():
 		hover_unit = unit
 		valid = (
@@ -674,10 +689,23 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 			and peek != null
 			and peek.can_drop_on(unit)
 		)
+	_board_view.clear_skill_drag_preview()
 	_board_view.set_card_drag_hover(cell, hover_unit, valid)
 
 
-## 单位目标卡拖到己方单位；棋盘打出卡松手在有效格即可。无效回手。
+## 短按：非通用技自由打出；通用卡短按无效。
+func _on_hand_card_activated(index: int) -> void:
+	if _in_deployment or _input_locked or _game_over or not _clock.player_active:
+		return
+	if index < 0 or index >= _deck.hand.size():
+		return
+	var peek: TacticalActionCard = _deck.hand[index]
+	if peek == null or not peek.plays_on_board():
+		return
+	_resolve_free_skill_play(index)
+
+
+## 单位目标卡拖到己方单位；非通用技松手在棋盘/手牌区即可。无效回手。
 func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if _board_view != null:
 		_board_view.clear_card_drag_hover()
@@ -689,32 +717,22 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		return
 	var peek: TacticalActionCard = _deck.hand[index]
 	var cell_v: Variant = _board_view.pick_cell_at_global(global_pos)
+	# 非通用技：棋盘格或手牌区（无格）均可打出。
+	if peek != null and peek.plays_on_board():
+		if peek.find_bound_caster(_board) == null:
+			_last_log = "施法者不在场 · 卡已回手"
+			_hand_fan.notify_drop_resolved(false)
+			_refresh_all()
+			return
+		_hand_fan.notify_drop_resolved(true)
+		_resolve_free_skill_play(index)
+		return
 	if cell_v == null:
-		_last_log = (
-			"未落到棋盘上 · 卡已回手"
-			if peek != null and peek.plays_on_board()
-			else "未落到单位上 · 卡已回手"
-		)
+		_last_log = "未落到单位上 · 卡已回手"
 		_hand_fan.notify_drop_resolved(false)
 		_refresh_all()
 		return
 	var cell: Vector2i = cell_v
-	# 鸣鼓换手：棋盘有效格即可打出。
-	if peek != null and peek.plays_on_board():
-		_hand_fan.notify_drop_resolved(true)
-		var board_card := _deck.play_hand_index(index)
-		if board_card == null or not board_card.is_valid():
-			_last_log = "无法使用该卡"
-			_refresh_all()
-			return
-		_pending_kind = PendingKind.NONE
-		_focus_unit = null
-		var drawn := _deck.resolve_wardrum_redraw()
-		_last_log = "鸣鼓换手：弃手后抽 %d 张" % drawn
-		_refresh_all()
-		# 换手抽牌后再判空手（通常已补满，不会自动结束）。
-		_maybe_auto_end_player_turn_if_hand_empty()
-		return
 	var target := _board.unit_at(cell)
 	if target == null or target.faction != TacticalFactionScript.Id.PLAYER:
 		_last_log = "需拖到己方单位 · 卡已回手"
@@ -733,6 +751,39 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		_last_log = "无法使用该卡"
 		_refresh_all()
 		return
+	_apply_unit_targeted_card(card, target)
+
+
+## 非通用绑角色技：自动找施法者结算。
+func _resolve_free_skill_play(index: int) -> void:
+	if index < 0 or index >= _deck.hand.size():
+		return
+	var peek: TacticalActionCard = _deck.hand[index]
+	if peek == null or not peek.plays_on_board():
+		return
+	var caster := peek.find_bound_caster(_board)
+	if caster == null:
+		_last_log = "施法者不在场 · 卡已回手"
+		_refresh_all()
+		return
+	var card := _deck.play_hand_index(index)
+	if card == null or not card.is_valid():
+		_last_log = "无法使用该卡"
+		_refresh_all()
+		return
+	if card.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
+		_pending_kind = PendingKind.NONE
+		_focus_unit = null
+		_selected_unit = null
+		var drawn := _deck.resolve_wardrum_redraw()
+		_last_log = "鸣鼓换手：弃手后抽 %d 张" % drawn
+		_refresh_all()
+		_maybe_auto_end_player_turn_if_hand_empty()
+		return
+	_apply_unit_targeted_card(card, caster)
+
+
+func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitInstance) -> void:
 	_focus_unit = target
 	_selected_unit = target
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
@@ -1330,42 +1381,63 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 	if unit == null:
 		return false
 	var peek: TacticalActionCard = _deck.hand[idx]
-	if not peek.plays_on_board() and not peek.can_drop_on(unit):
+	if peek.plays_on_board():
+		_resolve_free_skill_play(idx)
+		return true
+	if not peek.can_drop_on(unit):
 		return false
 	var card := _deck.play_hand_index(idx)
 	if card == null:
 		return false
-	_focus_unit = unit
-	_selected_unit = unit
-	if card.kind == TacticalActionCardScript.Kind.MOVE:
-		_select_player_for_move(unit)
-	elif card.kind == TacticalActionCardScript.Kind.SKILL_DRAW:
-		_pending_kind = PendingKind.NONE
-		_focus_unit = null
-		_deck.resolve_wardrum_redraw()
-	elif card.kind == TacticalActionCardScript.Kind.SKILL_ARMOR:
-		unit.add_armor(maxi(1, card.armor_grant))
-		_pending_kind = PendingKind.NONE
-	elif card.kind == TacticalActionCardScript.Kind.SKILL_INSPIRE:
-		var inspire_cap: Dictionary = _board.apply_inspire_frenzy(unit, 1)
-		_pending_kind = PendingKind.NONE
-		_last_log = str(inspire_cap.get("log", "鼓舞"))
-	elif card.kind == TacticalActionCardScript.Kind.SKILL_STEALTH:
-		_pending_kind = PendingKind.STEALTH
-		_last_log = "隐身：%s · 点任意存活单位" % unit.def.display_name
-	elif card.is_attack_aim():
-		_deck.authorize_attack(
-			unit,
-			card.attack_bonus_damage,
-			card.aoe_burn_stacks,
-			card.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
-		)
-		_pending_kind = PendingKind.ATTACK
-		_append_attack_card_passive_logs()
-	else:
+	_apply_unit_targeted_card(card, unit)
+	return true
+
+
+## GUI 验收：模拟拖非通用技到目标格（高亮+箭头）；返回 false 若卡/施法者缺失。
+func capture_skill_drag_preview(kind_name: String, hover_unit_id: String = "") -> bool:
+	var want := TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
+	match kind_name:
+		"skill_draw":
+			want = TacticalActionCardScript.Kind.SKILL_DRAW
+		"skill_inspire":
+			want = TacticalActionCardScript.Kind.SKILL_INSPIRE
+		"skill_burn_attack":
+			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
+		"skill_stealth":
+			want = TacticalActionCardScript.Kind.SKILL_STEALTH
+		"skill_volley":
+			want = TacticalActionCardScript.Kind.SKILL_VOLLEY
+		_:
+			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
+	var peek: TacticalActionCard = null
+	for c in _deck.hand:
+		if c.kind == want:
+			peek = c
+			break
+	if peek == null or not peek.plays_on_board():
 		return false
-	_refresh_all()
-	_maybe_auto_end_player_turn_if_hand_empty()
+	var caster := peek.find_bound_caster(_board)
+	if caster == null:
+		return false
+	var release_cells: Array[Vector2i] = peek.release_preview_cells(_board)
+	if release_cells.is_empty():
+		return false
+	var hover_cell: Vector2i = release_cells[0]
+	if hover_unit_id != "":
+		for u in _board.living_units():
+			if u.def != null and u.def.id == hover_unit_id and u.cell in release_cells:
+				hover_cell = u.cell
+				break
+	elif release_cells.size() > 1:
+		# 优先选非施法者格，箭头更可读。
+		for c in release_cells:
+			if c != caster.cell:
+				hover_cell = c
+				break
+	_board_view.set_card_drag_hover(hover_cell, _board.unit_at(hover_cell), true)
+	_board_view.set_skill_drag_preview(caster.cell, hover_cell, release_cells, true)
+	_last_log = "拖技预览：%s → %s" % [peek.display_label(), hover_cell]
+	_refresh_hand_ui()
 	return true
 
 

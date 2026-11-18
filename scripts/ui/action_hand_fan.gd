@@ -7,6 +7,8 @@ extends Control
 signal card_dropped(index: int, global_pos: Vector2)
 ## 拖拽跟手时持续发出，供棋盘悬停格/单位选中反馈（松手后由沙盘清空）。
 signal card_drag_moved(index: int, global_pos: Vector2)
+## 短按（未拖、未开详情）松手：非通用技可直接打出。
+signal card_activated(index: int)
 
 const CARD_W := 72.0
 const CARD_H := 100.0
@@ -163,8 +165,8 @@ func _make_card(text: String, kind: int, index: int) -> Panel:
 		# 攻击
 		style.bg_color = Color(0.42, 0.14, 0.16, 0.97)
 		style.border_color = Color(0.85, 0.45, 0.4, 1.0)
-	elif kind == 2 or kind == 3 or kind == 4 or kind == 5 or kind == 6:
-		# 主动技（换手 / 加强攻 / 燃爆 / 护甲 / 鼓舞）
+	elif kind >= 2:
+		# 主动技（换手 / 加强攻 / 燃爆 / 护甲 / 鼓舞 / 隐身）
 		style.bg_color = Color(0.28, 0.22, 0.12, 0.97)
 		style.border_color = Color(0.9, 0.72, 0.35, 1.0)
 	else:
@@ -335,7 +337,7 @@ func _show_detail(index: int) -> void:
 	if index < _detail_lines.size() and _detail_lines[index] != "":
 		_detail_body.text = _detail_lines[index]
 	else:
-		_detail_body.text = "长按查看 · 拖到己方单位使用"
+		_detail_body.text = "长按查看 · 通用卡拖到单位；技能卡短按或拖棋盘"
 	_detail_panel.visible = true
 	_detail_panel.scale = Vector2(0.92, 0.92)
 	_detail_panel.modulate.a = 0.0
@@ -412,11 +414,15 @@ func _on_press_released(global_pos: Vector2) -> void:
 		card_dropped.emit(_drag_index, global_pos)
 		# 等待 sandbox notify_drop_resolved
 		return
-	# 长按详情：松手即关，卡仍在手；短按无效果。
+	var clicked := _press_index
+	var was_detail := _detail_open
 	_hide_detail()
 	_press_index = -1
 	set_process_input(false)
 	_apply_hover_visual()
+	# 长按详情松手只关详情；短按可激活（由沙盘判定是否自由打出）。
+	if not was_detail and clicked >= 0:
+		card_activated.emit(clicked)
 
 
 func _finish_accepted_drop() -> void:

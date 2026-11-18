@@ -60,12 +60,17 @@ const OVERLAY_COLORS := {
 	"h": Color(1.0, 0.88, 0.28, 0.42),
 	"hv": Color(0.38, 0.95, 0.55, 0.55),
 	"hx": Color(0.78, 0.32, 0.36, 0.42),
+	## 非通用技拖牌：可释放/技能规则格（金）。
+	"sk": Color(0.95, 0.78, 0.35, 0.48),
 	## 点燃地块（可与选中/移动/攻击叠显：独立 marker，本色仅作参考）。
 	"b": Color(1.0, 0.42, 0.12, 0.38),
 	## 狼骑下一意图：路径格 / 攻击目标格（低于选中/红攻/绿移）。
 	"ip": Color(0.55, 0.88, 1.0, 0.38),
 	"it": Color(1.0, 0.62, 0.28, 0.52),
 }
+const SKILL_ARROW_VALID := Color(0.98, 0.86, 0.42, 0.95)
+const SKILL_ARROW_INVALID := Color(0.82, 0.38, 0.4, 0.75)
+const SKILL_ARROW_SEGMENTS := 18
 const INTENT_GHOST_ALPHA := 0.42
 const INTENT_PATH_LINE_COLOR := Color(0.55, 0.9, 1.0, 0.85)
 const INTENT_ATK_LINE_COLOR := Color(1.0, 0.45, 0.32, 0.9)
@@ -93,6 +98,10 @@ var _overlay_intent_target: Dictionary = {} # Vector2i -> true
 var _overlay_drag_hover: Vector2i = Vector2i(-1, -1)
 ## 0=空白/中性，1=可落单位，-1=不可落单位。
 var _overlay_drag_hover_kind: int = 0
+## 非通用技拖牌：可释放格高亮。
+var _overlay_skill_release: Dictionary = {} # Vector2i -> true
+## STS 风格曲线箭头：施法格 → 悬停释放格。
+var _skill_aim_arrow: Node2D = null
 ## 点选狼骑：下回合意图虚影（路径线 / 攻击线 / 落点半透明精灵 / 回血加攻提示）。
 var _intent_preview_ghost: Sprite2D = null
 var _intent_preview_line: Line2D = null
@@ -383,6 +392,8 @@ func _rebuild_board() -> void:
 	_drag_select_valid = false
 	_overlay_drag_hover = Vector2i(-1, -1)
 	_overlay_drag_hover_kind = 0
+	_overlay_skill_release.clear()
+	_skill_aim_arrow = null
 	_clear_deploy_drag()
 	for key in _unit_sprites.keys():
 		_kill_unit_idle(key as TacticalUnitInstance)
@@ -1330,14 +1341,6 @@ func _apply_overlay(cell: Vector2i) -> void:
 	var tag := ""
 	if cell == _overlay_selected:
 		tag = "s"
-	elif _overlay_attack.has(cell):
-		tag = "a"
-	elif _overlay_move.has(cell):
-		tag = "m"
-	elif _overlay_intent_target.has(cell):
-		tag = "it"
-	elif _overlay_intent_path.has(cell):
-		tag = "ip"
 	elif cell == _overlay_drag_hover:
 		if _overlay_drag_hover_kind > 0:
 			tag = "hv"
@@ -1345,6 +1348,16 @@ func _apply_overlay(cell: Vector2i) -> void:
 			tag = "hx"
 		else:
 			tag = "h"
+	elif _overlay_attack.has(cell):
+		tag = "a"
+	elif _overlay_skill_release.has(cell):
+		tag = "sk"
+	elif _overlay_move.has(cell):
+		tag = "m"
+	elif _overlay_intent_target.has(cell):
+		tag = "it"
+	elif _overlay_intent_path.has(cell):
+		tag = "ip"
 	ov.visible = tag != ""
 	if tag != "":
 		ov.color = OVERLAY_COLORS.get(tag, Color(1, 1, 1, 0.4)) as Color
@@ -1632,8 +1645,104 @@ func set_card_drag_hover(cell: Variant, unit: TacticalUnitInstance, valid_drop: 
 	_set_drag_select_unit(unit if unit != null and unit.is_alive() else null, valid_drop)
 
 
+## 非通用技拖牌预览：高亮可释放格 + STS 曲线箭头（施法格 → 悬停格）。
+## caster_cell / hover_cell 为 null 时只清箭头；release_cells 为空则清高亮。
+func set_skill_drag_preview(
+	caster_cell: Variant,
+	hover_cell: Variant,
+	release_cells: Array,
+	hover_in_release: bool
+) -> void:
+	var prev_release := _overlay_skill_release.duplicate()
+	_overlay_skill_release.clear()
+	for c in release_cells:
+		if c is Vector2i:
+			_overlay_skill_release[c as Vector2i] = true
+	for cell in prev_release.keys():
+		_apply_overlay(cell as Vector2i)
+	for cell in _overlay_skill_release.keys():
+		_apply_overlay(cell as Vector2i)
+	if caster_cell is Vector2i and hover_cell is Vector2i:
+		_rebuild_skill_aim_arrow(
+			caster_cell as Vector2i, hover_cell as Vector2i, hover_in_release
+		)
+	else:
+		_clear_skill_aim_arrow()
+
+
+func clear_skill_drag_preview() -> void:
+	set_skill_drag_preview(null, null, [], false)
+
+
 func clear_card_drag_hover() -> void:
 	set_card_drag_hover(null, null, false)
+	clear_skill_drag_preview()
+
+
+func _clear_skill_aim_arrow() -> void:
+	if _skill_aim_arrow != null and is_instance_valid(_skill_aim_arrow):
+		_skill_aim_arrow.queue_free()
+	_skill_aim_arrow = null
+
+
+## 二次贝塞尔曲线箭头（杀戮尖塔式侧弯）+ 箭镞两翼。
+func _rebuild_skill_aim_arrow(from_cell: Vector2i, to_cell: Vector2i, valid: bool) -> void:
+	_clear_skill_aim_arrow()
+	if config == null or _units_root == null:
+		return
+	var from_w := _cell_to_world(from_cell, config.cell_size)
+	var to_w := _cell_to_world(to_cell, config.cell_size)
+	var delta := to_w - from_w
+	if delta.length() < 0.02:
+		return
+	var color := SKILL_ARROW_VALID if valid else SKILL_ARROW_INVALID
+	var root := Node2D.new()
+	root.name = "SkillAimArrow"
+	root.z_as_relative = false
+	# 高于单位层，避免被精灵挡住。
+	root.z_index = UNIT_Z_BASE + 500
+	var mid := (from_w + to_w) * 0.5
+	var perp := Vector2(-delta.y, delta.x).normalized()
+	# 侧弯幅度随距离增长，短距也保持可读弧。
+	var bulge := clampf(delta.length() * 0.32, config.cell_size * 0.45, config.cell_size * 1.25)
+	# 固定弯向屏幕上方偏好：若 perp 朝下则翻转。
+	if perp.y > 0.0:
+		perp = -perp
+	var ctrl := mid + perp * bulge
+	var shaft := Line2D.new()
+	shaft.width = maxf(config.cell_size * 0.16, 0.12)
+	shaft.default_color = color
+	shaft.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	shaft.end_cap_mode = Line2D.LINE_CAP_ROUND
+	shaft.joint_mode = Line2D.LINE_JOINT_ROUND
+	for i in range(SKILL_ARROW_SEGMENTS + 1):
+		var t := float(i) / float(SKILL_ARROW_SEGMENTS)
+		var omt := 1.0 - t
+		var p: Vector2 = (
+			omt * omt * from_w
+			+ 2.0 * omt * t * ctrl
+			+ t * t * to_w
+		)
+		shaft.add_point(p)
+	root.add_child(shaft)
+	# 箭镞：沿曲线末端切线。
+	var tip_dir := (to_w - ctrl).normalized()
+	if tip_dir.length() < 0.001:
+		tip_dir = delta.normalized()
+	var tip := to_w
+	var wing_base := tip - tip_dir * (config.cell_size * 0.36)
+	var wing_perp := Vector2(-tip_dir.y, tip_dir.x) * (config.cell_size * 0.26)
+	for side in [-1.0, 1.0]:
+		var wing := Line2D.new()
+		wing.width = shaft.width
+		wing.default_color = color
+		wing.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		wing.end_cap_mode = Line2D.LINE_CAP_ROUND
+		wing.add_point(tip)
+		wing.add_point(wing_base + wing_perp * side)
+		root.add_child(wing)
+	_units_root.add_child(root)
+	_skill_aim_arrow = root
 
 
 func _set_drag_select_unit(unit: TacticalUnitInstance, valid_drop: bool) -> void:

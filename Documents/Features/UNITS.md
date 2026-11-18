@@ -18,7 +18,7 @@
 - **玩家移力池**：每行动段重置为 `move_range`（`action_move_budget()`）；**点选己方再点绿格**移动，可分步，总步数 ≤ 剩余移力。见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 - **对手移力池** = `move_budget`（为 0 时等同 `move_range`）：对手 AI 在池内可逐步移动。
 - **攻击距离** = `attack_range`（切比雪夫上限）。**最小射程死区** = `attack_range_min`（默认 0）：距离 ≤ min 不可攻击。游侠 `attack_range_min=1` → 只能打 **2…3**；狼骑兵为 **1**（近战邻格，含斜向）。
-- 玩家移/攻须把卡**拖到**己方单位。选定后：**绿** overlay = `move_range` 内可达空格；**红** overlay = 攻击距离 footprint（含 min 死区）。**玩家**普攻/加强攻可选红圈内**友方**为目标；**对手 AI** 仍只打敌方。
+- 玩家**通用**攻/加强攻/护甲须把卡**拖到**己方单位；**非通用**主动技短按或拖棋盘即可（见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)）。选定后：**绿** overlay = `move_range` 内可达空格；**红** overlay = 攻击距离 footprint（含 min 死区）。**玩家**普攻/加强攻可选红圈内**友方**为目标；**对手 AI** 仍只打敌方。
 - **点选敌方狼骑兵**时显示绿/红行动格（移最多 2、攻距 1，含地形阻挡），并叠加**下回合意图虚影**（路径/目标/回血加攻提示）；见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md)。
 
 ## 触发式战术能力
