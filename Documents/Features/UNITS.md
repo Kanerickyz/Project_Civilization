@@ -1,4 +1,4 @@
-# 战术单位 · 五人首版
+# 战术单位 · 七人首版
 
 > **已实现**（轻量切片）。数据在 `resources/units/*.tres`，逻辑在 `scripts/units/`。
 
@@ -11,6 +11,8 @@
 | 大剑 | `mini_pekka` | 2 | — | 1 | 慢速重击 |
 | 鼓手 | `wardrum` | 3 | — | 1 | 支援机动 |
 | 爆爆 | `boomling` | 2 | — | 2 | 生命 6、攻击 2；燃烧 |
+| 刺客 | `assassin` | **4 瞬移** | — | 1 | 生命 4、攻击 2；隐身见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md) |
+| 要员 | `devman` | 2 | — | 1 | 保护目标；生命 5；阵亡即失败 |
 | 狼骑兵 | `rider` | 2 | 2 | **1**（近战邻格） | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
 - **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **3**。
@@ -29,6 +31,8 @@
 | 大剑 | — | **无被动** |
 | 鼓手 | **移动结束** | 2 格内其他角色攻击 +1、生命 +1（本场；生命抬上限并回等量） |
 | 爆爆 | **死亡** | 所在格及周围格单位获得 3 层燃烧（见 [BURN_STATUS.md](./BURN_STATUS.md)） |
+| 刺客 | **默认隐身** | 敌方不可选为目标；攻击/受伤/加状态取消（见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md)） |
+| 要员 | — | **无被动**；保护目标 |
 
 侧栏仅**只读**说明。伤害/击杀/移动结束/死亡走 `TacticalBoard` 挂接触发。主动技能卡见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 
@@ -40,8 +44,9 @@
 
 ## 规则（与 TurnClock）
 
-- 沙盘预置 5 蓝（盾卫/游侠/大剑/鼓手/爆爆）+ 6 红（均为狼骑兵 `rider`，各 10 血）；贴图用已迁入的 `assets/autochess/.../unit_boomling_*`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；`effective_attack`，含 buff/狂暴；显式 `ui_font`；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；敌方狼骑兵另有**下一意图**角标（色菱形 + 攻/移/血/加）；燃烧为色菱形 + `燃N`；狂暴为色菱形 + `狂N`；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween；待机轻微上下浮动；攻击/受击/死亡带 Tween。
-- **开战前部署**：先进部署阶段，拖己方到左半盘合法格；确认后再抽手牌与开战触发（见 [DEPLOYMENT.md](./DEPLOYMENT.md)）。
+- 沙盘预置 7 蓝（盾卫/游侠/大剑/鼓手/爆爆/刺客/要员）+ 开战生成 6 红狼骑兵；刺客用 `unit_shinobi_*`，要员用 `character_dev`；`Sprite2D` 站在格心；头顶常驻 `当前HP/上限 攻N`（有护甲时附 `甲N`；隐身附 `隐`；`effective_attack`，含 buff/狂暴；显式 `ui_font`；`mouse_filter` 忽略以免挡点格）、受伤 `-N!` popup；敌方狼骑兵另有**下一意图**角标（色菱形 + 攻/移/血/加）；燃烧为色菱形 + `燃N`；狂暴为色菱形 + `狂N`；**长按约 0.38s** 弹出纸卡信息（对照 autochess `RealtimeUnitInfoCard`：名/阵营/攻血移射/护甲/被动·主动；松手关闭；不与手牌长按冲突）；多格移动按寻路格序逐格 Tween（刺客瞬移为直达 hop）；待机轻微上下浮动；攻击/受击/死亡带 Tween。
+- **开战前部署**：先进部署阶段，全图拖己方；显示敌潜在点虚影；确认后生成敌方再抽手牌（见 [DEPLOYMENT.md](./DEPLOYMENT.md)）。
+- **胜负**：要员血量归零 → 失败；敌方全灭 → 胜利；己方全灭 → 失败。
 - **玩家行动段**抽手牌；打出移动/攻击/主动技卡后再点目标；点「结束行动」先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。
 - 回到玩家段：清空移动/攻击卡授权后抽牌（玩家无段内攻次预算）；回到对手段：重置对手**移力池**与 `attacked_this_side_turn`。
 - **未做**：商店、招募、CombatEventBus、召唤。

@@ -11,6 +11,12 @@ extends Resource
 @export var attack_range: int = 1
 ## 最小射程死区（切比雪夫）：距离 ≤ 此值不可攻击。默认 0=无死区（可攻邻格）。游侠为 1。
 @export var attack_range_min: int = 0
+## 瞬移：可达格按切比雪夫 ≤ move_range，无视中间阻挡（仍须落空可通行格）。
+@export var teleports: bool = false
+## 开战默认隐身（刺客）；见单位实例 stealthed。
+@export var starts_stealthed: bool = false
+## 保护目标：血量归零即玩家失败（要员）。
+@export var is_protect_target: bool = false
 @export var texture_blue: Texture2D
 @export var texture_red: Texture2D
 ## 相对不透明内容高度的视觉倍率；1 = 内容高缩放 `unit_world_height`。用于剪纸角色身型对齐。

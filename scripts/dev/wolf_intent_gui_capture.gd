@@ -24,6 +24,7 @@ func _initialize() -> void:
 	view.setup(cfg)
 
 	var board := TacticalSandboxRoster.build_board_for_config(cfg, 20261117)
+	TacticalSandboxRoster.spawn_pending_enemies(board, 20261117)
 	view.set_terrain_cells(board.terrain_cells())
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	view._set_zoom(1.35)

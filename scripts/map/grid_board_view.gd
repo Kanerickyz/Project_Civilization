@@ -139,6 +139,12 @@ var _suppress_click: bool = false
 var _deploy_mode: bool = false
 var _deploy_valid_cells: Dictionary = {} # Vector2i -> true
 var _deploy_drag_unit: TacticalUnitInstance = null
+## 部署阶段敌方潜在生成点虚影。
+var _enemy_spawn_markers: Dictionary = {} # Vector2i -> Node2D
+var _enemy_spawn_cells: Dictionary = {} # Vector2i -> true
+var _rider_ghost_tex: Texture2D = null
+const ENEMY_SPAWN_MARKER_Z := 8
+const STEALTH_SPRITE_ALPHA := 0.42
 
 const UNIT_IDLE_BOB_PX := 3.0
 const UNIT_IDLE_HALF_SEC := 0.95
@@ -175,10 +181,20 @@ func set_deploy_mode(enabled: bool, valid_cells: Array = []) -> void:
 	if not enabled:
 		_clear_deploy_drag()
 		clear_card_drag_hover()
+		set_enemy_spawn_markers([])
 
 
 func is_deploy_mode() -> bool:
 	return _deploy_mode
+
+
+## 部署阶段：显示敌方潜在生成点（半透明狼骑虚影）。
+func set_enemy_spawn_markers(cells: Array) -> void:
+	_enemy_spawn_cells.clear()
+	for c in cells:
+		if c is Vector2i:
+			_enemy_spawn_cells[c as Vector2i] = true
+	_sync_enemy_spawn_markers()
 
 
 func _clear_deploy_drag() -> void:
@@ -430,6 +446,8 @@ func _rebuild_board() -> void:
 	_overlay_burn.clear()
 	_clear_danger_markers()
 	_overlay_danger.clear()
+	_clear_enemy_spawn_markers()
+	_enemy_spawn_cells.clear()
 	_last_unit_cells.clear()
 	_unit_move_tweens.clear()
 	_unit_idle_tweens.clear()
@@ -755,6 +773,9 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	spr.position = home
 	var shake := unit_hit_shake_px()
 	var rest := _look().unit_modulate
+	# 受伤后隐身已破；若仍隐身则保持半透明。
+	if unit.is_stealthed():
+		rest.a = STEALTH_SPRITE_ALPHA
 	spr.modulate = rest
 	var mat := _begin_unit_flash(spr)
 	# 瞬间完全纯白 → 短停 → 淡回；结束后卸 material，恢复默认 Sprite2D 亮度。
@@ -866,7 +887,10 @@ func _ensure_unit_sprite(unit: TacticalUnitInstance) -> void:
 	var s := (unit_h / content_h) * vis if content_h > 0.0 else 1.0
 	var base_scale := Vector2(s, s)
 	spr.texture = tex
-	spr.modulate = _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
+	var base_mod := _look().unit_modulate if unit.is_alive() else Color(0.4, 0.4, 0.4, 0.5)
+	if unit.is_alive() and unit.is_stealthed():
+		base_mod.a = STEALTH_SPRITE_ALPHA
+	spr.modulate = base_mod
 	_unit_base_scales[unit] = base_scale
 	# 拖牌选中脉冲中勿重置 scale，否则每帧 sync 会掐断 tween。
 	if not _unit_select_tweens.has(unit):
@@ -1016,6 +1040,86 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 	_ensure_intent_icon(unit)
 
 
+func _clear_enemy_spawn_markers() -> void:
+	for key in _enemy_spawn_markers.keys():
+		var node: Node = _enemy_spawn_markers[key] as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+	_enemy_spawn_markers.clear()
+
+
+func _sync_enemy_spawn_markers() -> void:
+	if config == null or _tiles_root == null:
+		_clear_enemy_spawn_markers()
+		return
+	var keep: Dictionary = {}
+	for cell in _enemy_spawn_cells.keys():
+		if cell is Vector2i:
+			keep[cell] = true
+			_ensure_enemy_spawn_marker(cell as Vector2i)
+	var stale: Array = []
+	for key in _enemy_spawn_markers.keys():
+		if not keep.has(key):
+			stale.append(key)
+	for key in stale:
+		var node: Node = _enemy_spawn_markers[key] as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+		_enemy_spawn_markers.erase(key)
+
+
+func _ensure_enemy_spawn_marker(cell: Vector2i) -> void:
+	if _enemy_spawn_markers.has(cell):
+		var existing := _enemy_spawn_markers[cell] as Node2D
+		if existing != null and is_instance_valid(existing):
+			existing.position = _cell_to_world(cell, config.cell_size)
+			return
+	if _rider_ghost_tex == null:
+		_rider_ghost_tex = load(
+			"res://assets/autochess/sprites/paper_cutout/units/unit_rider_red.png"
+		) as Texture2D
+	var root := Node2D.new()
+	root.name = "EnemySpawn_%d_%d" % [cell.x, cell.y]
+	root.z_index = ENEMY_SPAWN_MARKER_Z
+	root.position = _cell_to_world(cell, config.cell_size)
+	var half := config.cell_size * 0.46
+	var ring := Polygon2D.new()
+	ring.name = "Ring"
+	ring.color = Color(0.95, 0.22, 0.18, 0.55)
+	ring.polygon = PackedVector2Array([
+		Vector2(0.0, -half),
+		Vector2(half * 0.95, 0.0),
+		Vector2(0.0, half * 0.85),
+		Vector2(-half * 0.95, 0.0),
+	])
+	root.add_child(ring)
+	var core := Polygon2D.new()
+	core.name = "Core"
+	core.color = Color(1.0, 0.55, 0.35, 0.7)
+	var ch := half * 0.42
+	core.polygon = PackedVector2Array([
+		Vector2(0.0, -ch),
+		Vector2(ch * 0.95, 0.0),
+		Vector2(0.0, ch * 0.85),
+		Vector2(-ch * 0.95, 0.0),
+	])
+	root.add_child(core)
+	if _rider_ghost_tex != null:
+		var ghost := Sprite2D.new()
+		ghost.name = "Ghost"
+		ghost.texture = _rider_ghost_tex
+		ghost.centered = true
+		ghost.modulate = Color(1.0, 0.45, 0.4, 0.62)
+		var metrics := _texture_content_metrics(_rider_ghost_tex)
+		var content_h: float = metrics.content_h
+		var s := (config.unit_world_height / content_h) if content_h > 0.0 else 1.0
+		ghost.scale = Vector2(s, s) * 0.9
+		ghost.offset = Vector2(0.0, metrics.offset_y)
+		root.add_child(ghost)
+	_tiles_root.add_child(root)
+	_enemy_spawn_markers[cell] = root
+
+
 func _ensure_burn_badge(unit: TacticalUnitInstance) -> void:
 	if _burn_badges.has(unit):
 		_update_burn_badge(unit)
@@ -1058,21 +1162,23 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	var bar := _hp_bars[unit] as Label
 	_apply_ui_label_font(bar, 12)
 	var spr := _unit_sprites[unit] as Sprite2D
-	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）；有护甲时附「甲N」。
+	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）；有护甲时附「甲N」；隐身附「隐」。
+	var bits: PackedStringArray = [
+		"%d/%d" % [unit.hp, unit.effective_max_hp()],
+		"攻%d" % unit.effective_attack(),
+	]
 	if unit.armor > 0:
-		bar.text = "%d/%d 攻%d 甲%d" % [
-			unit.hp,
-			unit.effective_max_hp(),
-			unit.effective_attack(),
-			unit.armor,
-		]
-	else:
-		bar.text = "%d/%d 攻%d" % [unit.hp, unit.effective_max_hp(), unit.effective_attack()]
+		bits.append("甲%d" % unit.armor)
+	if unit.is_stealthed():
+		bits.append("隐")
+	bar.text = " ".join(bits)
 	# 节点在脚点；读数放在头顶（整段身高之上）。
 	var head_off := Vector2(0.0, -config.unit_world_height * 1.12)
 	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
 	if unit.hp <= unit.effective_max_hp() / 3:
 		bar.modulate = Color("ff6666")
+	elif unit.is_stealthed():
+		bar.modulate = Color("b8c4d8")
 	elif unit.armor > 0:
 		bar.modulate = Color("9ad0ff")
 	elif unit.atk_bonus > 0:

@@ -64,11 +64,14 @@ func _initialize() -> void:
 
 func _test_roster_loads() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	if board.living_units().size() != 11:
-		push_error("TacticalUnits: expected 11 units, got %d" % board.living_units().size())
+	# 7 友（含刺客+要员）+ 6 狼骑。
+	if board.living_units().size() != 13:
+		push_error("TacticalUnits: expected 13 units, got %d" % board.living_units().size())
 		return false
 	var riders := 0
 	var boomling := 0
+	var assassin := 0
+	var vip := 0
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.OPPONENT:
 			if u.def.id != "rider":
@@ -89,11 +92,33 @@ func _test_roster_loads() -> bool:
 			if u.def.move_range != 2 or u.def.attack_range != 2 or u.def.max_hp != 6:
 				push_error("TacticalUnits: boomling stats mismatch")
 				return false
+		elif u.def.id == "assassin":
+			assassin += 1
+			if (
+				u.def.max_hp != 4
+				or u.def.attack != 2
+				or u.def.move_range != 4
+				or not u.def.teleports
+				or not u.is_stealthed()
+			):
+				push_error("TacticalUnits: assassin stats/stealth mismatch")
+				return false
+		elif u.def.id == "devman":
+			vip += 1
+			if u.def.max_hp != 5 or not u.is_protect_target():
+				push_error("TacticalUnits: devman protect-target mismatch")
+				return false
 	if riders != 6:
 		push_error("TacticalUnits: expected 6 wolf cavalry, got %d" % riders)
 		return false
 	if boomling != 1:
 		push_error("TacticalUnits: expected 1 boomling, got %d" % boomling)
+		return false
+	if assassin != 1:
+		push_error("TacticalUnits: expected 1 assassin, got %d" % assassin)
+		return false
+	if vip != 1:
+		push_error("TacticalUnits: expected 1 devman, got %d" % vip)
 		return false
 	return true
 
@@ -424,11 +449,12 @@ func _test_archer_move_distance_two() -> bool:
 
 func _test_deploy_place_and_swap() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(8, 8)
-	if board.is_player_deploy_cell(Vector2i(4, 0)):
-		push_error("TacticalUnits: right-half cell must not be player deploy zone")
+	# 全图可部署：右半盘也可。
+	if not board.is_player_deploy_cell(Vector2i(4, 0)):
+		push_error("TacticalUnits: full-map deploy should allow right-half passable cell")
 		return false
 	if not board.is_player_deploy_cell(Vector2i(0, 0)):
-		push_error("TacticalUnits: left-half passable cell should be deploy zone")
+		push_error("TacticalUnits: passable cell should be deploy zone")
 		return false
 	var players: Array[TacticalUnitInstance] = []
 	var opponent: TacticalUnitInstance = null

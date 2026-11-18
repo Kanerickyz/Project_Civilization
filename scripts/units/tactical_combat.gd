@@ -31,6 +31,9 @@ static func attackable_cells(
 			continue
 		if not allow_friendly and u.faction == attacker.faction:
 			continue
+		# 敌方不可选隐身目标；友方/己方仍可选。
+		if u.is_stealthed() and u.faction != attacker.faction:
+			continue
 		var dist := GridMathScript.chebyshev(attacker.cell, u.cell)
 		if not attacker.def.is_chebyshev_in_attack_band(dist):
 			continue
@@ -85,6 +88,9 @@ static func try_basic_attack(
 	if not allow_friendly and target.faction == attacker.faction:
 		result["log"] = "需要敌方单位"
 		return result
+	if target.is_stealthed() and target.faction != attacker.faction:
+		result["log"] = "目标隐身不可选"
+		return result
 	var dist := GridMathScript.chebyshev(attacker.cell, target.cell)
 	if not attacker.def.is_chebyshev_in_attack_band(dist):
 		result["log"] = "目标不在攻击范围内"
@@ -92,6 +98,8 @@ static func try_basic_attack(
 	if not board.has_attack_los(attacker.cell, target.cell):
 		result["log"] = "树林挡住攻击"
 		return result
+	# 攻击取消自身隐身。
+	attacker.break_stealth()
 	# 狂暴倍率作用于基础攻+加强额外，再向上取整。
 	var dmg := attacker.apply_frenzy_to_damage(attacker.attack_power() + maxi(0, bonus_damage))
 	var from_cell := target.cell
@@ -166,3 +174,19 @@ static func faction_defeated(board: TacticalBoard, faction: TacticalFaction.Id) 
 		if u.faction == faction and u.is_alive():
 			return false
 	return true
+
+
+## 保护目标（要员）阵亡 → 玩家失败。
+static func protect_target_defeated(board: TacticalBoard) -> bool:
+	if board == null:
+		return false
+	var found := false
+	for u in board.units:
+		if u.faction != TacticalFaction.Id.PLAYER:
+			continue
+		if u.def == null or not u.def.is_protect_target:
+			continue
+		found = true
+		if u.is_alive():
+			return false
+	return found

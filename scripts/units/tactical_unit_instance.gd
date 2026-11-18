@@ -22,6 +22,8 @@ var armor: int = 0
 var death_cards_culled: bool = false
 ## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战各自随机初相）。
 var next_intent: int = 0
+## 隐身：敌方不可选为目标；攻击/受伤/加状态取消。
+var stealthed: bool = false
 
 const FRENZY_MAX_STACKS := 15
 const FRENZY_DAMAGE_MULT := 1.2
@@ -34,6 +36,7 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 	cell = p_cell
 	hp = p_def.max_hp
 	remaining_move_budget = p_def.action_move_budget()
+	stealthed = p_def != null and p_def.starts_stealthed
 	# 敌方狼骑兵开战各自独立随机初相；其它单位不读此字段。
 	if (
 		p_faction == TacticalFaction.Id.OPPONENT
@@ -43,6 +46,28 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 		next_intent = TacticalEnemyAi.roll_initial_intent()
 	else:
 		next_intent = 0
+
+
+func is_stealthed() -> bool:
+	return stealthed and is_alive()
+
+
+## 取消隐身；返回是否刚从隐身变为可见。
+func break_stealth() -> bool:
+	if not stealthed:
+		return false
+	stealthed = false
+	return true
+
+
+func grant_stealth() -> void:
+	if not is_alive():
+		return
+	stealthed = true
+
+
+func is_protect_target() -> bool:
+	return def != null and def.is_protect_target
 
 
 ## 不含狂暴倍率的基础战斗力（攻 + 本场加成）。
@@ -65,12 +90,15 @@ func is_alive() -> bool:
 func add_armor(amount: int) -> void:
 	if amount <= 0:
 		return
+	# 加状态取消隐身。
+	break_stealth()
 	armor += amount
 
 
 func add_burn_stacks(amount: int) -> void:
 	if amount <= 0:
 		return
+	break_stealth()
 	burn_stacks += amount
 
 
@@ -78,6 +106,7 @@ func add_burn_stacks(amount: int) -> void:
 func add_frenzy_stacks(amount: int) -> int:
 	if amount <= 0:
 		return 0
+	break_stealth()
 	var before := frenzy_stacks
 	frenzy_stacks = mini(FRENZY_MAX_STACKS, frenzy_stacks + amount)
 	return frenzy_stacks - before

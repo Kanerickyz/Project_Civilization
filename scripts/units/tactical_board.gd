@@ -23,6 +23,8 @@ var _danger_cells: Dictionary = {}
 var collapse_stage: int = 0
 ## 第几回合起开始缩圈（含该回合）。
 const COLLAPSE_START_TURN: int = 5
+## 部署阶段敌方潜在生成点（开战前不生成单位）。
+var enemy_spawn_cells: Array[Vector2i] = []
 
 
 func setup(p_width: int, p_height: int) -> void:
@@ -33,6 +35,7 @@ func setup(p_width: int, p_height: int) -> void:
 	_ignited_aoe_cells.clear()
 	_danger_cells.clear()
 	collapse_stage = 0
+	enemy_spawn_cells.clear()
 
 
 func set_terrain_cells(cells: Dictionary) -> void:
@@ -134,6 +137,23 @@ func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	if unit == null or not unit.is_alive() or unit.remaining_move_budget <= 0:
 		return out
+	# 瞬移：切比雪夫 ≤ 剩余移力（且 ≤ move_range），无视中间阻挡。
+	if unit.def != null and unit.def.teleports:
+		var cap := mini(unit.remaining_move_budget, unit.def.move_range)
+		for gx in range(grid_width):
+			for gy in range(grid_height):
+				var cell := Vector2i(gx, gy)
+				if cell == unit.cell:
+					continue
+				if not is_passable(cell):
+					continue
+				if unit_at(cell) != null:
+					continue
+				var d := GridMathScript.chebyshev(unit.cell, cell)
+				if d <= 0 or d > cap:
+					continue
+				out.append(cell)
+		return out
 	# 多段累计：每段落脚格须为空且路径步数 ≤ move_range，总步数 ≤ 剩余移力。
 	var dist: Dictionary = {unit.cell: 0}
 	var queue: Array[Vector2i] = [unit.cell]
@@ -231,10 +251,14 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 		"killed": false,
 		"armor_absorbed": 0,
 		"hp_damage": 0,
+		"broke_stealth": false,
 	}
 	if target == null or not target.is_alive() or amount <= 0:
 		result["log"] = "无效伤害"
 		return result
+	# 受伤取消隐身（含仅打在护甲上）。
+	if target.break_stealth():
+		result["broke_stealth"] = true
 	var armor_absorbed := 0
 	var hp_damage := 0
 	# 有护甲时整段伤害打在护甲上：护甲归零后溢出不穿血。
@@ -483,9 +507,16 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		return false
 	if unit_at(dest) != null:
 		return false
-	var step := path_distance(unit.cell, dest, mini(unit.def.move_range, unit.remaining_move_budget))
-	if step <= 0:
-		return false
+	var step := 0
+	if unit.def != null and unit.def.teleports:
+		var cap := mini(unit.def.move_range, unit.remaining_move_budget)
+		step = GridMathScript.chebyshev(unit.cell, dest)
+		if step <= 0 or step > cap:
+			return false
+	else:
+		step = path_distance(unit.cell, dest, mini(unit.def.move_range, unit.remaining_move_budget))
+		if step <= 0:
+			return false
 	unit.cell = dest
 	unit.remaining_move_budget -= step
 	if unit.remaining_move_budget <= 0:
@@ -512,11 +543,9 @@ func force_displace(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	return true
 
 
-## 开战前部署：左半盘可通行格；可与己方换位；不耗移力、不触发移动结束被动。
+## 开战前部署：全图可通行格；可与己方换位；不耗移力、不触发移动结束被动。
 func is_player_deploy_cell(cell: Vector2i) -> bool:
 	if not GridMathScript.in_bounds(cell, grid_width, grid_height):
-		return false
-	if cell.x >= int(grid_width / 2):
 		return false
 	return is_passable(cell)
 
@@ -524,7 +553,7 @@ func is_player_deploy_cell(cell: Vector2i) -> bool:
 ## 列出当前棋盘全部合法己方部署格（供 overlay）。
 func player_deploy_cells() -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for gx in range(int(grid_width / 2)):
+	for gx in range(grid_width):
 		for gy in range(grid_height):
 			var cell := Vector2i(gx, gy)
 			if is_passable(cell):
@@ -560,8 +589,109 @@ func try_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		occupant.cell = from
 		_apply_terrain_enter_effects(unit)
 		_apply_terrain_enter_effects(occupant)
+	# 覆盖敌潜在点则该点重随。
+	reroll_enemy_spawn_cells_blocked_by_players()
 	changed.emit()
 	return true
+
+
+## 令目标隐身（刺客主动）；加隐身状态本身不先破隐。
+func apply_grant_stealth(caster: TacticalUnitInstance, target: TacticalUnitInstance) -> Dictionary:
+	var result := {"ok": false, "log": ""}
+	if caster == null or not caster.is_alive() or caster.def == null or caster.def.id != "assassin":
+		result["log"] = "隐身只能由刺客触发"
+		return result
+	if target == null or not target.is_alive():
+		result["log"] = "需要存活目标"
+		return result
+	target.grant_stealth()
+	result["ok"] = true
+	result["log"] = "%s 令 %s 隐身" % [caster.def.display_name, target.def.display_name]
+	changed.emit()
+	return result
+
+
+## 玩家占格与敌潜在点冲突时，逐个重随冲突点。
+func reroll_enemy_spawn_cells_blocked_by_players(rng: RandomNumberGenerator = null) -> int:
+	if enemy_spawn_cells.is_empty():
+		return 0
+	var local_rng := rng
+	if local_rng == null:
+		local_rng = RandomNumberGenerator.new()
+		local_rng.randomize()
+	var blocked: Dictionary = {}
+	for u in living_units():
+		if u.faction == TacticalFactionScript.Id.PLAYER:
+			blocked[u.cell] = true
+	var rerolled := 0
+	for i in range(enemy_spawn_cells.size()):
+		var cur: Vector2i = enemy_spawn_cells[i]
+		if not blocked.has(cur):
+			continue
+		var fresh := _pick_free_enemy_spawn_cell(blocked, local_rng)
+		if fresh.x < 0:
+			continue
+		blocked.erase(cur)
+		blocked[fresh] = true
+		enemy_spawn_cells[i] = fresh
+		rerolled += 1
+	return rerolled
+
+
+func _pick_free_enemy_spawn_cell(blocked: Dictionary, rng: RandomNumberGenerator) -> Vector2i:
+	var candidates: Array[Vector2i] = []
+	for gx in range(grid_width):
+		for gy in range(grid_height):
+			var cell := Vector2i(gx, gy)
+			if not is_passable(cell):
+				continue
+			if blocked.has(cell):
+				continue
+			var occ := unit_at(cell)
+			if occ != null:
+				continue
+			candidates.append(cell)
+	if candidates.is_empty():
+		return Vector2i(-1, -1)
+	return candidates[rng.randi_range(0, candidates.size() - 1)]
+
+
+## 开战：在潜在点生成狼骑兵；已有敌方则跳过。
+func spawn_enemies_from_potential(
+	rider_def: TacticalUnitDef, rng: RandomNumberGenerator = null
+) -> int:
+	if rider_def == null:
+		return 0
+	for u in living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT:
+			return 0
+	var local_rng := rng
+	if local_rng == null:
+		local_rng = RandomNumberGenerator.new()
+		local_rng.randomize()
+	reroll_enemy_spawn_cells_blocked_by_players(local_rng)
+	var spawned := 0
+	for cell in enemy_spawn_cells:
+		if not is_passable(cell) or unit_at(cell) != null:
+			var fresh := _pick_free_enemy_spawn_cell(_occupied_cells_dict(), local_rng)
+			if fresh.x < 0:
+				continue
+			cell = fresh
+		add_unit(
+			TacticalUnitInstance.new(rider_def, TacticalFactionScript.Id.OPPONENT, cell)
+		)
+		spawned += 1
+	enemy_spawn_cells.clear()
+	return spawned
+
+
+func _occupied_cells_dict() -> Dictionary:
+	var out: Dictionary = {}
+	for u in living_units():
+		out[u.cell] = true
+	for c in enemy_spawn_cells:
+		out[c] = true
+	return out
 
 
 func allies_in_radius(origin: Vector2i, faction: TacticalFaction.Id, radius: int, exclude_cell: Vector2i) -> Array[TacticalUnitInstance]:
