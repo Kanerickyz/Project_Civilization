@@ -1754,12 +1754,13 @@ func _pan_by_screen_delta(delta: Vector2) -> void:
 
 func compute_pan_world_delta(delta: Vector2) -> Vector3:
 	## Camera2D.zoom 已把屏幕像素换成世界单位；再除 _zoom 或沿用 0.02 会让竖屏拖拽几乎不动。
+	## 竖向：往下滑动 → 视角往下（+forward）；左右仍为「抓住地图」跟手（-right）。
 	var cam_z := _camera.zoom.y if _camera != null and _camera.zoom.y > 0.0 else 1.0
 	var scaled := delta / maxf(cam_z, 0.001) * config.camera_pan_sensitivity
 	var yaw := deg_to_rad(config.camera_yaw_deg)
 	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
 	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
-	return -right * scaled.x - forward * scaled.y
+	return -right * scaled.x + forward * scaled.y
 
 
 ## 棋盘四角在斜投影下的半宽/半高（世界 2D）。

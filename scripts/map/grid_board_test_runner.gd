@@ -461,9 +461,10 @@ func _test_pan_vertical_intuitive() -> bool:
 	view.setup(cfg)
 	var yaw := deg_to_rad(cfg.camera_yaw_deg)
 	var forward := Vector3(sin(yaw), 0.0, cos(yaw))
-	var delta := view.compute_pan_world_delta(Vector2(0.0, -24.0))
+	## 往下滑动（屏幕 +Y）视角应往下（+forward）；左右符号不在此测。
+	var delta := view.compute_pan_world_delta(Vector2(0.0, 24.0))
 	if delta.dot(forward) <= 0.0:
-		push_error("GridBoardView: upward drag should pan along +forward (grab-the-map feel)")
+		push_error("GridBoardView: downward drag should pan along +forward (view moves down)")
 		return false
 	return true
 
