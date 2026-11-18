@@ -164,14 +164,25 @@ func _apply_unit(unit: TacticalUnitInstance) -> void:
 	_portrait.visible = tex != null
 	_atk_value.text = str(unit.effective_attack())
 	_hp_value.text = "%d/%d" % [unit.hp, unit.effective_max_hp()]
+	var range_txt: String
+	if unit.def.attack_range_min > 0:
+		range_txt = "射 %d–%d" % [unit.def.attack_range_min + 1, unit.def.attack_range]
+	else:
+		range_txt = "射 %d" % unit.def.attack_range
 	if unit.armor > 0:
-		_range_label.text = "移 %d · 射 %d · 甲 %d" % [
+		_range_label.text = "移 %d · %s · 甲 %d" % [
 			unit.def.move_range,
-			unit.def.attack_range,
+			range_txt,
 			unit.armor,
 		]
+	elif unit.frenzy_stacks > 0:
+		_range_label.text = "移 %d · %s · 狂 %d" % [
+			unit.def.move_range,
+			range_txt,
+			unit.frenzy_stacks,
+		]
 	else:
-		_range_label.text = "移 %d · 射 %d" % [unit.def.move_range, unit.def.attack_range]
+		_range_label.text = "移 %d · %s" % [unit.def.move_range, range_txt]
 	_body_label.clear()
 	_body_label.append_text(_skills_bbcode(unit))
 
@@ -217,7 +228,10 @@ func _skills_bbcode(unit: TacticalUnitInstance) -> String:
 func _active_skill_line(unit_id: String) -> String:
 	match unit_id:
 		"wardrum":
-			return "[b]主动技 · 鸣鼓换手[/b]\n拖到棋盘任意有效格：弃光手牌再抽 5。"
+			return (
+				"[b]主动技 · 鸣鼓换手[/b]\n拖到棋盘任意有效格：弃光手牌再抽 5。\n\n"
+				+ "[b]主动技 · 鼓舞[/b]\n只能拖到鼓手：周围 1 格其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
+			)
 		"knight":
 			return "[b]主动技 · 护甲[/b]\n通用卡：拖到任意己方；立刻 +2 护甲（可叠加）。伤害先打护甲，溢出不穿血。"
 		"mini_pekka":

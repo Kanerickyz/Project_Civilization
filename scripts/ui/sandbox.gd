@@ -540,8 +540,19 @@ func _refresh_unit_panel() -> void:
 		status_extra += "\n护甲 %d" % u.armor
 	if u.burn_stacks > 0:
 		status_extra += "\n燃烧 %d 层" % u.burn_stacks
+	if u.frenzy_stacks > 0:
+		status_extra += "\n狂暴 %d 层" % u.frenzy_stacks
+	var range_line: String
+	if u.def.attack_range_min > 0:
+		range_line = "射程 %d–%d（禁≤%d）" % [
+			u.def.attack_range_min + 1,
+			u.def.attack_range,
+			u.def.attack_range_min,
+		]
+	else:
+		range_line = "射程 %d" % u.def.attack_range
 	_unit_panel.text = (
-		"%s · %s\nHP %d/%d · 攻 %d · %s · 射程 %d\n移动：%s%s\n%s\n%s"
+		"%s · %s\nHP %d/%d · 攻 %d · %s · %s\n移动：%s%s\n%s\n%s"
 		% [
 			u.def.display_name,
 			TacticalFactionScript.label(u.faction),
@@ -549,7 +560,7 @@ func _refresh_unit_panel() -> void:
 			u.effective_max_hp(),
 			u.effective_attack(),
 			move_line,
-			u.def.attack_range,
+			range_line,
 			move_auth,
 			status_extra,
 			skill_line,
@@ -724,6 +735,10 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 			grant,
 			target.armor,
 		]
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_INSPIRE:
+		var inspire: Dictionary = _board.apply_inspire_frenzy(target, 1)
+		_pending_kind = PendingKind.NONE
+		_last_log = str(inspire.get("log", "鼓舞"))
 	elif card.is_attack_aim():
 		_deck.authorize_attack(target, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK
@@ -840,10 +855,8 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_refresh_all()
 			return
 		if clicked != null and clicked != _focus_unit:
-			var in_range := (
-				GridMathScript.chebyshev(_focus_unit.cell, clicked.cell)
-				<= _focus_unit.def.attack_range
-			)
+			var atk_dist := GridMathScript.chebyshev(_focus_unit.cell, clicked.cell)
+			var in_range := _focus_unit.def.is_chebyshev_in_attack_band(atk_dist)
 			if in_range:
 				_run_player_attack_async(cell, clicked)
 				return
@@ -1169,7 +1182,7 @@ func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
-## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor
+## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want := TacticalActionCardScript.Kind.MOVE
 	match kind_name:
@@ -1183,6 +1196,8 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
 		"skill_armor":
 			want = TacticalActionCardScript.Kind.SKILL_ARMOR
+		"skill_inspire":
+			want = TacticalActionCardScript.Kind.SKILL_INSPIRE
 		_:
 			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
@@ -1218,6 +1233,10 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_ARMOR:
 		unit.add_armor(maxi(1, card.armor_grant))
 		_pending_kind = PendingKind.NONE
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_INSPIRE:
+		var inspire_cap: Dictionary = _board.apply_inspire_frenzy(unit, 1)
+		_pending_kind = PendingKind.NONE
+		_last_log = str(inspire_cap.get("log", "鼓舞"))
 	elif card.is_attack_aim():
 		_deck.authorize_attack(unit, card.attack_bonus_damage, card.aoe_burn_stacks)
 		_pending_kind = PendingKind.ATTACK
