@@ -93,8 +93,12 @@ func _test_kill_result_keeps_target_when_unit_at_null() -> bool:
 		push_error("GameLoop: missing rider/wardrum for kill-target test")
 		return false
 	victim.hp = 1
-	victim.cell = attacker.cell + Vector2i(1, 0)
-	var cell := victim.cell
+	var cell := attacker.cell + Vector2i(1, 0)
+	# 清开目标格，避免叠格导致击杀后 unit_at 仍非空。
+	for u in board.living_units():
+		if u != victim and u != attacker and u.cell == cell:
+			u.cell = Vector2i(0, 0) if attacker.cell != Vector2i(0, 0) else Vector2i(0, 1)
+	victim.cell = cell
 	var res := TacticalCombatScript.try_basic_attack(
 		board, attacker, cell, TacticalFactionScript.Id.OPPONENT
 	)

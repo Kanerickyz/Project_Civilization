@@ -248,8 +248,6 @@ func _active_skill_line(unit_id: String) -> String:
 				"[b]移动 · 瞬移[/b]\n移距内切比雪夫瞬移，无视中间阻挡。\n\n"
 				+ "[b]主动技 · 隐身[/b]\n只能拖到刺客：再点任意存活单位令其隐身。"
 			)
-		"devman":
-			return "[b]保护目标[/b]\n血量归零则玩家失败。"
 		_:
 			return ""
 

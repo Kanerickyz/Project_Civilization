@@ -15,8 +15,6 @@ extends Resource
 @export var teleports: bool = false
 ## 开战默认隐身（刺客）；见单位实例 stealthed。
 @export var starts_stealthed: bool = false
-## 保护目标：血量归零即玩家失败（要员）。
-@export var is_protect_target: bool = false
 @export var texture_blue: Texture2D
 @export var texture_red: Texture2D
 ## 相对不透明内容高度的视觉倍率；1 = 内容高缩放 `unit_world_height`。用于剪纸角色身型对齐。

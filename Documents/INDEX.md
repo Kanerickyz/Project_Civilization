@@ -20,9 +20,8 @@
 | [Features/WOLF_CAVALRY_INTENT.md](./Features/WOLF_CAVALRY_INTENT.md) | **狼骑兵意图状态机** · 攻/移/血|加 · 意图角标 |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
 | [Features/BURN_STATUS.md](./Features/BURN_STATUS.md) | **燃烧状态** · 爆爆燃爆 / 死亡点燃 |
-| [Features/MAP_COLLAPSE.md](./Features/MAP_COLLAPSE.md) | **地图缩圈** · 第 5 回合起四角向内崩塌 · 危险区伤 |
-| [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 全图站位 · 敌潜在点 · 确认开战 |
-| [Features/ASSASSIN_STEALTH.md](./Features/ASSASSIN_STEALTH.md) | **刺客** · 瞬移 · 隐身被动/主动 · 要员保护目标 |
+| [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 左半盘站位 · 敌方开局生成 · 确认开战 |
+| [Features/ASSASSIN_STEALTH.md](./Features/ASSASSIN_STEALTH.md) | **刺客** · 瞬移 · 隐身被动/主动 |
 
 ## 仓库里有什么
 
@@ -79,5 +78,4 @@
 | 单位移动 | 当前 | 玩家靠移动卡（无移力池）；对手用移力池 |
 | 战斗 | 当前 | 普攻与胜负；玩家须打出攻击卡 |
 | 卡牌行动 | 当前 | 玩家攻+移+主动技；友方可被普攻；STS 抽弃；底栏手牌 |
-| 开战前部署 | 当前 | 沙盘先进部署；拖己方到左半盘；确认后开战 |
-| 地图缩圈 | 当前 | 第 5 回合起每回合从四角向内崩塌成永久危险区；段开始按 2^(n-1) 扣血 |
+| 开战前部署 | 当前 | 沙盘先进部署；拖己方到左半盘；敌方右半开局在场；确认后开战 |

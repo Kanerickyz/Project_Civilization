@@ -388,9 +388,25 @@ func _test_lake_clears_burn_and_immune() -> bool:
 func _test_ai_respects_passable_cells() -> bool:
 	var cfg := load(BOARD_CONFIG_PATH) as BoardConfig
 	var board := TacticalSandboxRosterScript.build_board_for_config(cfg, 99)
-	TacticalSandboxRosterScript.spawn_pending_enemies(board, 99)
-	# 临时加墙，确认 AI 不会踩上去。
-	board.set_terrain_cells({Vector2i(3, 3): WALL, Vector2i(4, 3): WALL})
+	# 在空格上临时加墙，确认 AI 不会踩上去。
+	var wall_cells: Array[Vector2i] = []
+	for gx in range(board.grid_width):
+		for gy in range(board.grid_height):
+			var cell := Vector2i(gx, gy)
+			if board.unit_at(cell) != null:
+				continue
+			wall_cells.append(cell)
+			if wall_cells.size() >= 2:
+				break
+		if wall_cells.size() >= 2:
+			break
+	if wall_cells.size() < 2:
+		push_error("TerrainMove: need 2 empty cells for wall AI test")
+		return false
+	var walls: Dictionary = {}
+	for c in wall_cells:
+		walls[c] = WALL
+	board.set_terrain_cells(walls)
 	for _round in range(4):
 		board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
 		TacticalEnemyAiScript.run_opponent_turn(board)

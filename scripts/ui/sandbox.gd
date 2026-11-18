@@ -71,7 +71,7 @@ func _enter_deployment_phase() -> void:
 	_pending_kind = PendingKind.NONE
 	_focus_unit = null
 	_selected_unit = null
-	_last_log = "部署：全图拖己方 · 红虚影=敌潜在点 · 点「开始战斗」开战"
+	_last_log = "部署：拖己方到左半盘 · 点「开始战斗」开战"
 	_apply_deploy_mode_to_board()
 	_sync_deploy_action_buttons()
 
@@ -80,18 +80,15 @@ func _begin_battle_after_deploy() -> void:
 	if not _in_deployment:
 		return
 	_in_deployment = false
-	# 开战瞬间按潜在点生成狼骑兵。
-	var spawned := TacticalSandboxRosterScript.spawn_pending_enemies(_board)
 	if _board_view != null:
 		_board_view.set_deploy_mode(false)
-		_board_view.set_enemy_spawn_markers([])
 	_sync_deploy_action_buttons()
 	_layout_hud_for_viewport()
 	_fire_battle_start_triggers()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	await _apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
 	_deck.begin_player_turn()
-	_last_log = "战斗开始 · 敌方入场 %d · 已抽手牌" % spawned
+	_last_log = "战斗开始 · 已抽手牌"
 	_refresh_all()
 	_show_turn_banner()
 
@@ -106,10 +103,6 @@ func _apply_deploy_mode_to_board() -> void:
 		return
 	var cells: Array = _board.player_deploy_cells()
 	_board_view.set_deploy_mode(_in_deployment, cells)
-	if _in_deployment:
-		_board_view.set_enemy_spawn_markers(_board.enemy_spawn_cells)
-	else:
-		_board_view.set_enemy_spawn_markers([])
 
 
 func _sync_deploy_action_buttons() -> void:
@@ -124,7 +117,7 @@ func _sync_deploy_action_buttons() -> void:
 
 
 func _show_deploy_banner() -> void:
-	_turn_banner.text = "部署阶段 · 全图站位 · 保护要员"
+	_turn_banner.text = "部署阶段 · 左半盘站位"
 	_turn_banner_panel.modulate.a = 1.0
 	_turn_banner_panel.scale = Vector2(0.94, 0.94)
 	var tw := create_tween()
@@ -148,17 +141,8 @@ func _fire_battle_start_triggers() -> void:
 
 
 func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
-	# 缩圈（按回合数同步）→ 危险区伤（仅本方）→ 燃烧（仅本方）→ 段开始被动 → 意图/出牌。
-	var newly_collapsed := _board.sync_map_collapse(_clock.turn)
-	if newly_collapsed.size() > 0:
-		_last_log = "地图崩塌 · 第 %d 层危险区（伤 %d）" % [
-			_board.collapse_stage,
-			_board.collapse_danger_damage(),
-		]
-		_refresh_all()
-		await get_tree().create_timer(0.28).timeout
+	# 燃烧（仅本方）→ 段开始被动 → 意图/出牌。
 	var tick_events: Array[Dictionary] = []
-	tick_events.append_array(_board.process_danger_ticks(faction))
 	tick_events.append_array(_board.process_burn_ticks(faction))
 	var killed_now: Array[TacticalUnitInstance] = []
 	for ev in tick_events:
@@ -511,8 +495,7 @@ func _refresh_all() -> void:
 		attack_cells,
 		_board.ignited_cells_for_view(),
 		intent_preview,
-		intent_unit,
-		_board.danger_cells_for_view()
+		intent_unit
 	)
 
 
@@ -520,7 +503,7 @@ func _compose_hint() -> String:
 	if _in_deployment:
 		if _last_log != "":
 			return _last_log
-		return "部署：全图拖己方 · 红虚影=敌潜在点 · 保护要员 · 「开始战斗」"
+		return "部署：拖己方到左半盘 · 「开始战斗」"
 	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
 		return "移动中：%s · 点绿格（本卡一次）" % _focus_unit.def.display_name
 	if _pending_kind == PendingKind.ATTACK and _focus_unit != null:
@@ -573,8 +556,6 @@ func _refresh_unit_panel() -> void:
 		status_extra += "\n隐身"
 	if u.def.teleports:
 		status_extra += "\n瞬移"
-	if u.is_protect_target():
-		status_extra += "\n保护目标"
 	var range_line: String
 	if u.def.attack_range_min > 0:
 		range_line = "射程 %d–%d（禁≤%d）" % [
@@ -657,12 +638,11 @@ func _on_unit_deploy_dropped(unit: TacticalUnitInstance, cell: Vector2i) -> void
 		_selected_unit = unit
 		if _board_view != null:
 			_board_view.accept_deploy_placement(unit, from)
-			_board_view.set_enemy_spawn_markers(_board.enemy_spawn_cells)
 		_last_log = "%s 部署至 (%d,%d)" % [unit.def.display_name, cell.x, cell.y]
 	else:
 		if _board_view != null:
 			_board_view.cancel_deploy_drag_visual(unit)
-		_last_log = "只能放到可通行空格或与己方换位"
+		_last_log = "只能放到左半盘空格或与己方换位"
 	_refresh_all()
 
 
@@ -1161,8 +1141,7 @@ func _run_opponent_turn_async() -> void:
 func _check_victory() -> bool:
 	if _game_over:
 		return true
-	var vip_lost := TacticalCombatScript.protect_target_defeated(_board)
-	var player_lost := vip_lost or TacticalCombatScript.faction_defeated(
+	var player_lost := TacticalCombatScript.faction_defeated(
 		_board, TacticalFactionScript.Id.PLAYER
 	)
 	var opp_lost := TacticalCombatScript.faction_defeated(
@@ -1176,7 +1155,7 @@ func _check_victory() -> bool:
 	_focus_unit = null
 	_pending_kind = PendingKind.NONE
 	if player_lost:
-		_game_over_title.text = "失败\n要员阵亡" if vip_lost else "失败\n对手获胜"
+		_game_over_title.text = "失败\n对手获胜"
 	else:
 		_game_over_title.text = "胜利\n我方获胜"
 	_game_over_panel.visible = true

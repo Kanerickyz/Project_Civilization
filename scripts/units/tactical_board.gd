@@ -17,14 +17,6 @@ var _terrain: Dictionary = {}
 var _catalog: TerrainCatalog = TerrainCatalog.load_default()
 ## 视觉：最近一次燃爆/爆燃 AoE 涉及的格子（含空格）；段开始燃烧结算后清除。
 var _ignited_aoe_cells: Dictionary = {}
-## 永久危险区（地图缩圈崩塌格）；Vector2i -> true。
-var _danger_cells: Dictionary = {}
-## 全局缩圈已生效次数 n（第 5 回合起每次 +1）；危险伤 = 2^(n-1)。
-var collapse_stage: int = 0
-## 第几回合起开始缩圈（含该回合）。
-const COLLAPSE_START_TURN: int = 5
-## 部署阶段敌方潜在生成点（开战前不生成单位）。
-var enemy_spawn_cells: Array[Vector2i] = []
 
 
 func setup(p_width: int, p_height: int) -> void:
@@ -33,9 +25,6 @@ func setup(p_width: int, p_height: int) -> void:
 	units.clear()
 	_terrain.clear()
 	_ignited_aoe_cells.clear()
-	_danger_cells.clear()
-	collapse_stage = 0
-	enemy_spawn_cells.clear()
 
 
 func set_terrain_cells(cells: Dictionary) -> void:
@@ -353,98 +342,6 @@ func _mark_ignited_aoe(origin: Vector2i, radius: int) -> void:
 			_ignited_aoe_cells[cell] = true
 
 
-## 到最近角的 Chebyshev 距离（0=四角）。用于四角向内缩圈判定。
-func corner_distance(cell: Vector2i) -> int:
-	var tl := maxi(cell.x, cell.y)
-	var tr := maxi(grid_width - 1 - cell.x, cell.y)
-	var bl := maxi(cell.x, grid_height - 1 - cell.y)
-	var br := maxi(grid_width - 1 - cell.x, grid_height - 1 - cell.y)
-	return mini(mini(tl, tr), mini(bl, br))
-
-
-func is_danger_cell(cell: Vector2i) -> bool:
-	return _danger_cells.has(cell)
-
-
-func danger_cells_for_view() -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for key in _danger_cells.keys():
-		if key is Vector2i:
-			out.append(key as Vector2i)
-	return out
-
-
-## 危险区伤害 = 2^(n-1)；n=collapse_stage。stage≤0 时无伤。
-func collapse_danger_damage() -> int:
-	if collapse_stage <= 0:
-		return 0
-	return 1 << (collapse_stage - 1)
-
-
-## 按当前回合数同步缩圈：turn≥5 时目标 stage=turn-4；每升一级把该层（corner_distance==stage-1）标为永久危险区。
-## 从四角向内崩塌（非整边外环）。返回本拍新崩塌格；已达标则空。
-func sync_map_collapse(turn: int) -> Array[Vector2i]:
-	var target := 0
-	if turn >= COLLAPSE_START_TURN:
-		target = turn - (COLLAPSE_START_TURN - 1)
-	var newly: Array[Vector2i] = []
-	while collapse_stage < target:
-		collapse_stage += 1
-		var ring := collapse_stage - 1
-		for gx in range(grid_width):
-			for gy in range(grid_height):
-				var cell := Vector2i(gx, gy)
-				if corner_distance(cell) != ring:
-					continue
-				if _danger_cells.has(cell):
-					continue
-				_danger_cells[cell] = true
-				newly.append(cell)
-	if newly.size() > 0:
-		changed.emit()
-	return newly
-
-
-## 该方行动段开始：站在危险区的本方单位结算一次扣血（伤害=当前全局 2^(n-1)）。
-func process_danger_ticks(faction: TacticalFaction.Id) -> Array[Dictionary]:
-	var events: Array[Dictionary] = []
-	var dmg := collapse_danger_damage()
-	if dmg <= 0:
-		return events
-	var victims: Array[TacticalUnitInstance] = []
-	for u in living_units():
-		if u.faction != faction:
-			continue
-		if not is_danger_cell(u.cell):
-			continue
-		victims.append(u)
-	for u in victims:
-		if not u.is_alive() or not is_danger_cell(u.cell):
-			continue
-		var cell := u.cell
-		var hurt := apply_damage(u, dmg, null)
-		if hurt.get("ok", false):
-			var killed: bool = bool(hurt.get("killed", false))
-			events.append({
-				"unit": u,
-				"cell": cell,
-				"damage": dmg,
-				"killed": killed,
-				"ok": true,
-				"kind": "danger",
-				"log": "%s 危险区（缩圈×%d）：受到 %d 伤害%s"
-				% [
-					u.def.display_name,
-					collapse_stage,
-					dmg,
-					"（阵亡）" if killed else "",
-				],
-			})
-	if events.size() > 0:
-		changed.emit()
-	return events
-
-
 ## 该方行动段开始：仅结算该方燃烧单位——先造成=层数伤害，再减 1 层。敌我各一次，不跨方重复。
 ## 返回事件列表（unit/cell/damage/killed/ok/log），供 UI 飘字；同 tick 内只扫开场 survivors，死亡新燃不重结。
 func process_burn_ticks(faction: TacticalFaction.Id) -> Array[Dictionary]:
@@ -543,9 +440,11 @@ func force_displace(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 	return true
 
 
-## 开战前部署：全图可通行格；可与己方换位；不耗移力、不触发移动结束被动。
+## 开战前部署：己方左半列可通行格；可与己方换位；不耗移力、不触发移动结束被动。
 func is_player_deploy_cell(cell: Vector2i) -> bool:
 	if not GridMathScript.in_bounds(cell, grid_width, grid_height):
+		return false
+	if cell.x >= int(grid_width / 2):
 		return false
 	return is_passable(cell)
 
@@ -553,7 +452,7 @@ func is_player_deploy_cell(cell: Vector2i) -> bool:
 ## 列出当前棋盘全部合法己方部署格（供 overlay）。
 func player_deploy_cells() -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for gx in range(grid_width):
+	for gx in range(int(grid_width / 2)):
 		for gy in range(grid_height):
 			var cell := Vector2i(gx, gy)
 			if is_passable(cell):
@@ -589,8 +488,6 @@ func try_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		occupant.cell = from
 		_apply_terrain_enter_effects(unit)
 		_apply_terrain_enter_effects(occupant)
-	# 覆盖敌潜在点则该点重随。
-	reroll_enemy_spawn_cells_blocked_by_players()
 	changed.emit()
 	return true
 
@@ -609,89 +506,6 @@ func apply_grant_stealth(caster: TacticalUnitInstance, target: TacticalUnitInsta
 	result["log"] = "%s 令 %s 隐身" % [caster.def.display_name, target.def.display_name]
 	changed.emit()
 	return result
-
-
-## 玩家占格与敌潜在点冲突时，逐个重随冲突点。
-func reroll_enemy_spawn_cells_blocked_by_players(rng: RandomNumberGenerator = null) -> int:
-	if enemy_spawn_cells.is_empty():
-		return 0
-	var local_rng := rng
-	if local_rng == null:
-		local_rng = RandomNumberGenerator.new()
-		local_rng.randomize()
-	var blocked: Dictionary = {}
-	for u in living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER:
-			blocked[u.cell] = true
-	var rerolled := 0
-	for i in range(enemy_spawn_cells.size()):
-		var cur: Vector2i = enemy_spawn_cells[i]
-		if not blocked.has(cur):
-			continue
-		var fresh := _pick_free_enemy_spawn_cell(blocked, local_rng)
-		if fresh.x < 0:
-			continue
-		blocked.erase(cur)
-		blocked[fresh] = true
-		enemy_spawn_cells[i] = fresh
-		rerolled += 1
-	return rerolled
-
-
-func _pick_free_enemy_spawn_cell(blocked: Dictionary, rng: RandomNumberGenerator) -> Vector2i:
-	var candidates: Array[Vector2i] = []
-	for gx in range(grid_width):
-		for gy in range(grid_height):
-			var cell := Vector2i(gx, gy)
-			if not is_passable(cell):
-				continue
-			if blocked.has(cell):
-				continue
-			var occ := unit_at(cell)
-			if occ != null:
-				continue
-			candidates.append(cell)
-	if candidates.is_empty():
-		return Vector2i(-1, -1)
-	return candidates[rng.randi_range(0, candidates.size() - 1)]
-
-
-## 开战：在潜在点生成狼骑兵；已有敌方则跳过。
-func spawn_enemies_from_potential(
-	rider_def: TacticalUnitDef, rng: RandomNumberGenerator = null
-) -> int:
-	if rider_def == null:
-		return 0
-	for u in living_units():
-		if u.faction == TacticalFactionScript.Id.OPPONENT:
-			return 0
-	var local_rng := rng
-	if local_rng == null:
-		local_rng = RandomNumberGenerator.new()
-		local_rng.randomize()
-	reroll_enemy_spawn_cells_blocked_by_players(local_rng)
-	var spawned := 0
-	for cell in enemy_spawn_cells:
-		if not is_passable(cell) or unit_at(cell) != null:
-			var fresh := _pick_free_enemy_spawn_cell(_occupied_cells_dict(), local_rng)
-			if fresh.x < 0:
-				continue
-			cell = fresh
-		add_unit(
-			TacticalUnitInstance.new(rider_def, TacticalFactionScript.Id.OPPONENT, cell)
-		)
-		spawned += 1
-	enemy_spawn_cells.clear()
-	return spawned
-
-
-func _occupied_cells_dict() -> Dictionary:
-	var out: Dictionary = {}
-	for u in living_units():
-		out[u.cell] = true
-	for c in enemy_spawn_cells:
-		out[c] = true
-	return out
 
 
 func allies_in_radius(origin: Vector2i, faction: TacticalFaction.Id, radius: int, exclude_cell: Vector2i) -> Array[TacticalUnitInstance]:

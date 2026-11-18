@@ -66,10 +66,6 @@ func grant_stealth() -> void:
 	stealthed = true
 
 
-func is_protect_target() -> bool:
-	return def != null and def.is_protect_target
-
-
 ## 不含狂暴倍率的基础战斗力（攻 + 本场加成）。
 func attack_power() -> int:
 	return def.attack + atk_bonus
