@@ -1197,11 +1197,23 @@ func _unit_kill_silhouette_tex(unit: TacticalUnitInstance) -> Texture2D:
 	return unit.def.texture_blue
 
 
+func _unit_kill_silhouette_screen_size(unit: TacticalUnitInstance, tex: Texture2D) -> Vector2:
+	if tex == null or _board_view == null:
+		return Vector2.ZERO
+	var vis := 1.0
+	if unit != null and unit.def != null and unit.def.visual_scale > 0.0:
+		vis = unit.def.visual_scale
+	if _board_view.has_method("unit_texture_screen_size"):
+		return _board_view.unit_texture_screen_size(tex, vis)
+	return Vector2.ZERO
+
+
 func _play_kill_impact(unit: TacticalUnitInstance = null) -> void:
 	if _game_over or _kill_impact == null:
 		return
 	if _kill_impact.has_method("play"):
-		_kill_impact.call("play", _unit_kill_silhouette_tex(unit))
+		var tex := _unit_kill_silhouette_tex(unit)
+		_kill_impact.call("play", tex, _unit_kill_silhouette_screen_size(unit, tex))
 
 
 ## GUI 截图：强制播一次击杀冲击（默认红狼骑剪影；可传贴图）。
@@ -1209,12 +1221,18 @@ func capture_play_kill_impact(silhouette_tex: Texture2D = null) -> bool:
 	if _kill_impact == null:
 		return false
 	var tex := silhouette_tex
+	var vis := 1.0
 	if tex == null:
 		var rider_def: TacticalUnitDef = load("res://resources/units/rider.tres") as TacticalUnitDef
 		if rider_def != null:
 			tex = rider_def.texture_red
+			if rider_def.visual_scale > 0.0:
+				vis = rider_def.visual_scale
+	var screen_sz := Vector2.ZERO
+	if tex != null and _board_view != null and _board_view.has_method("unit_texture_screen_size"):
+		screen_sz = _board_view.unit_texture_screen_size(tex, vis)
 	if _kill_impact.has_method("play"):
-		_kill_impact.call("play", tex)
+		_kill_impact.call("play", tex, screen_sz)
 	return _kill_impact.visible
 
 
