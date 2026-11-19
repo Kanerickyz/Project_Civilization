@@ -6,14 +6,14 @@
 
 - 主菜单进入**对战沙盘**：中央方格盘。
 - **拖拽**平移镜头、**滚轮**缩放（Camera2D）。
-- 棋盘外包约 **8×8**，**边缘不规则缩进**（缺角/缺边 void 格，非规整 6×6 正方）；开局内部 seed **成簇**铺湖泊/树林（各 0%–15%，见 [LAKE_FOREST.md](./LAKE_FOREST.md)）；**6 己方 + 6 狼骑**（见 [UNITS.md](./UNITS.md)）。
+- 棋盘外包每次开局在 **10×8** 与 **8×10** 间二选一，再 **随机边缘缩进**（void 缺格，轮廓不规则）；开局内部 seed **成簇**铺湖泊/树林（各 0%–15%，见 [LAKE_FOREST.md](./LAKE_FOREST.md)）；**6 己方 + 6 狼骑**（见 [UNITS.md](./UNITS.md)）。
 - 玩家回合可**点选单位查看**；移动须拖**移动卡**后再点绿格；可普攻、结束行动（对手 AI 段见 [COMBAT.md](./COMBAT.md)）。点到不可通行格（城墙/树林）有提示。
 - 默认逻辑分辨率 **竖屏 393×852**（iPhone 14 Pro）；棋盘 **拖动 + 滚轮/双指缩放**。缩放下限取 `BoardConfig.camera_zoom_min` 与「当前视口看全盘」的更小值；平移按 Camera2D 像素→世界 1:1（`camera_pan_sensitivity` 默认 1.0）。**竖向**往下滑动视角往下；左右仍为抓住地图跟手。
 
 ## 地块
 
-- 类型表 `resources/terrain/terrain_catalog.tres`：**空草地**（可通行）、**直城墙**（不可通行）、**湖泊**（可通行）、**树林**（不可通行且挡攻击）、**盘外 void**（不绘制、不可站立；`BoardEdgeShape` 默认 8×8 缩进）。细则见 [LAKE_FOREST.md](./LAKE_FOREST.md)。
-- 对战开局：`ClusterTerrainGenerator` 按内部 seed 成簇生成后，再盖上边缘 void（不读预置 JSON；`terrain_map_path` 已废弃）。
+- 类型表 `resources/terrain/terrain_catalog.tres`：**空草地**（可通行）、**直城墙**（不可通行）、**湖泊**（可通行）、**树林**（不可通行且挡攻击）、**盘外 void**（不绘制、不可站立；`BoardEdgeShape` 随机缩进）。细则见 [LAKE_FOREST.md](./LAKE_FOREST.md)。
+- 对战开局：选定外包尺寸 → `ClusterTerrainGenerator` 成簇生成 → 随机边缘 void（不读预置 JSON；`terrain_map_path` 已废弃）。
 - **移动与寻路**：8 邻接最短路，每步 1 移力；不可通行格不能进入或穿过；**禁止斜穿墙角**；路径中间的单位不挡路。
 - 攻击距离按切比雪夫；**城墙不挡射击**；**树林挡中间格视线**（邻格不挡）。
 

@@ -45,21 +45,25 @@ static func build_demo_board(width: int, height: int) -> TacticalBoard:
 	return board
 
 
-## 对战开局：成簇地形 → 左半随机友方 + 右半敌方狼骑兵（部署阶段已在场）。
+## 对战开局：随机 10×8/8×10 → 成簇地形 → 随机边缘 void → 左半友方 + 右半狼骑。
+## 会就地改写 config.grid_width/height 与 camera_ortho_size，供视图复用。
 static func build_board_for_config(config: BoardConfig, seed_value: int = -1) -> TacticalBoard:
-	var board: TacticalBoard = TacticalBoardScript.new()
-	board.setup(config.grid_width, config.grid_height)
-	var gen: Dictionary = ClusterTerrainGeneratorScript.generate(
-		config.grid_width, config.grid_height, seed_value
-	)
-	var map: MapData = gen["map"] as MapData
-	BoardEdgeShapeScript.apply_to_map(map)
-	board.set_terrain(map)
 	var rng := RandomNumberGenerator.new()
 	if seed_value >= 0:
 		rng.seed = seed_value
 	else:
 		rng.randomize()
+	var size: Vector2i = BoardEdgeShapeScript.pick_battle_size(rng)
+	if config != null:
+		config.grid_width = size.x
+		config.grid_height = size.y
+		config.camera_ortho_size = BoardEdgeShapeScript.ortho_size_for(size.x, size.y)
+	var board: TacticalBoard = TacticalBoardScript.new()
+	board.setup(size.x, size.y)
+	var gen: Dictionary = ClusterTerrainGeneratorScript.generate(size.x, size.y, int(rng.randi()))
+	var map: MapData = gen["map"] as MapData
+	BoardEdgeShapeScript.apply_to_map(map, rng)
+	board.set_terrain(map)
 	_place_players_random(board, rng)
 	_place_enemies_random(board, rng, ENEMY_SPAWN_COUNT)
 	_relocate_units_off_impassable(board)
