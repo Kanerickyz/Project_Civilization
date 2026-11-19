@@ -11,7 +11,7 @@
 | 大剑 | `mini_pekka` | 2 | — | 1 | 慢速重击 |
 | 鼓手 | `wardrum` | 3 | — | 1 | 支援机动 |
 | 爆爆 | `boomling` | 2 | — | 2 | 生命 6、攻击 2；燃烧 |
-| 医师 | `healer` | 2 | — | 2 | 生命 4、攻击 0；共情被动 +「恢复药水」 |
+| 医师 | `healer` | 2 | — | 2 | 生命 4、攻击 0；共情被动 +「恢复药水」×2 |
 | 刺客 | `assassin` | **4 瞬移** | — | 1 | **资源保留、未编入当前可部署阵容**；隐身见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md) |
 | 狼骑兵 | `rider` | 2 | 2 | **1**（近战邻格） | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
