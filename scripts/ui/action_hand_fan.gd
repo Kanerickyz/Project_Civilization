@@ -20,6 +20,9 @@ const DRAG_SCALE := 1.22
 const LONG_PRESS_SEC := 0.35
 const DRAG_THRESHOLD_PX := 12.0
 const TWEEN_SEC := 0.18
+## STS 式逐张抽牌：飞入时长与张间间隔。
+const DRAW_FLY_SEC := 0.24
+const DRAW_STAGGER_SEC := 0.06
 
 var _cards: Array[Control] = []
 var _base_poses: Array[Dictionary] = []
@@ -38,6 +41,7 @@ var _dragging: bool = false
 var _drag_index: int = -1
 var _drag_offset: Vector2 = Vector2.ZERO
 var _busy: bool = false
+var _drawing: bool = false
 var _detail_panel: PanelContainer
 var _detail_title: Label
 var _detail_body: Label
@@ -58,7 +62,7 @@ func _ready() -> void:
 
 
 func is_busy() -> bool:
-	return _busy or _dragging or _detail_open or _press_index >= 0
+	return _busy or _dragging or _detail_open or _press_index >= 0 or _drawing
 
 
 func set_interactive(enabled: bool) -> void:
@@ -69,10 +73,14 @@ func set_interactive(enabled: bool) -> void:
 		c.mouse_filter = (
 			Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
 		)
-		c.modulate.a = 1.0 if enabled else 0.55
+		if not _drawing:
+			c.modulate.a = 1.0 if enabled else 0.55
 
 
 func set_hand(labels: Array[String], kinds: Array[int], details: Array[String] = []) -> void:
+	if _drawing:
+		# 抽牌动画中由 play_draw_sequence 独占；避免 _refresh 打断飞入。
+		return
 	if is_busy() and _cards.size() == labels.size():
 		# 拖拽/详情中避免整手重建打断动画；仅更新文案缓存。
 		_labels = labels.duplicate()
@@ -100,10 +108,97 @@ func set_hand(labels: Array[String], kinds: Array[int], details: Array[String] =
 
 
 func clear_hand() -> void:
+	if _drawing:
+		return
 	var empty_s: Array[String] = []
 	var empty_k: Array[int] = []
 	var empty_d: Array[String] = []
 	set_hand(empty_s, empty_k, empty_d)
+
+
+## STS 式：牌从右侧一张张飞入手牌位；期间 is_busy。调用方应锁输入。
+func play_draw_sequence(
+	labels: Array[String], kinds: Array[int], details: Array[String] = []
+) -> void:
+	_cancel_press_state(false)
+	_drawing = true
+	_busy = true
+	_interactive = false
+	for c in _cards:
+		c.queue_free()
+	_cards.clear()
+	_base_poses.clear()
+	_labels.clear()
+	_kinds.clear()
+	_detail_lines.clear()
+	_hover_index = -1
+	# 等布局尺寸就绪，避免 size.x=0 时飞入起点错位。
+	await get_tree().process_frame
+	if not is_inside_tree():
+		_drawing = false
+		_busy = false
+		return
+	for i in labels.size():
+		_labels.append(labels[i])
+		_kinds.append(int(kinds[i]) if i < kinds.size() else 0)
+		if i < details.size():
+			_detail_lines.append(details[i])
+		else:
+			_detail_lines.append("")
+		var card := _make_card(_labels[i], int(_kinds[i]), i)
+		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(card)
+		_cards.append(card)
+		_compute_base_poses()
+		# 已有牌重排到新扇形。
+		for j in range(i):
+			var older := _cards[j]
+			var older_pose: Dictionary = _base_poses[j]
+			_tween_card_to(
+				older,
+				older_pose["pos"] as Vector2,
+				float(older_pose["rot"]),
+				Vector2.ONE
+			)
+		var pose: Dictionary = _base_poses[i]
+		var target_pos: Vector2 = pose["pos"]
+		var target_rot := float(pose["rot"])
+		# 自手牌区右侧偏上飞入（杀戮尖塔抽牌感）。
+		var start_x := size.x + CARD_W * 0.35
+		if start_x < target_pos.x + CARD_W:
+			start_x = target_pos.x + CARD_W * 1.4
+		card.position = Vector2(start_x, target_pos.y - 48.0)
+		card.rotation_degrees = 22.0
+		card.scale = Vector2(0.52, 0.52)
+		card.modulate.a = 0.0
+		card.z_index = 80 + i
+		var tw := create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(card, "position", target_pos, DRAW_FLY_SEC).set_trans(
+			Tween.TRANS_CUBIC
+		).set_ease(Tween.EASE_OUT)
+		tw.tween_property(card, "rotation_degrees", target_rot, DRAW_FLY_SEC).set_trans(
+			Tween.TRANS_QUAD
+		)
+		tw.tween_property(card, "scale", Vector2.ONE, DRAW_FLY_SEC).set_trans(
+			Tween.TRANS_BACK
+		).set_ease(Tween.EASE_OUT)
+		tw.tween_property(card, "modulate:a", 1.0, DRAW_FLY_SEC * 0.45)
+		await tw.finished
+		if not is_inside_tree():
+			_drawing = false
+			_busy = false
+			return
+		card.z_index = i
+		if DRAW_STAGGER_SEC > 0.0 and i < labels.size() - 1:
+			await get_tree().create_timer(DRAW_STAGGER_SEC).timeout
+			if not is_inside_tree():
+				_drawing = false
+				_busy = false
+				return
+	_drawing = false
+	_busy = false
+	_relayout(false)
 
 
 func notify_drop_resolved(accepted: bool) -> void:
@@ -213,11 +308,12 @@ func _make_card(text: String, kind: int, index: int) -> Panel:
 	return panel
 
 
-func _relayout(animate: bool = false) -> void:
+func _compute_base_poses() -> float:
 	var n := _cards.size()
+	_base_poses.clear()
 	if n == 0:
 		custom_minimum_size.y = 118.0
-		return
+		return 0.0
 	var step := CARD_W - OVERLAP
 	var total_w := CARD_W + step * float(n - 1)
 	var origin_x := (size.x - total_w) * 0.5
@@ -227,7 +323,6 @@ func _relayout(animate: bool = false) -> void:
 			step = (size.x - CARD_W) / float(n - 1)
 			total_w = size.x
 	var base_y := size.y - CARD_H - 4.0
-	_base_poses.clear()
 	for i in n:
 		var t := 0.0 if n == 1 else (float(i) / float(n - 1)) * 2.0 - 1.0
 		var rot := t * FAN_MAX_DEG
@@ -238,9 +333,22 @@ func _relayout(animate: bool = false) -> void:
 			gap_shift = 10.0 if i < _drag_index else -10.0
 		var pos := Vector2(origin_x + step * float(i) + gap_shift, base_y + arc_y)
 		_base_poses.append({"pos": pos, "rot": rot})
+	custom_minimum_size = Vector2(maxi(int(total_w) + 16, 280), 118)
+	return total_w
+
+
+func _relayout(animate: bool = false) -> void:
+	_compute_base_poses()
+	var n := _cards.size()
+	if n == 0:
+		return
+	for i in n:
 		var card := _cards[i]
 		if i == _drag_index and _dragging:
 			continue
+		var pose: Dictionary = _base_poses[i]
+		var pos: Vector2 = pose["pos"]
+		var rot := float(pose["rot"])
 		card.z_index = i
 		if animate:
 			_tween_card_to(card, pos, rot, Vector2.ONE)
@@ -248,7 +356,6 @@ func _relayout(animate: bool = false) -> void:
 			card.position = pos
 			card.rotation_degrees = rot
 			card.scale = Vector2.ONE
-	custom_minimum_size = Vector2(maxi(int(total_w) + 16, 280), 118)
 	if not _dragging:
 		_apply_hover_visual()
 
