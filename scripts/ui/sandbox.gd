@@ -687,8 +687,8 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 	if peek != null and peek.plays_on_board():
 		var release_cells: Array[Vector2i] = peek.release_preview_cells(_board)
 		var in_release := cell in release_cells
-		# 自由打出：棋盘任意有效格可松手；高亮按技能规则格。
-		valid = true
+		# 非通用技：仅规则格（金 overlay）可松手；格外悬停标无效。
+		valid = in_release
 		if unit != null and unit.is_alive():
 			hover_unit = unit
 		var caster := peek.find_bound_caster(_board)
@@ -721,7 +721,7 @@ func _on_hand_card_activated(index: int) -> void:
 	_resolve_free_skill_play(index)
 
 
-## 单位目标卡拖到己方单位；非通用技松手在棋盘/手牌区即可。无效回手。
+## 单位目标卡拖到己方单位；非通用技须松在规则格。无效回手。
 ## 瞄准类技若松手落在合法目标格上：打出后立刻结算，无需再点一次。
 func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	if _board_view != null:
@@ -734,10 +734,15 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 		return
 	var peek: TacticalActionCard = _deck.hand[index]
 	var cell_v: Variant = _board_view.pick_cell_at_global(global_pos)
-	# 非通用技：棋盘格或手牌区（无格）均可打出。
+	# 非通用技：须落到规则格（金 overlay）；无效格/手牌区松手回手。短按仍可自由打出。
 	if peek != null and peek.plays_on_board():
 		if peek.find_bound_caster(_board) == null:
 			_last_log = "施法者不在场 · 卡已回手"
+			_hand_fan.notify_drop_resolved(false)
+			_refresh_all()
+			return
+		if cell_v == null or not peek.is_valid_release_cell(_board, cell_v as Vector2i):
+			_last_log = "落点无效 · 卡已回手"
 			_hand_fan.notify_drop_resolved(false)
 			_refresh_all()
 			return

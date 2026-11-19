@@ -124,28 +124,28 @@ func rules_detail() -> String:
 		Kind.ATTACK:
 			return "拖到己方单位：选定攻击者，再点红圈内单位（含友方）普攻。可打多张再攻。"
 		Kind.SKILL_DRAW:
-			return "短按或拖到棋盘/手牌区打出：手牌全部进弃，再抽 5 张（自动绑定鼓手）。"
+			return "短按或拖到规则格打出：手牌全部进弃，再抽 5 张（自动绑定鼓手）。无效格松手回手。"
 		Kind.SKILL_STRONG_ATTACK:
 			return "拖到任意己方单位：选定攻击者，再点红圈内单位；本次攻击额外 +%d 伤害。" % attack_bonus_damage
 		Kind.SKILL_BURN_ATTACK:
 			return (
-				"短按或拖到棋盘/手牌区打出（自动绑定爆爆）：再点红圈内单位普攻；对目标及其周围格施加 %d 层燃烧。"
+				"短按或拖到规则格打出（自动绑定爆爆）：再点红圈内单位普攻；对目标及其周围格施加 %d 层燃烧。无效格松手回手。"
 				% maxi(1, aoe_burn_stacks)
 			)
 		Kind.SKILL_ARMOR:
 			return "拖到任意己方单位：立刻 +%d 护甲（可叠加）。伤害先打护甲，溢出不穿血。" % maxi(1, armor_grant)
 		Kind.SKILL_INSPIRE:
-			return "短按或拖到棋盘/手牌区打出（自动绑定鼓手）：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。"
+			return "短按或拖到规则格打出（自动绑定鼓手）：周围 1 格内其他友方各 +1 狂暴（战局永久，上限 15；每层伤害 ×1.2 向上取整）。无效格松手回手。"
 		Kind.SKILL_STEALTH:
-			return "短按或拖到棋盘/手牌区打出（自动绑定刺客）：再点任意存活单位，令其隐身（敌方不可选为目标；攻击/受伤/加状态取消）。"
+			return "短按或拖到规则格打出（自动绑定刺客）：再点任意存活单位，令其隐身（敌方不可选为目标；攻击/受伤/加状态取消）。无效格松手回手。"
 		Kind.SKILL_VOLLEY:
 			return (
-				"短按或拖到棋盘/手牌区打出（自动绑定游侠）；松手落在红圈合法目标可立刻结算。对目标格及相对攻击方向垂直左右两格造成伤害。"
+				"短按或拖到规则格打出（自动绑定游侠）；松手落在红圈合法目标可立刻结算。对目标格及相对攻击方向垂直左右两格造成伤害。无效格松手回手。"
 			)
 		Kind.SKILL_CHARGE:
 			return (
-				"短按或拖到棋盘/手牌区打出（自动绑定盾卫）：再点方向格；朝该方向冲撞最多 3 格。"
-				+ "路径单位（含友军）受当前攻击力伤害并撞开；遇不可走格则停在前一格且自身受 3 点伤害。"
+				"短按或拖到规则格打出（自动绑定盾卫）：再点方向格；朝该方向冲撞最多 3 格。"
+				+ "路径单位（含友军）受当前攻击力伤害并撞开；遇不可走格则停在前一格且自身受 3 点伤害。无效格松手回手。"
 			)
 		_:
 			return ""
@@ -199,6 +199,13 @@ func release_preview_cells(board: TacticalBoard) -> Array[Vector2i]:
 		_:
 			pass
 	return out
+
+
+## 拖放松手格是否落在该技规则格内；否则应回手、不进弃。
+func is_valid_release_cell(board: TacticalBoard, cell: Vector2i) -> bool:
+	if board == null or not plays_on_board():
+		return false
+	return cell in release_preview_cells(board)
 
 
 ## 绑角色主动技的存活施法者；找不到则 null。

@@ -58,6 +58,9 @@ func _initialize() -> void:
 	if not _test_bound_skills_play_free():
 		quit(1)
 		return
+	if not _test_skill_invalid_release_cell():
+		quit(1)
+		return
 	if not _test_inspire_adds_frenzy_nearby():
 		quit(1)
 		return
@@ -929,6 +932,75 @@ func _test_bound_skills_play_free() -> bool:
 	var res: Dictionary = board.apply_inspire_frenzy(drum, 1)
 	if not res.get("ok", false) or ally.frenzy_stacks != before + 1:
 		push_error("CardActions: free inspire should buff neighbor via bound caster")
+		return false
+	return true
+
+
+## 非通用技：规则格外落点须判无效（拖放回手）；规则格内有效。
+func _test_skill_invalid_release_cell() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var volley := TacticalActionCardScript.make_skill_volley("archer")
+	var charge := TacticalActionCardScript.make_skill_charge("knight")
+	var inspire := TacticalActionCardScript.make_skill_inspire("wardrum")
+	var wardrum := TacticalActionCardScript.make_skill_draw("wardrum")
+	var archer := volley.find_bound_caster(board)
+	var knight := charge.find_bound_caster(board)
+	var drum := inspire.find_bound_caster(board)
+	if archer == null or knight == null or drum == null:
+		push_error("CardActions: casters missing for invalid-release test")
+		return false
+	var volley_cells: Array[Vector2i] = volley.release_preview_cells(board)
+	if volley_cells.is_empty():
+		push_error("CardActions: volley needs release cells")
+		return false
+	if not volley.is_valid_release_cell(board, volley_cells[0]):
+		push_error("CardActions: volley rule cell must be valid release")
+		return false
+	# 找一格不在发射带内。
+	var outside := Vector2i(-1, -1)
+	for gx in range(board.grid_width):
+		for gy in range(board.grid_height):
+			var c := Vector2i(gx, gy)
+			if not (c in volley_cells):
+				outside = c
+				break
+		if outside.x >= 0:
+			break
+	if outside.x < 0:
+		push_error("CardActions: need a cell outside volley range")
+		return false
+	if volley.is_valid_release_cell(board, outside):
+		push_error("CardActions: volley outside range must be invalid release")
+		return false
+	var charge_cells: Array[Vector2i] = charge.release_preview_cells(board)
+	if charge_cells.is_empty() or not charge.is_valid_release_cell(board, charge_cells[0]):
+		push_error("CardActions: charge rule cell must be valid")
+		return false
+	if charge.is_valid_release_cell(board, outside) and not (outside in charge_cells):
+		push_error("CardActions: charge must reject non-preview cell")
+		return false
+	# 鼓舞：鼓手周围 1 外无效。
+	var far := drum.cell + Vector2i(3, 3)
+	if (
+		far.x >= 0
+		and far.x < board.grid_width
+		and far.y >= 0
+		and far.y < board.grid_height
+		and inspire.is_valid_release_cell(board, far)
+	):
+		push_error("CardActions: inspire far cell must be invalid")
+		return false
+	if not inspire.is_valid_release_cell(board, drum.cell):
+		push_error("CardActions: inspire drummer cell must be valid")
+		return false
+	# 鸣鼓：全盘有效。
+	if not wardrum.is_valid_release_cell(board, Vector2i(0, 0)):
+		push_error("CardActions: wardrum any board cell must be valid")
+		return false
+	# 通用攻击卡不走规则格判定。
+	var attack := TacticalActionCardScript.make_attack()
+	if attack.is_valid_release_cell(board, Vector2i(0, 0)):
+		push_error("CardActions: attack must not use skill release cells")
 		return false
 	return true
 
