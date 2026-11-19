@@ -263,6 +263,8 @@ static func _grant_ephemeral_attack(
 
 
 ## 击杀被动：周围友方各尝试普攻一次；无合法敌则跳过；用友军自身攻距/攻。
+## 每段出击写入 fx_out 的 kind=reaction_attack（含 tag 飘字字段），供沙盘串行播动画+飘字；
+## 嵌套被动/连锁反应按结算顺序追加在该段之后。
 static func _apply_ally_attack_on_kill(
 	board: TacticalBoard,
 	killer: TacticalUnitInstance,
@@ -295,12 +297,31 @@ static func _apply_ally_attack_on_kill(
 		if not bool(atk.get("ok", false)):
 			continue
 		fired += 1
-		_emit_fx(fx_out, ally.cell, tag, Color("ffe08a"))
-		# 嵌套伤害/击杀被动飘字并入本次击杀反馈。
-		var nested_fx: Array = atk.get("passive_fx", []) as Array
-		if fx_out is Array and not nested_fx.is_empty():
-			(fx_out as Array).append_array(nested_fx)
 		var victim: TacticalUnitInstance = atk.get("target") as TacticalUnitInstance
+		if fx_out is Array:
+			(fx_out as Array).append(
+				{
+					"kind": "reaction_attack",
+					"cell": ally.cell,
+					"text": tag,
+					"color": Color("ffe08a"),
+					"attacker": ally,
+					"target": victim,
+					"target_cell": target_cell,
+					"damage": int(atk.get("damage", 0)),
+					"killed": bool(atk.get("killed", false)),
+					"knockback_moved": bool(atk.get("knockback_moved", false)),
+					"knockback_from": atk.get("knockback_from", Vector2i(-1, -1)),
+					"collision_target": atk.get("collision_target"),
+					"collision_damage": int(atk.get("collision_damage", 0)),
+					"collision_killed": bool(atk.get("collision_killed", false)),
+					"volley_hits": atk.get("volley_hits", []),
+				}
+			)
+			# 嵌套飘字与更深一层反应攻击按结算序接在本段后，沙盘逐段播放。
+			var nested_fx: Array = atk.get("passive_fx", []) as Array
+			if not nested_fx.is_empty():
+				(fx_out as Array).append_array(nested_fx)
 		var vname := victim.def.display_name if victim != null and victim.def != null else "?"
 		hit_logs.append(
 			"%s→%s %d%s"
