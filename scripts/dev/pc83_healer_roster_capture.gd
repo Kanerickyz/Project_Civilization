@@ -1,5 +1,5 @@
 extends SceneTree
-## PC-83 GUI：部署阶段可见医师（apothecary 剪纸）在 7 蓝阵容。
+## PC-83 GUI：部署阶段可见医师（apothecary 剪纸）在可部署阵容。
 ## godot --path . --display-driver x11 --rendering-driver opengl3 --resolution 786x1704 \
 ##   --script res://scripts/dev/pc83_healer_roster_capture.gd -- <out.png>
 
@@ -51,9 +51,9 @@ func _initialize() -> void:
 		push_error("PC83 capture: missing healer on board")
 		quit(1)
 		return
-	if players != 7 or opponents != 6:
+	if players != 6 or opponents != 6:
 		push_error(
-			"PC83 capture: expected 7+6 units, got players=%d opponents=%d"
+			"PC83 capture: expected 6+6 units, got players=%d opponents=%d"
 			% [players, opponents]
 		)
 		quit(1)

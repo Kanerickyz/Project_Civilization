@@ -76,13 +76,12 @@ func _initialize() -> void:
 
 func _test_roster_loads() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(6, 6)
-	# 7 友（含刺客/医师）+ 6 狼骑。
-	if board.living_units().size() != 13:
-		push_error("TacticalUnits: expected 13 units, got %d" % board.living_units().size())
+	# 6 友（含医师，不含刺客）+ 6 狼骑。
+	if board.living_units().size() != 12:
+		push_error("TacticalUnits: expected 12 units, got %d" % board.living_units().size())
 		return false
 	var riders := 0
 	var boomling := 0
-	var assassin := 0
 	var healer := 0
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.OPPONENT:
@@ -112,16 +111,8 @@ func _test_roster_loads() -> bool:
 					push_error("TacticalUnits: boomling stats mismatch")
 					return false
 			elif u.def.id == "assassin":
-				assassin += 1
-				if (
-					u.def.max_hp != 4
-					or u.def.attack != 2
-					or u.def.move_range != 4
-					or not u.def.teleports
-					or not u.is_stealthed()
-				):
-					push_error("TacticalUnits: assassin stats/stealth mismatch")
-					return false
+				push_error("TacticalUnits: assassin should be removed from roster")
+				return false
 			elif u.def.id == "healer":
 				healer += 1
 				if (
@@ -148,9 +139,6 @@ func _test_roster_loads() -> bool:
 		return false
 	if boomling != 1:
 		push_error("TacticalUnits: expected 1 boomling, got %d" % boomling)
-		return false
-	if assassin != 1:
-		push_error("TacticalUnits: expected 1 assassin, got %d" % assassin)
 		return false
 	if healer != 1:
 		push_error("TacticalUnits: expected 1 healer, got %d" % healer)

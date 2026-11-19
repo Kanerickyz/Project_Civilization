@@ -126,9 +126,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 7 人：鼓手×2 /盾卫护甲+冲撞 /大剑/爆爆/刺客/游侠齐发/医师药水 → 9
-	if skills != 9:
-		push_error("CardActions: expected 9 skill cards, got %d" % skills)
+	# 6 人：鼓手×2 /盾卫护甲+冲撞 /大剑/爆爆/游侠齐发/医师药水 → 8（刺客未编入阵容）
+	if skills != 8:
+		push_error("CardActions: expected 8 skill cards, got %d" % skills)
 		return false
 	# 每人仅通用攻 1 + 主动技；无移动牌。
 	var expected := living_players + skills
@@ -905,19 +905,15 @@ func _test_bound_skills_play_free() -> bool:
 		return false
 	var drum := inspire.find_bound_caster(board)
 	var boom := burn.find_bound_caster(board)
-	var sin := stealth.find_bound_caster(board)
 	var archer := volley.find_bound_caster(board)
 	var knight := charge.find_bound_caster(board)
 	var healer := potion.find_bound_caster(board)
-	if (
-		drum == null
-		or boom == null
-		or sin == null
-		or archer == null
-		or knight == null
-		or healer == null
-	):
+	if drum == null or boom == null or archer == null or knight == null or healer == null:
 		push_error("CardActions: bound casters missing on demo board")
+		return false
+	# 刺客未编入可部署阵容；卡工厂仍可用，场上无施法者时解析为 null。
+	if stealth.find_bound_caster(board) != null:
+		push_error("CardActions: assassin must not be on default roster")
 		return false
 	var inspire_cells: Array[Vector2i] = inspire.release_preview_cells(board)
 	if inspire_cells.is_empty() or not (drum.cell in inspire_cells):
@@ -926,10 +922,6 @@ func _test_bound_skills_play_free() -> bool:
 	var burn_cells: Array[Vector2i] = burn.release_preview_cells(board)
 	if burn_cells.is_empty():
 		push_error("CardActions: burn preview must show attack range")
-		return false
-	var stealth_cells: Array[Vector2i] = stealth.release_preview_cells(board)
-	if stealth_cells.size() < 2:
-		push_error("CardActions: stealth preview must cover living units")
 		return false
 	# 自由打出后鼓舞仍按鼓手结算。
 	var ally: TacticalUnitInstance = null

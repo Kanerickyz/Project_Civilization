@@ -13,7 +13,6 @@ const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/mini_pekka.tres",
 	"res://resources/units/wardrum.tres",
 	"res://resources/units/boomling.tres",
-	"res://resources/units/assassin.tres",
 	"res://resources/units/healer.tres",
 ]
 
