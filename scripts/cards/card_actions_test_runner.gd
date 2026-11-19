@@ -126,9 +126,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 7 人：鼓手×2 /盾卫护甲+冲撞 /大剑/爆爆/刺客/游侠齐发/医师药水 → 9
-	if skills != 9:
-		push_error("CardActions: expected 9 skill cards, got %d" % skills)
+	# 7 人：鼓手×2 /盾卫护甲+冲撞 /大剑×2 /爆爆/刺客/游侠齐发/医师药水×2 → 11
+	if skills != 11:
+		push_error("CardActions: expected 11 skill cards, got %d" % skills)
 		return false
 	# 每人仅通用攻 1 + 主动技；无移动牌。
 	var expected := living_players + skills
@@ -150,8 +150,8 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_INSPIRE) != 1:
 		push_error("CardActions: one wardrum inspire skill expected")
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 1:
-		push_error("CardActions: one pekka strong attack expected")
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK) != 2:
+		push_error("CardActions: two pekka strong attack expected")
 		return false
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_ARMOR) != 1:
 		push_error("CardActions: one knight armor skill expected")
@@ -165,8 +165,8 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_VOLLEY) != 1:
 		push_error("CardActions: one archer volley skill expected")
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION) != 1:
-		push_error("CardActions: one healer potion skill expected")
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION) != 2:
+		push_error("CardActions: two healer potion skills expected")
 		return false
 	for c in deck.draw_pile:
 		if c.ephemeral:
@@ -1257,7 +1257,7 @@ func _test_heal_potion_skill() -> bool:
 	):
 		push_error("CardActions: heal potion outside range must be invalid")
 		return false
-	# 死亡 cull：攻 1 + 药水 1。
+	# 死亡 cull：攻 1 + 药水 2。
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 83
 	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
@@ -1265,14 +1265,14 @@ func _test_heal_potion_skill() -> bool:
 	var before_total := deck.total_cards()
 	var before_potion := deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION)
 	var removed := deck.on_player_unit_died(healer)
-	if removed != 2:
-		push_error("CardActions: healer death should remove 2, got %d" % removed)
+	if removed != 3:
+		push_error("CardActions: healer death should remove 3, got %d" % removed)
 		return false
-	if deck.total_cards() != before_total - 2:
+	if deck.total_cards() != before_total - 3:
 		push_error("CardActions: healer death total mismatch")
 		return false
-	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION) != before_potion - 1:
-		push_error("CardActions: heal potion should cull by 1")
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION) != before_potion - 2:
+		push_error("CardActions: heal potion should cull by 2")
 		return false
 	# 医师仍存活（cull 不击杀）；摆位测治疗结算。
 	healer.hp = healer.def.max_hp

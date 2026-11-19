@@ -282,7 +282,7 @@ static func _entry_volley(entry: Variant) -> bool:
 	return false
 
 
-## 己方阵亡：减通用攻 1；绑角色主动技按 owner 减 1；通用加强攻按贡献者减 1；清攻授权。
+## 己方阵亡：减通用攻 1；绑角色主动技按 owner 减；通用加强攻按贡献者减 2；清攻授权。
 ## 幂等：同一尸体只 cull 一次（燃烧段开始会扫全部尸体，不可重复减攻）。
 func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	if unit == null:
@@ -313,7 +313,8 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 				int(TacticalActionCard.Kind.SKILL_VOLLEY), unit_id
 			)
 		"mini_pekka":
-			# 加强攻已解绑：按 kind 减 1（贡献者阵亡仍 cull 一张）。
+			# 加强攻已解绑：按 kind 各减 1（贡献者阵亡 cull 其贡献的两张）。
+			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK))
 			removed += _remove_one_skill_kind(int(TacticalActionCard.Kind.SKILL_STRONG_ATTACK))
 		"knight":
 			# 护甲卡已解绑：按 kind 减 1；冲撞按 bound cull。
@@ -322,6 +323,10 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 				int(TacticalActionCard.Kind.SKILL_CHARGE), unit_id
 			)
 		"healer":
+			# 医师贡献 2 张恢复药水，按 bound 各 cull 1。
+			removed += _remove_one_bound_skill(
+				int(TacticalActionCard.Kind.SKILL_HEAL_POTION), unit_id
+			)
 			removed += _remove_one_bound_skill(
 				int(TacticalActionCard.Kind.SKILL_HEAL_POTION), unit_id
 			)
@@ -361,7 +366,8 @@ static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCar
 			out.append(TacticalActionCardScript.make_skill_armor(SKILL_ARMOR_GRANT))
 			out.append(TacticalActionCardScript.make_skill_charge("knight"))
 		"mini_pekka":
-			# 大剑贡献 1 张通用加强攻（不绑角色）。
+			# 大剑贡献 2 张通用加强攻（不绑角色）。
+			out.append(TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS))
 			out.append(TacticalActionCardScript.make_skill_strong_attack(SKILL_STRONG_BONUS))
 		"boomling":
 			out.append(
@@ -372,6 +378,8 @@ static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCar
 		"archer":
 			out.append(TacticalActionCardScript.make_skill_volley("archer"))
 		"healer":
+			# 医师贡献 2 张恢复药水。
+			out.append(TacticalActionCardScript.make_skill_heal_potion("healer"))
 			out.append(TacticalActionCardScript.make_skill_heal_potion("healer"))
 	return out
 

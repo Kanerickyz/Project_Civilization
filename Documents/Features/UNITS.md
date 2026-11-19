@@ -12,7 +12,7 @@
 | 鼓手 | `wardrum` | 3 | — | 1 | 支援机动 |
 | 爆爆 | `boomling` | 2 | — | 2 | 生命 6、攻击 2；燃烧 |
 | 刺客 | `assassin` | **4 瞬移** | — | 1 | 生命 4、攻击 2；隐身见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md) |
-| 医师 | `healer` | 2 | — | 2 | 生命 4、攻击 0；共情被动 +「恢复药水」 |
+| 医师 | `healer` | 2 | — | 2 | 生命 4、攻击 0；共情被动 +「恢复药水」×2 |
 | 狼骑兵 | `rider` | 2 | 2 | **1**（近战邻格） | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
 - **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **3**。
