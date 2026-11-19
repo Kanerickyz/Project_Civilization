@@ -84,6 +84,22 @@ static func process_ally_death(
 	return logs
 
 
+## 敌方单位阵亡后：扫描仍存活己方的 ON_ENEMY_DEATH 被动。
+static func process_enemy_death(
+	board: TacticalBoard, dead: TacticalUnitInstance, fx_out: Variant = null
+) -> Array[String]:
+	if board == null or dead == null:
+		return []
+	var logs: Array[String] = []
+	for u in board.living_units():
+		if u == dead or u.faction == dead.faction:
+			continue
+		logs.append_array(
+			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_ENEMY_DEATH, fx_out)
+		)
+	return logs
+
+
 ## 玩家一张攻击瞄准卡选定有效目标并成功结算后：扫描存活己方单位的 ON_PLAYER_ATTACK_CARD 被动。
 ## 授权未出手、取消瞄准、无效/回手不触发。
 static func process_player_attack_card_played(
@@ -141,6 +157,8 @@ static func _try_trigger(
 			return _apply_player_attack_card(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
 			return _draw_cards_on_trigger(board, unit, ab, fx_out)
+		TacticalActiveAbility.TriggerKind.ON_ENEMY_DEATH:
+			return _apply_self_attack_on_enemy_death(board, unit, ab, fx_out)
 		_:
 			return []
 
@@ -260,6 +278,50 @@ static func _grant_ephemeral_attack(
 	board.player_deck.add_ephemeral_attack_to_hand()
 	_emit_fx(fx_out, killer.cell, "+1临攻", Color("7ec8ff"))
 	return ["%s 猎获：手牌+1 临时攻击卡（用完销毁）" % killer.def.display_name]
+
+
+## 敌方死亡被动：自身攻击范围内仍有敌则普攻一次（最近；同距低 HP）。
+static func _apply_self_attack_on_enemy_death(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
+) -> Array[String]:
+	if board == null or unit == null or not unit.is_alive():
+		return []
+	if not ab.self_attack_on_enemy_death:
+		return []
+	if unit.effective_attack() <= 0:
+		return []
+	var cells: Array[Vector2i] = TacticalCombatScript.attackable_cells(board, unit, false)
+	if cells.is_empty():
+		return []
+	var target_cell := _pick_nearest_enemy_cell(board, unit, cells)
+	if target_cell.x < -900:
+		return []
+	var atk: Dictionary = TacticalCombatScript.try_basic_attack(
+		board, unit, target_cell, unit.faction, false
+	)
+	if not bool(atk.get("ok", false)):
+		return []
+	var tag := ab.display_name if not ab.display_name.is_empty() else "追斩"
+	_emit_fx(fx_out, unit.cell, tag, Color("ffe08a"))
+	var nested_fx: Array = atk.get("passive_fx", []) as Array
+	if fx_out is Array and not nested_fx.is_empty():
+		(fx_out as Array).append_array(nested_fx)
+	var victim: TacticalUnitInstance = atk.get("target") as TacticalUnitInstance
+	var vname := victim.def.display_name if victim != null and victim.def != null else "?"
+	board.changed.emit()
+	return [
+		"%s %s：攻击 %s %d%s"
+		% [
+			unit.def.display_name,
+			tag,
+			vname,
+			int(atk.get("damage", 0)),
+			"（击杀）" if bool(atk.get("killed", false)) else "",
+		],
+	]
 
 
 ## 击杀被动：周围友方各尝试普攻一次；无合法敌则跳过；用友军自身攻距/攻。
