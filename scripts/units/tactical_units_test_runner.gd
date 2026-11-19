@@ -28,6 +28,9 @@ func _initialize() -> void:
 	if not _test_knight_ally_death_draws():
 		quit(1)
 		return
+	if not _test_rider_pack_on_ally_death():
+		quit(1)
+		return
 	if not _test_armor_absorbs_no_overflow_hp():
 		quit(1)
 		return
@@ -375,14 +378,20 @@ func _test_archer_kill_ally_attacks() -> bool:
 		push_error("TacticalUnits: foe_a should be dead")
 		return false
 	# 邻格盾卫应攻击最近敌（(3,3) 距 1）；医师攻 0 跳过；远距大剑无邻敌不追斩。
-	if foe_near.hp >= foe_near_before:
+	# 狼群先于猎召结算：存活狼骑已 +2 血，故邻敌血上限按抬升后比较。
+	var pack_near_hp := foe_near_before + 2
+	if foe_near.hp >= pack_near_hp:
 		push_error(
-			"TacticalUnits: neighbor knight should attack after hunt_call, hp %d→%d"
-			% [foe_near_before, foe_near.hp]
+			"TacticalUnits: neighbor knight should attack after hunt_call, hp %d→%d (pack+2)"
+			% [pack_near_hp, foe_near.hp]
 		)
 		return false
-	if foe_b.hp != foe_b_before:
-		push_error("TacticalUnits: out-of-range foe must not be hit by hunt_call ally")
+	# 远距狼骑仅吃狼群 +2 血，不应再被猎召友军打到。
+	if foe_b.hp != foe_b_before + 2 or foe_b.effective_max_hp() != foe_b.def.max_hp + 2:
+		push_error(
+			"TacticalUnits: out-of-range foe must only get wolf_pack +2, hp %d→%d max=%d"
+			% [foe_b_before, foe_b.hp, foe_b.effective_max_hp()]
+		)
 		return false
 	if ally_far.hp != far_hp_before:
 		push_error("TacticalUnits: far ally must not be mutated by hunt_call")
@@ -467,6 +476,95 @@ func _test_knight_ally_death_draws() -> bool:
 	board.apply_damage(foe, 1, null)
 	if deck.hand.size() != hand_mid:
 		push_error("TacticalUnits: enemy death must not trigger knight draw")
+		return false
+	return true
+
+
+func _test_rider_pack_on_ally_death() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var riders: Array = []
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
+			riders.append(u)
+	if riders.size() < 2:
+		push_error("TacticalUnits: need ≥2 riders for pack buff")
+		return false
+	var sample: TacticalUnitInstance = riders[0] as TacticalUnitInstance
+	var ab := sample.def.triggered_ability
+	if ab == null or ab.id != "wolf_pack":
+		push_error("TacticalUnits: rider should have wolf_pack passive")
+		return false
+	if ab.self_atk_on_trigger != 2 or ab.self_hp_on_trigger != 2:
+		push_error("TacticalUnits: wolf_pack should be +2 atk/+2 hp")
+		return false
+	if ab.trigger_kind != TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
+		push_error("TacticalUnits: wolf_pack must be ON_ALLY_DEATH")
+		return false
+	# 拉开玩家到左缘，避免大剑追斩连锁干扰狼群断言。
+	var py := 0
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		u.cell = Vector2i(0, py)
+		py += 1
+	var victim: TacticalUnitInstance = riders[0] as TacticalUnitInstance
+	var survivors: Array = riders.slice(1)
+	var before: Array = []
+	for s in survivors:
+		var su: TacticalUnitInstance = s as TacticalUnitInstance
+		before.append(
+			{"atk": su.effective_attack(), "max": su.effective_max_hp(), "hp": su.hp}
+		)
+	victim.hp = 1
+	var res := board.apply_damage(victim, 1, null)
+	if victim.is_alive() or not bool(res.get("killed", false)):
+		push_error("TacticalUnits: pack victim should die")
+		return false
+	for i in range(survivors.size()):
+		var su: TacticalUnitInstance = survivors[i] as TacticalUnitInstance
+		var b: Dictionary = before[i] as Dictionary
+		if su.effective_attack() != int(b["atk"]) + 2:
+			push_error(
+				"TacticalUnits: pack survivor atk +2 expected, got %d→%d"
+				% [int(b["atk"]), su.effective_attack()]
+			)
+			return false
+		if su.effective_max_hp() != int(b["max"]) + 2 or su.hp != int(b["hp"]) + 2:
+			push_error(
+				"TacticalUnits: pack survivor hp +2 expected, got max %d→%d hp %d→%d"
+				% [int(b["max"]), su.effective_max_hp(), int(b["hp"]), su.hp]
+			)
+			return false
+	var fx: Array = res.get("passive_fx", []) as Array
+	var prompts := 0
+	var atk_fx := 0
+	var hp_fx := 0
+	for ev in fx:
+		if not (ev is Dictionary):
+			continue
+		var d: Dictionary = ev as Dictionary
+		if str(d.get("kind", "")) == "skill_prompt" and str(d.get("text", "")) == "狼群":
+			prompts += 1
+		elif str(d.get("text", "")) == "+2攻":
+			atk_fx += 1
+		elif str(d.get("text", "")) == "+2血":
+			hp_fx += 1
+	var n := survivors.size()
+	if prompts != n or atk_fx != n or hp_fx != n:
+		push_error(
+			"TacticalUnits: pack fx mismatch prompts=%d atk=%d hp=%d want %d"
+			% [prompts, atk_fx, hp_fx, n]
+		)
+		return false
+	# 玩家死亡不触发狼群。
+	var player := _player_unit(board, "archer")
+	if player == null:
+		return false
+	var mid_atk := (survivors[0] as TacticalUnitInstance).effective_attack()
+	player.hp = 1
+	board.apply_damage(player, 1, null)
+	if (survivors[0] as TacticalUnitInstance).effective_attack() != mid_atk:
+		push_error("TacticalUnits: player death must not buff riders")
 		return false
 	return true
 
@@ -670,14 +768,20 @@ func _test_pekka_enemy_death_attack() -> bool:
 	if not bool(res.get("killed", false)):
 		push_error("TacticalUnits: archer should kill foe_a for pursuit")
 		return false
-	if foe_b.hp >= foe_b_before:
+	# 狼群先于追斩：邻敌先 +2 血再被打。
+	var pack_b_hp := foe_b_before + 2
+	if foe_b.hp >= pack_b_hp:
 		push_error(
-			"TacticalUnits: pekka should attack nearest in-range foe, hp %d→%d"
-			% [foe_b_before, foe_b.hp]
+			"TacticalUnits: pekka should attack nearest in-range foe, hp %d→%d (pack+2)"
+			% [pack_b_hp, foe_b.hp]
 		)
 		return false
-	if foe_far.hp != foe_far_before:
-		push_error("TacticalUnits: out-of-range foe must not be hit by pursuit")
+	# 远距狼骑仅吃狼群 +2，不被追斩打到。
+	if foe_far.hp != foe_far_before + 2 or foe_far.effective_max_hp() != foe_far.def.max_hp + 2:
+		push_error(
+			"TacticalUnits: out-of-range foe must only get wolf_pack +2, hp %d→%d max=%d"
+			% [foe_far_before, foe_far.hp, foe_far.effective_max_hp()]
+		)
 		return false
 	if pekka.effective_attack() != atk_before:
 		push_error("TacticalUnits: pekka pursuit must not grant atk")

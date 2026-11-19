@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="TacticalActiveAbility" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/units/tactical_active_ability.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+id = "wolf_pack"
+display_name = "狼群"
+autochess_ability_id = "ally_death_self_atk_hp"
+rules_hint = "每有一个友方单位阵亡：自身攻击 +2、生命 +2（本场；生命抬上限并回等量）。"
+trigger_kind = 7
+range_chebyshev = 0
+self_atk_on_trigger = 2
+self_hp_on_trigger = 2
+self_atk_on_kill = 0
+ally_atk_buff = 0
+ally_hp_buff = 0
+ally_buff_radius = 0
+ally_heal_on_trigger = 0
+grant_ephemeral_attack_on_kill = false
+ally_attack_on_kill = false
+self_attack_on_enemy_death = false
+draw_cards_on_trigger = 0

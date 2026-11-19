@@ -174,7 +174,10 @@ static func _try_trigger(
 		TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD:
 			return _apply_player_attack_card(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
-			return _draw_cards_on_trigger(board, unit, ab, fx_out)
+			var ally_death_logs: Array[String] = []
+			ally_death_logs.append_array(_apply_self_stats_on_trigger(board, unit, ab, fx_out))
+			ally_death_logs.append_array(_draw_cards_on_trigger(board, unit, ab, fx_out))
+			return ally_death_logs
 		TacticalActiveAbility.TriggerKind.ON_ENEMY_DEATH:
 			return _apply_self_attack_on_enemy_death(board, unit, ab, fx_out)
 		_:
@@ -234,6 +237,39 @@ static func _apply_self_atk(
 	_emit_fx(fx_out, unit.cell, "+%d攻" % amount, Color("ffe08a"))
 	return [
 		"%s %s：攻击+%d（本场）" % [unit.def.display_name, tag, amount],
+	]
+
+
+## 友方死亡等：自身攻/血本场加成（抬上限并回等量血）；先短能力名再数值飘字。
+static func _apply_self_stats_on_trigger(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
+) -> Array[String]:
+	if unit == null or not unit.is_alive() or ab == null:
+		return []
+	var atk := ab.self_atk_on_trigger
+	var hp := ab.self_hp_on_trigger
+	if atk == 0 and hp == 0:
+		return []
+	var tag := ab.display_name if not ab.display_name.is_empty() else "强化"
+	_emit_skill_prompt(fx_out, unit.cell, tag)
+	if atk != 0:
+		unit.atk_bonus += atk
+		_emit_fx(fx_out, unit.cell, "+%d攻" % atk, Color("ffe08a"), "", "buff_atk")
+	if hp != 0:
+		unit.max_hp_bonus += hp
+		unit.hp += hp
+		_emit_fx(fx_out, unit.cell, "+%d血" % hp, Color("7dff9a"), "", "buff_hp")
+	board.changed.emit()
+	var parts: PackedStringArray = []
+	if atk != 0:
+		parts.append("攻击+%d" % atk)
+	if hp != 0:
+		parts.append("生命+%d" % hp)
+	return [
+		"%s %s：%s（本场）" % [unit.def.display_name, tag, "、".join(parts)],
 	]
 
 
