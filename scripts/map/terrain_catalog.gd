@@ -56,6 +56,12 @@ func is_passable(terrain_id: StringName) -> bool:
 	return def == null or def.passable
 
 
+## 盘内可见格；void 等 present=false 视为盘外。
+func is_present(terrain_id: StringName) -> bool:
+	var def := get_def(resolve_id(terrain_id))
+	return def == null or def.present
+
+
 func blocks_attack(terrain_id: StringName) -> bool:
 	var def := get_def(resolve_id(terrain_id))
 	return def != null and def.blocks_attack
@@ -77,7 +83,10 @@ func display_name_for(terrain_id: StringName) -> String:
 
 
 func next_id(terrain_id: StringName) -> StringName:
-	var list := ids()
+	var list: Array[StringName] = []
+	for tid in ids():
+		if is_present(tid):
+			list.append(tid)
 	if list.is_empty():
 		return default_id
 	var i := list.find(resolve_id(terrain_id))

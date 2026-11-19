@@ -7,6 +7,8 @@ extends Resource
 @export var id: StringName = &""
 @export var display_name: String = ""
 @export var passable: bool = true
+## false=盘外缺格：不绘制、不可点选/部署/站立（边缘不规则缩进用）。
+@export var present: bool = true
 ## 中间格挡普攻视线（如树林）；邻格攻击不受影响。城墙默认 false。
 @export var blocks_attack: bool = false
 ## 单位进入该格时清除燃烧层数（如湖泊）。
