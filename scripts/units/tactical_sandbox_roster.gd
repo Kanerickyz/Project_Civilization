@@ -14,6 +14,7 @@ const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/wardrum.tres",
 	"res://resources/units/boomling.tres",
 	"res://resources/units/assassin.tres",
+	"res://resources/units/healer.tres",
 ]
 
 ## 敌方六狼骑兵（autochess id `rider` / 剪纸 unit_rider；各 max_hp=10）。

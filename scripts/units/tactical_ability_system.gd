@@ -120,7 +120,12 @@ static func _try_trigger(
 			unit.deploy_trigger_fired = true
 			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "入阵", fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SELF_HURT:
-			return _apply_self_atk(board, unit, ab.self_atk_on_trigger, "铁壁", fx_out)
+			var hurt_logs: Array[String] = []
+			hurt_logs.append_array(
+				_apply_self_atk(board, unit, ab.self_atk_on_trigger, "铁壁", fx_out)
+			)
+			hurt_logs.append_array(_apply_ally_heal_on_hurt(board, unit, ab, fx_out))
+			return hurt_logs
 		TacticalActiveAbility.TriggerKind.ON_SELF_KILL:
 			return _apply_kill_effects(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SIDE_TURN_START:
@@ -190,6 +195,38 @@ static func _apply_self_atk(
 	_emit_fx(fx_out, unit.cell, "+%d攻" % amount, Color("ffe08a"))
 	return [
 		"%s %s：攻击+%d（本场）" % [unit.def.display_name, tag, amount],
+	]
+
+
+## 受击被动：周围友方恢复当前 HP（排除自身；不抬上限）。
+static func _apply_ally_heal_on_hurt(
+	board: TacticalBoard,
+	unit: TacticalUnitInstance,
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
+) -> Array[String]:
+	var amount := ab.ally_heal_on_trigger
+	if amount <= 0:
+		return []
+	var radius := ab.ally_buff_radius if ab.ally_buff_radius > 0 else ab.range_chebyshev
+	if radius < 0:
+		radius = 1
+	var allies := board.allies_in_radius(unit.cell, unit.faction, radius, unit.cell)
+	var healed := 0
+	for ally in allies:
+		if ally == unit:
+			continue
+		var gained := ally.apply_heal(amount)
+		if gained <= 0:
+			continue
+		healed += 1
+		_emit_fx(fx_out, ally.cell, "+%d血" % gained, Color("7dff9a"))
+	if healed == 0:
+		return []
+	board.changed.emit()
+	var tag := ab.display_name if not ab.display_name.is_empty() else "共情"
+	return [
+		"%s %s：%d 名周围友方恢复 %d 血" % [unit.def.display_name, tag, healed, amount],
 	]
 
 

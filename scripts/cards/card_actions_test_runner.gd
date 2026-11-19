@@ -82,6 +82,9 @@ func _initialize() -> void:
 	if not _test_ephemeral_attack_not_in_piles():
 		quit(1)
 		return
+	if not _test_heal_potion_skill():
+		quit(1)
+		return
 	print("CARD_ACTIONS_OK")
 	quit(0)
 
@@ -123,9 +126,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 		push_error("CardActions: demo board should have enemies")
 		return false
 	var skills := TacticalCardDeckScript.expected_skill_count_for_board(board)
-	# 6 人：鼓手×2 /盾卫护甲+冲撞 /大剑/爆爆/刺客/游侠齐发 → 8
-	if skills != 8:
-		push_error("CardActions: expected 8 skill cards, got %d" % skills)
+	# 7 人：鼓手×2 /盾卫护甲+冲撞 /大剑/爆爆/刺客/游侠齐发/医师药水 → 9
+	if skills != 9:
+		push_error("CardActions: expected 9 skill cards, got %d" % skills)
 		return false
 	# 每人仅通用攻 1 + 主动技；无移动牌。
 	var expected := living_players + skills
@@ -162,6 +165,9 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_VOLLEY) != 1:
 		push_error("CardActions: one archer volley skill expected")
 		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION) != 1:
+		push_error("CardActions: one healer potion skill expected")
+		return false
 	for c in deck.draw_pile:
 		if c.ephemeral:
 			push_error("CardActions: build must not include ephemeral")
@@ -195,6 +201,12 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 			and c.bound_unit_id != "archer"
 		):
 			push_error("CardActions: volley must bind archer")
+			return false
+		if (
+			c.kind == TacticalActionCardScript.Kind.SKILL_HEAL_POTION
+			and c.bound_unit_id != "healer"
+		):
+			push_error("CardActions: heal potion must bind healer")
 			return false
 	return true
 
@@ -880,12 +892,14 @@ func _test_bound_skills_play_free() -> bool:
 	var stealth := TacticalActionCardScript.make_skill_stealth("assassin")
 	var volley := TacticalActionCardScript.make_skill_volley("archer")
 	var charge := TacticalActionCardScript.make_skill_charge("knight")
+	var potion := TacticalActionCardScript.make_skill_heal_potion("healer")
 	if (
 		not inspire.plays_on_board()
 		or not burn.plays_on_board()
 		or not stealth.plays_on_board()
 		or not volley.plays_on_board()
 		or not charge.plays_on_board()
+		or not potion.plays_on_board()
 	):
 		push_error("CardActions: bound skills must play free (plays_on_board)")
 		return false
@@ -894,7 +908,15 @@ func _test_bound_skills_play_free() -> bool:
 	var sin := stealth.find_bound_caster(board)
 	var archer := volley.find_bound_caster(board)
 	var knight := charge.find_bound_caster(board)
-	if drum == null or boom == null or sin == null or archer == null or knight == null:
+	var healer := potion.find_bound_caster(board)
+	if (
+		drum == null
+		or boom == null
+		or sin == null
+		or archer == null
+		or knight == null
+		or healer == null
+	):
 		push_error("CardActions: bound casters missing on demo board")
 		return false
 	var inspire_cells: Array[Vector2i] = inspire.release_preview_cells(board)
@@ -943,10 +965,12 @@ func _test_skill_invalid_release_cell() -> bool:
 	var charge := TacticalActionCardScript.make_skill_charge("knight")
 	var inspire := TacticalActionCardScript.make_skill_inspire("wardrum")
 	var wardrum := TacticalActionCardScript.make_skill_draw("wardrum")
+	var potion := TacticalActionCardScript.make_skill_heal_potion("healer")
 	var archer := volley.find_bound_caster(board)
 	var knight := charge.find_bound_caster(board)
 	var drum := inspire.find_bound_caster(board)
-	if archer == null or knight == null or drum == null:
+	var healer := potion.find_bound_caster(board)
+	if archer == null or knight == null or drum == null or healer == null:
 		push_error("CardActions: casters missing for invalid-release test")
 		return false
 	var volley_cells: Array[Vector2i] = volley.release_preview_cells(board)
@@ -996,6 +1020,24 @@ func _test_skill_invalid_release_cell() -> bool:
 	# 鸣鼓：全盘有效。
 	if not wardrum.is_valid_release_cell(board, Vector2i(0, 0)):
 		push_error("CardActions: wardrum any board cell must be valid")
+		return false
+	# 恢复药水：施法者周围 attack_range 内有效，外无效。
+	var potion_cells: Array[Vector2i] = potion.release_preview_cells(board)
+	if potion_cells.is_empty() or not (healer.cell in potion_cells):
+		push_error("CardActions: heal potion preview must include healer cell")
+		return false
+	if not potion.is_valid_release_cell(board, healer.cell):
+		push_error("CardActions: heal potion caster cell must be valid")
+		return false
+	var potion_far := healer.cell + Vector2i(3, 3)
+	if (
+		potion_far.x >= 0
+		and potion_far.x < board.grid_width
+		and potion_far.y >= 0
+		and potion_far.y < board.grid_height
+		and potion.is_valid_release_cell(board, potion_far)
+	):
+		push_error("CardActions: heal potion far cell must be invalid")
 		return false
 	# 通用攻击卡不走规则格判定。
 	var attack := TacticalActionCardScript.make_attack()
@@ -1169,4 +1211,99 @@ func _test_ephemeral_attack_not_in_piles() -> bool:
 	if deck.total_cards() < before:
 		# 开局抽了又弃，总数应回到 build 规模（不含临时卡）。
 		pass
+	return true
+
+
+## 医师「恢复药水」：绑定 / 规则格 / 无效格 / 死亡 cull / 落点治疗。
+func _test_heal_potion_skill() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var healer: TacticalUnitInstance = null
+	var ally: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			continue
+		if u.def.id == "healer":
+			healer = u
+		elif ally == null:
+			ally = u
+	if healer == null or ally == null:
+		push_error("CardActions: need healer + ally for potion")
+		return false
+	var card := TacticalActionCardScript.make_skill_heal_potion("healer")
+	if (
+		card.kind != TacticalActionCardScript.Kind.SKILL_HEAL_POTION
+		or not card.is_heal_potion_aim()
+		or not card.is_active_skill()
+		or not card.plays_on_board()
+	):
+		push_error("CardActions: heal potion must be bound aim skill")
+		return false
+	if card.find_bound_caster(board) != healer:
+		push_error("CardActions: heal potion caster must resolve to healer")
+		return false
+	var preview: Array[Vector2i] = card.release_preview_cells(board)
+	if preview.is_empty() or not (healer.cell in preview):
+		push_error("CardActions: heal potion release must include caster cell")
+		return false
+	var range_max := healer.def.attack_range
+	for c in preview:
+		if GridMathScript.chebyshev(healer.cell, c) > range_max:
+			push_error("CardActions: heal potion release beyond attack_range")
+			return false
+	var outside := healer.cell + Vector2i(range_max + 1, 0)
+	if (
+		outside.x < board.grid_width
+		and card.is_valid_release_cell(board, outside)
+	):
+		push_error("CardActions: heal potion outside range must be invalid")
+		return false
+	# 死亡 cull：攻 1 + 药水 1。
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 83
+	var deck: TacticalCardDeck = TacticalCardDeckScript.new(rng)
+	deck.build_from_living_player_units(board)
+	var before_total := deck.total_cards()
+	var before_potion := deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION)
+	var removed := deck.on_player_unit_died(healer)
+	if removed != 2:
+		push_error("CardActions: healer death should remove 2, got %d" % removed)
+		return false
+	if deck.total_cards() != before_total - 2:
+		push_error("CardActions: healer death total mismatch")
+		return false
+	if deck.count_kind(TacticalActionCardScript.Kind.SKILL_HEAL_POTION) != before_potion - 1:
+		push_error("CardActions: heal potion should cull by 1")
+		return false
+	# 医师仍存活（cull 不击杀）；摆位测治疗结算。
+	healer.hp = healer.def.max_hp
+	for u in board.living_units():
+		if u == healer or u == ally:
+			continue
+		if u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2):
+			u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
+	healer.cell = Vector2i(2, 2)
+	ally.cell = Vector2i(3, 2)
+	ally.hp = 1
+	healer.hp = 2
+	var target := Vector2i(3, 2)
+	var res: Dictionary = board.apply_heal_potion(healer, target, 2, 1)
+	if not res.get("ok", false):
+		push_error("CardActions: heal potion apply failed")
+		return false
+	# 落点格上的 ally 与半径内的 healer 均应回血。
+	if ally.hp != 3:
+		push_error("CardActions: potion should heal ally +2, got %d" % ally.hp)
+		return false
+	if healer.hp != 4:
+		push_error("CardActions: potion may heal caster in radius, got %d" % healer.hp)
+		return false
+	var fx: Array = res.get("passive_fx", []) as Array
+	if fx.is_empty():
+		push_error("CardActions: heal potion should emit passive_fx")
+		return false
+	# 非医师不可投。
+	var bad := board.apply_heal_potion(ally, target, 2, 1)
+	if bad.get("ok", false):
+		push_error("CardActions: non-healer must not throw potion")
+		return false
 	return true

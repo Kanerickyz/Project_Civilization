@@ -29,6 +29,8 @@ enum TriggerKind {
 @export var ally_atk_buff: int = 0
 @export var ally_hp_buff: int = 0
 @export var ally_buff_radius: int = 2
+## 受击等触发时：周围友方恢复当前 HP（不含自身；不抬上限）。
+@export var ally_heal_on_trigger: int = 0
 ## 击杀时往玩家手牌加 1 张临时攻击卡（仅玩家击杀生效）。
 @export var grant_ephemeral_attack_on_kill: bool = false
 ## 玩家打出攻击牌时从牌库抽 N 张（需 board.player_deck）。

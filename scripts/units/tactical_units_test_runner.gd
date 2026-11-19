@@ -67,19 +67,23 @@ func _initialize() -> void:
 	if not _test_knight_charge_path_hit_and_wall():
 		quit(1)
 		return
+	if not _test_healer_sympathy_on_hurt():
+		quit(1)
+		return
 	print("TACTICAL_UNITS_OK")
 	quit(0)
 
 
 func _test_roster_loads() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(6, 6)
-	# 6 友（含刺客）+ 6 狼骑。
-	if board.living_units().size() != 12:
-		push_error("TacticalUnits: expected 12 units, got %d" % board.living_units().size())
+	# 7 友（含刺客/医师）+ 6 狼骑。
+	if board.living_units().size() != 13:
+		push_error("TacticalUnits: expected 13 units, got %d" % board.living_units().size())
 		return false
 	var riders := 0
 	var boomling := 0
 	var assassin := 0
+	var healer := 0
 	for u in board.living_units():
 		if u.faction == TacticalFactionScript.Id.OPPONENT:
 			if u.def.id != "rider":
@@ -118,6 +122,24 @@ func _test_roster_loads() -> bool:
 				):
 					push_error("TacticalUnits: assassin stats/stealth mismatch")
 					return false
+			elif u.def.id == "healer":
+				healer += 1
+				if (
+					u.def.max_hp != 4
+					or u.def.attack != 0
+					or u.def.move_range != 2
+					or u.def.attack_range != 2
+				):
+					push_error("TacticalUnits: healer stats mismatch")
+					return false
+				var ab := u.def.triggered_ability
+				if (
+					ab == null
+					or ab.trigger_kind != TacticalActiveAbility.TriggerKind.ON_SELF_HURT
+					or ab.ally_heal_on_trigger != 1
+				):
+					push_error("TacticalUnits: healer sympathy passive mismatch")
+					return false
 			elif u.def.id == "devman":
 				push_error("TacticalUnits: devman should be removed from roster")
 				return false
@@ -129,6 +151,9 @@ func _test_roster_loads() -> bool:
 		return false
 	if assassin != 1:
 		push_error("TacticalUnits: expected 1 assassin, got %d" % assassin)
+		return false
+	if healer != 1:
+		push_error("TacticalUnits: expected 1 healer, got %d" % healer)
 		return false
 	return true
 
@@ -808,6 +833,8 @@ func _test_archer_volley_side_damage() -> bool:
 		return false
 	# 游侠在 (2,2) 打 (4,2)：方向 (1,0)，侧格 (4,1)/(4,3)。
 	board.set_terrain_cells({})
+	for keep_cell in [Vector2i(2, 2), Vector2i(4, 2), Vector2i(4, 1), Vector2i(4, 3), Vector2i(5, 2)]:
+		_relocate_off_cell(board, keep_cell, null)
 	archer.cell = Vector2i(2, 2)
 	foe_mid.cell = Vector2i(4, 2)
 	foe_left.cell = Vector2i(4, 1)
@@ -858,6 +885,8 @@ func _test_archer_volley_side_damage() -> bool:
 		push_error("TacticalUnits: ranged normal attack must not knockback")
 		return false
 	# 竖直攻击方向：游侠 (2,2)→(2,4)，侧格 (1,4)/(3,4)。
+	for keep_cell_v in [Vector2i(2, 2), Vector2i(2, 4), Vector2i(1, 4), Vector2i(3, 4), Vector2i(2, 5)]:
+		_relocate_off_cell(board, keep_cell_v, null)
 	archer.cell = Vector2i(2, 2)
 	foe_mid.cell = Vector2i(2, 4)
 	foe_left.cell = Vector2i(1, 4)
@@ -951,5 +980,73 @@ func _test_knight_charge_path_hit_and_wall() -> bool:
 	var bad := TacticalCombatScript.try_knight_charge(board, ally, Vector2i(5, 4))
 	if bad.get("ok", false):
 		push_error("TacticalUnits: non-knight must not charge")
+		return false
+	return true
+
+
+## 医师共情：实际扣血时周围 1 格其他友方各恢复 1 血 + 绿飘字；不含自身；不抬上限。
+func _test_healer_sympathy_on_hurt() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var healer: TacticalUnitInstance = _player_unit(board, "healer")
+	var ally_near: TacticalUnitInstance = _player_unit(board, "knight")
+	var ally_far: TacticalUnitInstance = _player_unit(board, "archer")
+	if healer == null or ally_near == null or ally_far == null:
+		push_error("TacticalUnits: healer sympathy needs healer+knight+archer")
+		return false
+	healer.cell = Vector2i(2, 2)
+	ally_near.cell = Vector2i(3, 2)
+	ally_far.cell = Vector2i(5, 2)
+	_relocate_off_cell(board, healer.cell, healer)
+	_relocate_off_cell(board, ally_near.cell, ally_near)
+	_relocate_off_cell(board, ally_far.cell, ally_far)
+	healer.hp = healer.effective_max_hp()
+	ally_near.hp = 1
+	ally_far.hp = 1
+	var near_before: int = ally_near.hp
+	var far_before: int = ally_far.hp
+	var self_before: int = healer.hp
+	var res: Dictionary = board.apply_damage(healer, 1, null)
+	if not res.get("ok", false) or int(res.get("hp_damage", 0)) != 1:
+		push_error("TacticalUnits: healer should take 1 hp damage")
+		return false
+	if healer.hp != self_before - 1:
+		push_error("TacticalUnits: healer must not self-heal from sympathy")
+		return false
+	if ally_near.hp != near_before + 1:
+		push_error("TacticalUnits: neighbor ally should heal +1 from sympathy")
+		return false
+	if ally_far.hp != far_before:
+		push_error("TacticalUnits: dist>1 ally must not heal from sympathy")
+		return false
+	var fx: Array = res.get("passive_fx", []) as Array
+	var saw_heal_fx := false
+	for ev in fx:
+		if not (ev is Dictionary):
+			continue
+		var text := str((ev as Dictionary).get("text", ""))
+		if text == "+1血":
+			saw_heal_fx = true
+			break
+	if not saw_heal_fx:
+		push_error("TacticalUnits: sympathy should emit +1血 fx, got %s" % [fx])
+		return false
+	# 满血友方不抬上限。
+	ally_near.hp = ally_near.effective_max_hp()
+	healer.hp = maxi(2, healer.hp)
+	var full_before: int = ally_near.hp
+	board.apply_damage(healer, 1, null)
+	if ally_near.hp != full_before:
+		push_error("TacticalUnits: sympathy must not raise max / overheal")
+		return false
+	# 仅护甲吸收不触发共情。
+	ally_near.hp = 1
+	healer.armor = 2
+	healer.hp = healer.effective_max_hp()
+	var armor_res: Dictionary = board.apply_damage(healer, 1, null)
+	if int(armor_res.get("hp_damage", 0)) != 0:
+		push_error("TacticalUnits: armor-only hit must not deal hp")
+		return false
+	if ally_near.hp != 1:
+		push_error("TacticalUnits: armor-only hit must not trigger sympathy heal")
 		return false
 	return true

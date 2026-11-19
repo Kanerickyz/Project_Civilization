@@ -14,6 +14,7 @@ enum Kind {
 	SKILL_STEALTH,
 	SKILL_VOLLEY,
 	SKILL_CHARGE,
+	SKILL_HEAL_POTION,
 }
 
 var kind: Kind = Kind.MOVE
@@ -47,7 +48,7 @@ func _init(
 
 func is_valid() -> bool:
 	match kind:
-		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH, Kind.SKILL_VOLLEY, Kind.SKILL_CHARGE:
+		Kind.MOVE, Kind.ATTACK, Kind.SKILL_DRAW, Kind.SKILL_STRONG_ATTACK, Kind.SKILL_BURN_ATTACK, Kind.SKILL_ARMOR, Kind.SKILL_INSPIRE, Kind.SKILL_STEALTH, Kind.SKILL_VOLLEY, Kind.SKILL_CHARGE, Kind.SKILL_HEAL_POTION:
 			return true
 		_:
 			return false
@@ -70,6 +71,10 @@ func is_charge_aim() -> bool:
 	return kind == Kind.SKILL_CHARGE
 
 
+func is_heal_potion_aim() -> bool:
+	return kind == Kind.SKILL_HEAL_POTION
+
+
 func is_active_skill() -> bool:
 	return (
 		kind == Kind.SKILL_DRAW
@@ -80,6 +85,7 @@ func is_active_skill() -> bool:
 		or kind == Kind.SKILL_STEALTH
 		or kind == Kind.SKILL_VOLLEY
 		or kind == Kind.SKILL_CHARGE
+		or kind == Kind.SKILL_HEAL_POTION
 	)
 
 
@@ -109,6 +115,8 @@ func kind_label() -> String:
 			return "万箭齐发"
 		Kind.SKILL_CHARGE:
 			return "冲撞"
+		Kind.SKILL_HEAL_POTION:
+			return "恢复药水"
 		_:
 			return "移动"
 
@@ -146,6 +154,11 @@ func rules_detail() -> String:
 			return (
 				"短按或拖到规则格打出（自动绑定盾卫）：再点方向格；朝该方向冲撞最多 3 格。"
 				+ "路径单位（含友军）受当前攻击力伤害并撞开；遇不可走格则停在前一格且自身受 3 点伤害。无效格松手回手。"
+			)
+		Kind.SKILL_HEAL_POTION:
+			return (
+				"短按或拖到规则格打出（自动绑定医师）：再点落点格；恢复该格一格内（含落点）友方各 2 点血。"
+				+ "规则格=医师周围攻击距离内全部格。无效格松手回手。"
 			)
 		_:
 			return ""
@@ -192,6 +205,15 @@ func release_preview_cells(board: TacticalBoard) -> Array[Vector2i]:
 			if caster == null:
 				return out
 			return TacticalCombat.charge_preview_cells(board, caster.cell)
+		Kind.SKILL_HEAL_POTION:
+			if caster == null:
+				return out
+			var range_max := caster.def.attack_range if caster.def != null else 2
+			for gx in range(board.grid_width):
+				for gy in range(board.grid_height):
+					var cell := Vector2i(gx, gy)
+					if GridMath.chebyshev(caster.cell, cell) <= range_max:
+						out.append(cell)
 		Kind.SKILL_STEALTH:
 			for u in board.living_units():
 				if u != null and u.is_alive():
@@ -272,3 +294,8 @@ static func make_skill_volley(bound_id: String = "archer") -> TacticalActionCard
 ## 盾卫主动技「冲撞」：自由打出后自动绑定盾卫；再点方向格冲撞最多 3 格。
 static func make_skill_charge(bound_id: String = "knight") -> TacticalActionCard:
 	return TacticalActionCard.new(Kind.SKILL_CHARGE, bound_id)
+
+
+## 医师主动技「恢复药水」：自由打出后自动绑定医师；再点落点格治疗周围友方。
+static func make_skill_heal_potion(bound_id: String = "healer") -> TacticalActionCard:
+	return TacticalActionCard.new(Kind.SKILL_HEAL_POTION, bound_id)

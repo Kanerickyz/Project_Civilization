@@ -18,7 +18,7 @@ const TacticalUnitInfoCardScript := preload("res://scripts/ui/tactical_unit_info
 const KillImpactFxScript := preload("res://scripts/ui/kill_impact_fx.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
-enum PendingKind { NONE, MOVE, ATTACK, STEALTH, CHARGE }
+enum PendingKind { NONE, MOVE, ATTACK, STEALTH, CHARGE, HEAL_POTION }
 
 var _clock: TurnClock
 var _turn_label: Label
@@ -445,6 +445,8 @@ func _on_deck_changed() -> void:
 
 func _clear_pending_target(keep_move_focus: bool = true) -> void:
 	_pending_kind = PendingKind.NONE
+	if _board_view != null:
+		_board_view.clear_skill_drag_preview()
 	# 取消瞄准：已打牌不回手，清空该单位全部攻击授权（含连拖叠加）。
 	if _focus_unit != null and _deck.is_attack_authorized(_focus_unit):
 		_deck.clear_attack_authorization(_focus_unit)
@@ -492,6 +494,9 @@ func _refresh_all() -> void:
 			attack_cells = _board.attack_range_cells(_focus_unit)
 		elif _pending_kind == PendingKind.CHARGE:
 			attack_cells = TacticalCombatScript.charge_preview_cells(_board, _focus_unit.cell)
+		elif _pending_kind == PendingKind.HEAL_POTION:
+			# 金 overlay 在 sync 后由 set_skill_drag_preview 叠加。
+			pass
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
 		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）
@@ -512,6 +517,16 @@ func _refresh_all() -> void:
 		intent_preview,
 		intent_unit
 	)
+	# 恢复药水瞄准：金规则格 = 医师周围 ≤ attack_range。
+	if (
+		_pending_kind == PendingKind.HEAL_POTION
+		and _focus_unit != null
+		and _focus_unit.is_alive()
+		and not _in_deployment
+		and _board_view != null
+	):
+		var gold_cells: Array[Vector2i] = _heal_potion_aim_cells(_focus_unit)
+		_board_view.set_skill_drag_preview(_focus_unit.cell, null, gold_cells, false)
 
 
 func _compose_hint() -> String:
@@ -533,6 +548,8 @@ func _compose_hint() -> String:
 		return "隐身：%s · 点任意存活单位" % _focus_unit.def.display_name
 	if _pending_kind == PendingKind.CHARGE and _focus_unit != null:
 		return "冲撞：%s · 点红圈方向格（最多 3 格）" % _focus_unit.def.display_name
+	if _pending_kind == PendingKind.HEAL_POTION and _focus_unit != null:
+		return "恢复药水：%s · 点金圈落点（该格一格内友方各+2血）" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
 	return "点己方移动 · 通用卡拖单位 · 技能卡短按/拖棋盘 · 库 %d · 弃 %d" % [
@@ -778,7 +795,7 @@ func _on_hand_card_dropped(index: int, global_pos: Vector2) -> void:
 	# 通用攻击/加强攻拖到己方后仍须点红圈；此处不自动结算。
 
 
-## 自由打出瞄准技后：若松手格已是合法目标，立刻结算（万箭/燃爆/隐身/冲撞）。
+## 自由打出瞄准技后：若松手格已是合法目标，立刻结算（万箭/燃爆/隐身/冲撞/恢复药水）。
 func _try_complete_aim_at_drop_cell(cell_v: Variant) -> void:
 	if cell_v == null or _focus_unit == null or _input_locked or _game_over:
 		return
@@ -812,6 +829,9 @@ func _try_complete_aim_at_drop_cell(cell_v: Variant) -> void:
 		)
 		if cell in charge_cells:
 			_run_player_charge_async(cell)
+		return
+	if _pending_kind == PendingKind.HEAL_POTION:
+		_resolve_heal_potion_at(cell)
 
 
 ## 非通用绑角色技：自动找施法者结算。
@@ -870,6 +890,9 @@ func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitIns
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_CHARGE:
 		_pending_kind = PendingKind.CHARGE
 		_last_log = "冲撞：%s · 点红圈方向格（最多 3 格；路径单位受伤并撞开）" % target.def.display_name
+	elif card.kind == TacticalActionCardScript.Kind.SKILL_HEAL_POTION:
+		_pending_kind = PendingKind.HEAL_POTION
+		_last_log = "恢复药水：%s · 点金圈落点（该格一格内友方各+2血）" % target.def.display_name
 	elif card.is_attack_aim():
 		var is_volley := card.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
 		_deck.authorize_attack(
@@ -1025,6 +1048,14 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_run_player_charge_async(cell)
 			return
 		_last_log = "请点红圈方向格，或取消目标"
+		_refresh_all()
+		return
+
+	# 医师恢复药水：点金规则格落点。
+	if _pending_kind == PendingKind.HEAL_POTION and _focus_unit != null:
+		if _resolve_heal_potion_at(cell):
+			return
+		_last_log = "请点金圈落点格，或取消目标"
 		_refresh_all()
 		return
 
@@ -1356,7 +1387,7 @@ func _on_deploy_cell_clicked(cell: Vector2i) -> void:
 
 
 ## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、盾卫友方死亡抽牌等补牌结算之后调用；
-## 攻/隐身/冲撞瞄准未完成时不触发（卡已离手但仍待点目标）。
+## 攻/隐身/冲撞/恢复药水瞄准未完成时不触发（卡已离手但仍待点目标）。
 ## 先锁输入再 deferred 启动，避免同步结算路径丢弃 async、或间隙里重入把钟多拨一次。
 func _maybe_auto_end_player_turn_if_hand_empty() -> void:
 	if not _should_auto_end_player_action():
@@ -1379,8 +1410,40 @@ func _should_auto_end_player_action() -> bool:
 		_pending_kind == PendingKind.ATTACK
 		or _pending_kind == PendingKind.STEALTH
 		or _pending_kind == PendingKind.CHARGE
+		or _pending_kind == PendingKind.HEAL_POTION
 	):
 		return false
+	return true
+
+
+func _heal_potion_aim_cells(caster: TacticalUnitInstance) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if caster == null or caster.def == null or _board == null:
+		return out
+	var range_max := caster.def.attack_range
+	for gx in range(_board.grid_width):
+		for gy in range(_board.grid_height):
+			var cell := Vector2i(gx, gy)
+			if GridMathScript.chebyshev(caster.cell, cell) <= range_max:
+				out.append(cell)
+	return out
+
+
+## 恢复药水瞄准落点结算；合法返回 true。
+func _resolve_heal_potion_at(cell: Vector2i) -> bool:
+	if _focus_unit == null or not _focus_unit.is_alive():
+		return false
+	if not (cell in _heal_potion_aim_cells(_focus_unit)):
+		return false
+	var res: Dictionary = _board.apply_heal_potion(_focus_unit, cell, 2, 1)
+	_pending_kind = PendingKind.NONE
+	if _board_view != null:
+		_board_view.clear_skill_drag_preview()
+	_last_log = str(res.get("log", "恢复药水"))
+	var fx: Array = res.get("passive_fx", []) as Array
+	_play_passive_fx(fx)
+	_refresh_all()
+	_maybe_auto_end_player_turn_if_hand_empty()
 	return true
 
 
@@ -1582,7 +1645,7 @@ func capture_card_drag_hover(unit_id: String, valid_drop: bool = true) -> bool:
 
 
 ## GUI 验收：把一手中第一张指定种类卡「拖」到指定己方单位 id 上。
-## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire | skill_stealth | skill_volley | skill_charge
+## kind_name: move | attack | skill_draw | skill_strong_attack | skill_burn_attack | skill_armor | skill_inspire | skill_stealth | skill_volley | skill_charge | skill_heal_potion
 func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool:
 	var want := TacticalActionCardScript.Kind.MOVE
 	match kind_name:
@@ -1604,6 +1667,8 @@ func capture_drop_first_card_on_unit(kind_name: String, unit_id: String) -> bool
 			want = TacticalActionCardScript.Kind.SKILL_VOLLEY
 		"skill_charge":
 			want = TacticalActionCardScript.Kind.SKILL_CHARGE
+		"skill_heal_potion":
+			want = TacticalActionCardScript.Kind.SKILL_HEAL_POTION
 		_:
 			want = TacticalActionCardScript.Kind.MOVE
 	var idx := -1
@@ -1650,6 +1715,8 @@ func capture_skill_drag_preview(kind_name: String, hover_unit_id: String = "") -
 			want = TacticalActionCardScript.Kind.SKILL_VOLLEY
 		"skill_charge":
 			want = TacticalActionCardScript.Kind.SKILL_CHARGE
+		"skill_heal_potion":
+			want = TacticalActionCardScript.Kind.SKILL_HEAL_POTION
 		_:
 			want = TacticalActionCardScript.Kind.SKILL_BURN_ATTACK
 	var peek: TacticalActionCard = null
