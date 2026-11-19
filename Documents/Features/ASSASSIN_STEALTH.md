@@ -1,6 +1,6 @@
 # 刺客 · 瞬移与隐身
 
-> **已实现**（轻量切片）。数据 `resources/units/assassin.tres`。
+> **已实现**（轻量切片）。数据 `resources/units/assassin.tres`。**当前可部署阵容未编入**（资源与逻辑保留）。
 
 ## 数值
 
