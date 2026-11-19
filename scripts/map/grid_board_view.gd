@@ -126,6 +126,8 @@ var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
 ## 拖牌悬停选中只改 scale，不碰 offset/position/modulate（避 idle bob / hit flash）。
 var _unit_select_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _unit_base_scales: Dictionary = {} # TacticalUnitInstance -> Vector2
+## 被动触发：单位晃动/弹出/高亮（小丑牌式），与选中脉冲互斥。
+var _unit_passive_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 ## Texture2D -> {content_h: float, offset_y: float}；按不透明区域算缩放/脚点。
 var _tex_content_cache: Dictionary = {}
 var _drag_select_unit: TacticalUnitInstance = null
@@ -398,7 +400,9 @@ func _rebuild_board() -> void:
 	for key in _unit_sprites.keys():
 		_kill_unit_idle(key as TacticalUnitInstance)
 		_kill_unit_select_tween(key as TacticalUnitInstance)
+		_kill_unit_passive_tween(key as TacticalUnitInstance)
 		(_unit_sprites[key] as Node).queue_free()
+	_unit_passive_tweens.clear()
 	for child in _tiles_root.get_children():
 		child.queue_free()
 	for child in _units_root.get_children():
@@ -550,6 +554,12 @@ const UNIT_HIT_FLASH_HOLD_SEC := 0.08
 const UNIT_HIT_FLASH_FADE_SEC := 0.22
 const DAMAGE_POPUP_FONT_SIZE := 28
 const DAMAGE_POPUP_LIFT_PX := 56.0
+## 被动触发（参考小丑牌）：单位抖、弹出、金高亮 + 更冲的飘字。
+const PASSIVE_TRIGGER_SHAKE_FRAC := 0.07
+const PASSIVE_TRIGGER_SCALE := 1.22
+const PASSIVE_TRIGGER_HIGHLIGHT := Color(1.45, 1.28, 0.55, 1.0)
+const PASSIVE_POPUP_FONT_SIZE := 32
+const PASSIVE_POPUP_LIFT_PX := 64.0
 
 
 func unit_move_duration_sec() -> float:
@@ -667,6 +677,7 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 	_kill_unit_move_tween(unit)
 	_kill_unit_idle(unit)
 	_kill_unit_select_tween(unit)
+	_kill_unit_passive_tween(unit)
 	_unit_base_offsets.erase(unit)
 	_unit_base_scales.erase(unit)
 	if _unit_sprites.has(unit):
@@ -703,6 +714,59 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 func play_float_text(
 	cell: Vector2i, text: String, color: Color = Color("ff5533"), stack_index: int = 0
 ) -> void:
+	_spawn_float_label(
+		cell,
+		text,
+		color,
+		stack_index,
+		DAMAGE_POPUP_FONT_SIZE,
+		DAMAGE_POPUP_LIFT_PX,
+		Vector2(0.55, 0.55),
+		Vector2(1.12, 1.12),
+		0.14,
+		0.55,
+		0.38,
+		0.2,
+		5
+	)
+
+
+## 被动数值/能力名飘字：更强 BACK 弹出，贴近小丑牌触发字效。
+func play_passive_float_text(
+	cell: Vector2i, text: String, color: Color = Color("ffe08a"), stack_index: int = 0
+) -> void:
+	_spawn_float_label(
+		cell,
+		text,
+		color,
+		stack_index,
+		PASSIVE_POPUP_FONT_SIZE,
+		PASSIVE_POPUP_LIFT_PX,
+		Vector2(0.28, 0.28),
+		Vector2(1.32, 1.32),
+		0.18,
+		0.62,
+		0.42,
+		0.24,
+		6
+	)
+
+
+func _spawn_float_label(
+	cell: Vector2i,
+	text: String,
+	color: Color,
+	stack_index: int,
+	font_size: int,
+	lift_px: float,
+	start_scale: Vector2,
+	peak_scale: Vector2,
+	pop_sec: float,
+	lift_sec: float,
+	fade_sec: float,
+	fade_delay: float,
+	outline_size: int
+) -> void:
 	if config == null:
 		return
 	# 与常驻 HP 读数同一套世界坐标（格心投影 + 头顶偏移），勿再抬 3D Y / 混像素。
@@ -713,12 +777,12 @@ func play_float_text(
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.text = text
 	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", DAMAGE_POPUP_FONT_SIZE)
+	lbl.add_theme_font_size_override("font_size", font_size)
 	lbl.add_theme_color_override("font_color", color)
 	lbl.add_theme_color_override("font_outline_color", Color("1a0a08"))
-	lbl.add_theme_constant_override("outline_size", 5)
+	lbl.add_theme_constant_override("outline_size", outline_size)
 	lbl.modulate = Color(1.0, 1.0, 1.0, 1.0)
-	lbl.scale = Vector2(0.55, 0.55)
+	lbl.scale = start_scale
 	_labels_root.add_child(lbl)
 	lbl.reset_size()
 	lbl.pivot_offset = lbl.size * 0.5
@@ -729,25 +793,97 @@ func play_float_text(
 	var tw := create_tween()
 	tw.set_parallel(true)
 	# 上浮在屏幕空间（Control.position），不再经 world→screen。
-	tw.tween_property(lbl, "position", start_pos + Vector2(0.0, -DAMAGE_POPUP_LIFT_PX), 0.55).set_trans(
+	tw.tween_property(lbl, "position", start_pos + Vector2(0.0, -lift_px), lift_sec).set_trans(
 		Tween.TRANS_SINE
 	).set_ease(Tween.EASE_OUT)
-	tw.tween_property(lbl, "scale", Vector2(1.12, 1.12), 0.14).set_trans(Tween.TRANS_BACK).set_ease(
+	tw.tween_property(lbl, "scale", peak_scale, pop_sec).set_trans(Tween.TRANS_BACK).set_ease(
 		Tween.EASE_OUT
 	)
-	tw.tween_property(lbl, "modulate:a", 0.0, 0.38).set_delay(0.2)
+	tw.tween_property(lbl, "modulate:a", 0.0, fade_sec).set_delay(fade_delay)
 	tw.finished.connect(lbl.queue_free)
+
+
+## 被动触发单位：左右连抖 + 弹出缩放 + 金色高亮（小丑牌 joker 触发感）。
+func play_passive_trigger(unit: TacticalUnitInstance) -> Tween:
+	if config == null or unit == null or not _unit_sprites.has(unit):
+		return null
+	_pause_unit_idle(unit)
+	if _drag_select_unit == unit:
+		_clear_drag_select_unit()
+	else:
+		_kill_unit_select_tween(unit)
+	_kill_unit_passive_tween(unit)
+	var spr := _unit_sprites[unit] as Sprite2D
+	var home := _unit_combat_home(unit, spr)
+	spr.position = home
+	var base_scale: Vector2 = _unit_base_scales.get(unit, spr.scale) as Vector2
+	_unit_base_scales[unit] = base_scale
+	spr.scale = base_scale
+	var rest := _look().unit_modulate
+	if unit.is_stealthed():
+		rest.a = STEALTH_SPRITE_ALPHA
+	spr.modulate = rest
+	var shake := config.cell_size * PASSIVE_TRIGGER_SHAKE_FRAC
+	var peak := base_scale * PASSIVE_TRIGGER_SCALE
+	var highlight := Color(
+		rest.r * PASSIVE_TRIGGER_HIGHLIGHT.r,
+		rest.g * PASSIVE_TRIGGER_HIGHLIGHT.g,
+		rest.b * PASSIVE_TRIGGER_HIGHLIGHT.b,
+		rest.a
+	)
+	var tw := create_tween()
+	# 弹出 + 金高亮与首拍晃动并行；随后连抖回位（小丑牌 joker 触发感）。
+	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.04).set_trans(Tween.TRANS_SINE)
+	tw.parallel().tween_property(spr, "scale", peak, 0.12).set_trans(Tween.TRANS_BACK).set_ease(
+		Tween.EASE_OUT
+	)
+	tw.parallel().tween_property(spr, "modulate", highlight, 0.08).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(spr, "position", home + Vector2(-shake, 0.0), 0.04).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(spr, "position", home + Vector2(shake * 0.65, 0.0), 0.04).set_trans(
+		Tween.TRANS_SINE
+	)
+	tw.tween_property(spr, "position", home, 0.06).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(spr, "scale", base_scale, 0.18).set_trans(Tween.TRANS_SINE).set_ease(
+		Tween.EASE_IN_OUT
+	)
+	tw.parallel().tween_property(spr, "modulate", rest, 0.2).set_trans(Tween.TRANS_SINE)
+	_unit_passive_tweens[unit] = tw
+	tw.finished.connect(
+		func() -> void:
+			if _unit_passive_tweens.get(unit) == tw:
+				_unit_passive_tweens.erase(unit)
+			if not is_instance_valid(spr) or not _unit_sprites.has(unit):
+				return
+			spr.position = _unit_combat_home(unit, spr)
+			_restore_unit_base_scale(unit)
+			var end_mod := _look().unit_modulate
+			if unit.is_stealthed():
+				end_mod.a = STEALTH_SPRITE_ALPHA
+			spr.modulate = end_mod
+			_ensure_unit_idle(unit)
+	)
+	return tw
+
+
+func _kill_unit_passive_tween(unit: TacticalUnitInstance) -> void:
+	if not _unit_passive_tweens.has(unit):
+		return
+	var tw: Tween = _unit_passive_tweens[unit] as Tween
+	_unit_passive_tweens.erase(unit)
+	if tw != null and is_instance_valid(tw):
+		tw.kill()
 
 
 func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	if config == null or not _unit_sprites.has(unit):
 		return null
 	_pause_unit_idle(unit)
-	# 受击用 position + 纯白 flash shader；先停选中 scale，避免叠脉冲。
+	# 受击用 position + 纯白 flash shader；先停选中/被动 scale，避免叠脉冲。
 	if _drag_select_unit == unit:
 		_clear_drag_select_unit()
 	else:
 		_kill_unit_select_tween(unit)
+	_kill_unit_passive_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var home := _unit_combat_home(unit, spr)
 	spr.position = home

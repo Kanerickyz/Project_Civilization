@@ -1779,11 +1779,12 @@ func _append_attack_card_passive_logs() -> void:
 		_last_log = "%s · %s" % [_last_log, "；".join(logs)]
 
 
-## 被动触发可见反馈：加攻 / 加血 / 抽牌等短飘字。
+## 被动触发可见反馈：短飘字 + 单位晃动/弹出/金高亮（小丑牌触发感）。
 func _play_passive_fx(fx_list: Array) -> void:
 	if _board_view == null or fx_list.is_empty():
 		return
 	var stack_by_cell: Dictionary = {}
+	var pulsed_cells: Dictionary = {}
 	for ev in fx_list:
 		if not (ev is Dictionary):
 			continue
@@ -1795,4 +1796,12 @@ func _play_passive_fx(fx_list: Array) -> void:
 		var key := "%d,%d" % [cell.x, cell.y]
 		var stack := int(stack_by_cell.get(key, 0))
 		stack_by_cell[key] = stack + 1
-		_board_view.play_float_text(cell, text, color, stack)
+		_board_view.play_passive_float_text(cell, text, color, stack)
+		if pulsed_cells.has(key):
+			continue
+		pulsed_cells[key] = true
+		if _board == null:
+			continue
+		var unit := _board.unit_at(cell)
+		if unit != null and unit.is_alive():
+			_board_view.play_passive_trigger(unit)

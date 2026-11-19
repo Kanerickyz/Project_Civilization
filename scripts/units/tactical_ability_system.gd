@@ -7,6 +7,7 @@ const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 
 ## 时机触发战术能力；不替代 TurnClock.end_turn，无玩家点按释放。
 ## 可选 fx_out：追加 Dictionary 飘字事件 {cell, text, color}，供沙盘可见反馈。
+## 受益格飘数值；触发者本体另飘短能力名（小丑牌式弹出/晃动由沙盘播）。
 
 
 static func process_battle_start(board: TacticalBoard, fx_out: Variant = null) -> Array[String]:
@@ -227,6 +228,8 @@ static func _apply_ally_heal_on_hurt(
 		return []
 	board.changed.emit()
 	var tag := ab.display_name if not ab.display_name.is_empty() else "共情"
+	# 触发者本体短标签，供单位晃动/高亮对齐（数值仍在受益友方格）。
+	_emit_fx(fx_out, unit.cell, tag, Color("ffd24a"))
 	return [
 		"%s %s：%d 名周围友方恢复 %d 血" % [unit.def.display_name, tag, healed, amount],
 	]
@@ -365,6 +368,8 @@ static func _apply_ally_buff(
 	if buffed == 0:
 		return []
 	board.changed.emit()
+	var label := ab.display_name if not ab.display_name.is_empty() else tag
+	_emit_fx(fx_out, unit.cell, label, Color("ffd24a"))
 	var parts: PackedStringArray = []
 	if ab.ally_atk_buff != 0:
 		parts.append("攻击+%d" % ab.ally_atk_buff)
