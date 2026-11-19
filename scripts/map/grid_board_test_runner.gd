@@ -58,8 +58,45 @@ func _initialize() -> void:
 	if not _test_unit_idle_tween():
 		quit(1)
 		return
+	if not await _test_presentation_busy_ignores_hp_labels():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
+
+
+## PC-96：常驻血攻 Label 不得让 is_combat_presentation_busy 恒真（否则结束行动空等超时）。
+func _test_presentation_busy_ignores_hp_labels() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	cfg.grid_width = 4
+	cfg.grid_height = 4
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		push_error("presentation busy: knight.tres missing")
+		return false
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.PLAYER, Vector2i(1, 1))
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	await process_frame
+	if not view._hp_bars.has(unit):
+		push_error("presentation busy: expected permanent HP label after sync")
+		return false
+	if view.is_combat_presentation_busy():
+		push_error("presentation busy: HP/ATK labels alone must not count as busy")
+		return false
+	view.play_float_text(unit.cell, "-1", Color("ff5533"))
+	await process_frame
+	if not view.is_combat_presentation_busy():
+		push_error("presentation busy: in-flight float label should count as busy")
+		return false
+	return true
 
 
 func _test_unit_scale_vs_cell() -> bool:
