@@ -167,9 +167,9 @@ static func _preview_move_dest(board: TacticalBoard, unit: TacticalUnitInstance)
 static func _preview_move_path(
 	board: TacticalBoard, unit: TacticalUnitInstance, dest: Vector2i
 ) -> Array[Vector2i]:
-	var path := board.shortest_path(unit.cell, dest, MOVE_STEP_CAP)
+	var path := board.shortest_path(unit.cell, dest, MOVE_STEP_CAP, unit)
 	if path.is_empty():
-		path = board.shortest_path(unit.cell, dest)
+		path = board.shortest_path(unit.cell, dest, -1, unit)
 	if path.is_empty():
 		return [unit.cell, dest] as Array[Vector2i]
 	return path

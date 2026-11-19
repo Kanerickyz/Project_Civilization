@@ -15,7 +15,7 @@
 | 刺客 | `assassin` | **4 瞬移** | — | 1 | **资源保留、未编入当前可部署阵容**；隐身见 [ASSASSIN_STEALTH.md](./ASSASSIN_STEALTH.md) |
 | 狼骑兵 | `rider` | 2 | 2 | **1**（近战邻格） | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
-- **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **3**。
+- **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙与**敌方占格**、禁斜穿墙角；无城墙/无敌挡时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **3**。
 - **玩家移动**：每行动段开始移力清零；须打出**移动卡**重置额度并授权一次，再点绿格（成功一步后用完）。不可点选角色/格子直接移动。见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 - **对手移力池** = `move_budget`（为 0 时等同 `move_range`）：对手 AI 在池内可逐步移动。
 - **攻击距离** = `attack_range`（切比雪夫上限）。**最小射程死区** = `attack_range_min`（默认 0）：距离 ≤ min 不可攻击。游侠 `attack_range_min=1` → 只能打 **2…3**；狼骑兵为 **1**（近战邻格，含斜向）。
