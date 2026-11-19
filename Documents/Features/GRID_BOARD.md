@@ -27,7 +27,7 @@
 - **3D 网格资源**：`resources/terrain/meshes/*.tres` 仍供 headless 尺寸/生成脚本使用，**运行时沙盘不再实例化 MeshInstance3D**。
 - **湖泊**：偏蓝顶面；**树林**：深绿顶面 + 树冠标记。
 - **阴影**：**无 3D 方向光实时投影**。`BoardLook.shadow_*` 仍定义产品意图；2D 路径下单位使用 **脚下径向渐变软影**（`Sprite2D`），不随 Web 开关 3D 灯。若需强对比，可调 `unit_blob_opacity`。
-- **BoardLook**：`background_color`（橄榄绿桌面）铺满棋盘区背板；`unit_modulate` 乘在角色 Sprite 上。已移除全屏后处理。
+- **BoardLook**：`background_color`（纯色 `#121820`，与沙盘 HUD 底同色）铺满棋盘区背板；`unit_modulate` 乘在角色 Sprite 上。已移除全屏后处理。
 - **单位**：节点原点在**地面格心投影**（菱形几何中心，不是下顶点）。缩放按贴图**不透明内容高度**对齐 `unit_world_height`（避免顶部留白把角色缩小），再乘 `TacticalUnitDef.visual_scale`；`Sprite2D.offset` 对齐内容底边，**脚点留在格心**，躯干与头在脚点上方；HP 在头顶。脚下软影贴在脚点。`z_as_relative = false`，`z_index` 从 `1000` 起（高于全部格子），单位之间再按屏幕 Y 排序。
 - **选中高亮**：格上半透明 `Polygon2D`——选中（蓝）、移动（绿）、攻击距离（红）。
 - **不做**：WFC、迷雾、六边格。

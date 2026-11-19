@@ -25,7 +25,8 @@ extends Resource
 @export_group("Sky fill")
 @export var ambient_color: Color = Color("9fb6d0")
 @export var ambient_energy: float = 0.36
-@export var background_color: Color = Color("56603a")
+## 棋盘区纯色背板（与沙盘 HUD 底同色，避免 Web 未铺满时露出橄榄绿「1/4 绿块」）。
+@export var background_color: Color = Color("121820")
 
 @export_group("Units")
 ## Billboard 角色脚下软影（不透明度 0 = 关）。

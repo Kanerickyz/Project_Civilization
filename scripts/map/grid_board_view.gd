@@ -287,7 +287,7 @@ func _ready() -> void:
 func _ensure_viewport_tree() -> void:
 	if _viewport_container != null:
 		return
-	# Control 层先铺 BoardLook 底色：Web/竖屏下 stretch 同步前也不透出沙盘灰，避免「1/4 绿」。
+	# Control 层先铺 BoardLook 纯色：Web/竖屏下 stretch 同步前也不透出异色块。
 	_chrome = ColorRect.new()
 	_chrome.name = "BoardChrome"
 	_chrome.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -296,7 +296,7 @@ func _ensure_viewport_tree() -> void:
 
 	_viewport_container = SubViewportContainer.new()
 	_viewport_container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# stretch=true：容器负责把 SubViewport 拉满；勿手改 size（引擎会忽略并留下未铺满绿块）。
+	# stretch=true：容器负责把 SubViewport 拉满；勿手改 size（引擎会忽略并留下未铺满色块）。
 	_viewport_container.stretch = true
 	_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_viewport_container)
