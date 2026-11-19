@@ -36,7 +36,6 @@ func _initialize() -> void:
 		quit(1)
 		return
 
-	var has_assassin := false
 	var players := 0
 	var opponents := 0
 	for u in board.living_units():
@@ -46,18 +45,16 @@ func _initialize() -> void:
 			push_error("PC66 capture: devman must not be on board")
 			quit(1)
 			return
+		if u.def.id == "assassin":
+			push_error("PC66 capture: assassin must not be on deployable roster")
+			quit(1)
+			return
 		if u.faction == TacticalFaction.Id.PLAYER:
 			players += 1
 			if u.cell.x >= 3:
 				push_error("PC66 capture: player outside left half %s" % str(u.cell))
 				quit(1)
 				return
-			if u.def.id == "assassin":
-				has_assassin = true
-				if not u.is_stealthed():
-					push_error("PC66 capture: assassin should start stealthed")
-					quit(1)
-					return
 		elif u.faction == TacticalFaction.Id.OPPONENT:
 			opponents += 1
 			if u.cell.x < 3:
@@ -65,10 +62,6 @@ func _initialize() -> void:
 				quit(1)
 				return
 
-	if not has_assassin:
-		push_error("PC66 capture: missing assassin")
-		quit(1)
-		return
 	if players != 6 or opponents != 6:
 		push_error(
 			"PC66 capture: expected 6+6 units, got players=%d opponents=%d"
@@ -99,7 +92,7 @@ func _initialize() -> void:
 		return
 	svp.save_png(out_path)
 	print(
-		"PC66_CAPTURE_OK board=6x6 players=%d opponents=%d assassin=%s %s"
-		% [players, opponents, has_assassin, out_path]
+		"PC66_CAPTURE_OK board=6x6 players=%d opponents=%d %s"
+		% [players, opponents, out_path]
 	)
 	quit(0)
