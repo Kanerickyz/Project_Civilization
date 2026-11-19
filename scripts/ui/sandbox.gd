@@ -555,7 +555,7 @@ func _compose_hint() -> String:
 		return "恢复药水：%s · 点金圈落点（该格一格内友方各+2血）" % _focus_unit.def.display_name
 	if _last_log != "":
 		return _last_log
-	return "点己方移动 · 通用卡拖单位 · 技能卡短按/拖棋盘 · 库 %d · 弃 %d" % [
+	return "点己方移动 / 拖移攻卡 · 技能卡短按/拖棋盘 · 库 %d · 弃 %d" % [
 		_deck.draw_pile.size(),
 		_deck.discard_pile.size(),
 	]
@@ -574,7 +574,7 @@ func _refresh_action_buttons() -> void:
 func _refresh_unit_panel() -> void:
 	var u := _focus_unit if _focus_unit != null else _selected_unit
 	if u == null or not u.is_alive():
-		_unit_panel.text = "未选中单位\n（点己方移动 / 拖攻击卡）"
+		_unit_panel.text = "未选中单位\n（点己方移动 / 拖移攻卡）"
 		return
 	var ab := u.def.triggered_ability
 	var skill_line := ab.display_name if ab != null else "—"
@@ -870,10 +870,9 @@ func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitIns
 	_focus_unit = target
 	_selected_unit = target
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
-		# 移动已改为点格移力池；遗留移动卡打出无效。
-		_pending_kind = PendingKind.NONE
-		_select_player_for_move(target)
-		_last_log = "移动不需卡 · 点绿格即可（余移力 %d）" % target.remaining_move_budget
+		_deck.authorize_move(target)
+		_pending_kind = PendingKind.MOVE
+		_last_log = "移动：%s · 点绿格（本卡仅一次；亦可点选分步用移力）" % target.def.display_name
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_ARMOR:
 		var grant := maxi(1, card.armor_grant)
 		target.add_armor(grant)
@@ -985,21 +984,31 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_refresh_all()
 			return
 		if _focus_unit.remaining_move_budget <= 0:
-			_last_log = "%s 移力已用尽" % _focus_unit.def.display_name
+			_last_log = "%s 移力已用尽 · 可拖移动卡续航" % _focus_unit.def.display_name
 			_pending_kind = PendingKind.NONE
 			_refresh_all()
 			return
 		if _board.try_move(_focus_unit, cell):
-			_last_log = "%s 移动至 (%d,%d) · 余移力 %d" % [
-				_focus_unit.def.display_name,
-				cell.x,
-				cell.y,
-				_focus_unit.remaining_move_budget,
-			]
-			if _focus_unit.remaining_move_budget > 0:
-				_pending_kind = PendingKind.MOVE
-			else:
+			var used_card := _deck.is_move_authorized(_focus_unit)
+			if used_card:
+				_deck.consume_move_authorization(_focus_unit)
 				_pending_kind = PendingKind.NONE
+				_last_log = "%s 移动至 (%d,%d) · 本卡已用完" % [
+					_focus_unit.def.display_name,
+					cell.x,
+					cell.y,
+				]
+			else:
+				_last_log = "%s 移动至 (%d,%d) · 余移力 %d" % [
+					_focus_unit.def.display_name,
+					cell.x,
+					cell.y,
+					_focus_unit.remaining_move_budget,
+				]
+				if _focus_unit.remaining_move_budget > 0:
+					_pending_kind = PendingKind.MOVE
+				else:
+					_pending_kind = PendingKind.NONE
 			_refresh_all()
 			_input_locked = true
 			_refresh_action_buttons()
@@ -1093,7 +1102,7 @@ func _select_player_for_move(unit: TacticalUnitInstance) -> void:
 		]
 	else:
 		_pending_kind = PendingKind.NONE
-		_last_log = "%s 本段移力已用尽 · 攻击请拖卡" % unit.def.display_name
+		_last_log = "%s 本段移力已用尽 · 可拖移动卡续航或拖攻击卡" % unit.def.display_name
 
 
 func _run_player_charge_async(target_cell: Vector2i) -> void:
@@ -1462,7 +1471,8 @@ func _should_auto_end_player_action() -> bool:
 	if _deck == null or not _deck.hand.is_empty():
 		return false
 	if (
-		_pending_kind == PendingKind.ATTACK
+		_pending_kind == PendingKind.MOVE
+		or _pending_kind == PendingKind.ATTACK
 		or _pending_kind == PendingKind.STEALTH
 		or _pending_kind == PendingKind.CHARGE
 		or _pending_kind == PendingKind.HEAL_POTION

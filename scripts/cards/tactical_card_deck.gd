@@ -17,6 +17,8 @@ var draw_count: int = 5
 var draw_pile: Array[TacticalActionCard] = []
 var hand: Array[TacticalActionCard] = []
 var discard_pile: Array[TacticalActionCard] = []
+## 本段已获移动卡授权的己方单位（对象作键）；与点格移力池共存。
+var move_authorized: Dictionary = {}
 ## 本段攻击授权队列：单位 → Array[Dictionary]（bonus / burn / volley 键）。
 ## 同单位连拖多张攻击卡会入队多次，可连续结算多次攻击。
 var attack_bonus_queues: Dictionary = {}
@@ -57,6 +59,7 @@ func clear() -> void:
 	draw_pile.clear()
 	hand.clear()
 	discard_pile.clear()
+	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
@@ -66,7 +69,8 @@ func clear() -> void:
 	changed.emit()
 
 
-## 按场上己方存活：每人通用攻 1；另按角色贡献主动技。移动不经牌库。绝不收录敌方。
+## 按场上己方存活：每人通用移+攻各 1；另按角色贡献主动技。绝不收录敌方。
+## 移动卡与点格移力池共存：卡用于重置额度并授权一次移动。
 func build_from_living_player_units(board: TacticalBoard) -> void:
 	clear()
 	if board == null:
@@ -77,11 +81,12 @@ func build_from_living_player_units(board: TacticalBoard) -> void:
 		if u.faction != TacticalFactionScript.Id.PLAYER:
 			continue
 		player_count += 1
+		draw_pile.append(TacticalActionCardScript.make_move())
 		draw_pile.append(TacticalActionCardScript.make_attack())
 		for skill in _skill_cards_for_unit_id(u.def.id):
 			draw_pile.append(skill)
 			skill_count += 1
-	var expected := player_count + skill_count
+	var expected := player_count * 2 + skill_count
 	if draw_pile.size() != expected:
 		push_error(
 			"TacticalCardDeck: build size %d != expected %d"
@@ -93,6 +98,7 @@ func build_from_living_player_units(board: TacticalBoard) -> void:
 func begin_player_turn() -> void:
 	# 上一段锁定的鸣鼓换手可按 STS 正常参与本段洗牌。
 	_same_turn_locked_discards.clear()
+	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
@@ -102,6 +108,7 @@ func begin_player_turn() -> void:
 
 func end_player_turn() -> void:
 	discard_hand()
+	move_authorized.clear()
 	attack_bonus_queues.clear()
 	pending_attack_bonus = 0
 	pending_aoe_burn_stacks = 0
@@ -168,6 +175,37 @@ func add_ephemeral_attack_to_hand() -> TacticalActionCard:
 func resolve_wardrum_redraw() -> int:
 	discard_hand()
 	return draw_up_to(draw_count)
+
+
+## 打出移动卡并选定己方单位：授权本段移动一次（路径步数 ≤ move_range）。
+## 与点格移力池共存：卡重置额度；成功走一步后须 consume。
+func authorize_move(unit: TacticalUnitInstance) -> bool:
+	if unit == null or not unit.is_alive():
+		return false
+	if unit.faction != TacticalFactionScript.Id.PLAYER:
+		return false
+	move_authorized[unit] = true
+	unit.remaining_move_budget = maxi(1, unit.def.move_range)
+	unit.moved_this_side_turn = false
+	changed.emit()
+	return true
+
+
+## 一次成功移动后消耗卡授权：清授权并清空本次移动额度（一张移动卡只走一次）。
+func consume_move_authorization(unit: TacticalUnitInstance) -> void:
+	if unit == null:
+		return
+	if move_authorized.has(unit):
+		move_authorized.erase(unit)
+	unit.remaining_move_budget = 0
+	unit.moved_this_side_turn = true
+	changed.emit()
+
+
+func is_move_authorized(unit: TacticalUnitInstance) -> bool:
+	if unit == null:
+		return false
+	return bool(move_authorized.get(unit, false))
 
 
 ## 打出攻击/加强攻击/燃爆/万箭齐发卡：入队一次攻击授权；额外伤害、燃烧、齐发随该次入队。
@@ -282,8 +320,8 @@ static func _entry_volley(entry: Variant) -> bool:
 	return false
 
 
-## 己方阵亡：减通用攻 1；绑角色主动技按 owner 减；通用加强攻按贡献者减 2；清攻授权。
-## 幂等：同一尸体只 cull 一次（燃烧段开始会扫全部尸体，不可重复减攻）。
+## 己方阵亡：减通用移/攻各 1；绑角色主动技按 owner 减；通用加强攻按贡献者减 2；清移/攻授权。
+## 幂等：同一尸体只 cull 一次（燃烧段开始会扫全部尸体，不可重复减 MOVE/攻）。
 func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 	if unit == null:
 		return 0
@@ -293,6 +331,7 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 		return 0
 	unit.death_cards_culled = true
 	var removed := 0
+	removed += _remove_one_kind(TacticalActionCard.Kind.MOVE)
 	removed += _remove_one_kind(TacticalActionCard.Kind.ATTACK)
 	var unit_id := unit.def.id if unit.def != null else ""
 	match unit_id:
@@ -331,6 +370,9 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 				int(TacticalActionCard.Kind.SKILL_HEAL_POTION), unit_id
 			)
 	var cleared_auth := false
+	if move_authorized.has(unit):
+		move_authorized.erase(unit)
+		cleared_auth = true
 	if attack_bonus_queues.has(unit):
 		attack_bonus_queues.erase(unit)
 		_sync_pending_attack_bonus(null)
