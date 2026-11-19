@@ -128,7 +128,10 @@ func display_label() -> String:
 func rules_detail() -> String:
 	match kind:
 		Kind.MOVE:
-			return "拖到己方单位：重置其本段移力为满池并授权移动，再点绿格。可打多张再移。"
+			return (
+				"拖到己方单位：重置其本段移力为 move_range 并授权移动，再点绿格。"
+				+ "本卡成功走一步后用完。亦可不经卡点选己方用移力池分步移动。"
+			)
 		Kind.ATTACK:
 			return "拖到己方单位：选定攻击者，再点红圈内单位（含友方）普攻。可打多张再攻。"
 		Kind.SKILL_DRAW:

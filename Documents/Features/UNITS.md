@@ -16,7 +16,7 @@
 | 狼骑兵 | `rider` | 2 | 2 | **1**（近战邻格） | 敌方编制；生命 10；高速近战；行为状态机见 [WOLF_CAVALRY_INTENT.md](./WOLF_CAVALRY_INTENT.md) |
 
 - **移动距离** = `move_range`：一次移动的路径步数不得超过此值（8 邻接、绕开城墙、禁斜穿墙角；无城墙时等于切比雪夫距离，见 [GRID_BOARD.md](./GRID_BOARD.md)）。游侠为 **3**。
-- **玩家移力池**：每行动段重置为 `move_range`（`action_move_budget()`）；**点选己方再点绿格**移动，可分步，总步数 ≤ 剩余移力。见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
+- **玩家移力池**：每行动段重置为 `move_range`（`action_move_budget()`）；**点选己方再点绿格**移动，可分步，总步数 ≤ 剩余移力。另可打出**移动卡**重置额度并授权一次（成功一步后用完）。见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)。
 - **对手移力池** = `move_budget`（为 0 时等同 `move_range`）：对手 AI 在池内可逐步移动。
 - **攻击距离** = `attack_range`（切比雪夫上限）。**最小射程死区** = `attack_range_min`（默认 0）：距离 ≤ min 不可攻击。游侠 `attack_range_min=1` → 只能打 **2…3**；狼骑兵为 **1**（近战邻格，含斜向）。
 - 玩家**通用**攻/加强攻/护甲须把卡**拖到**己方单位；**非通用**主动技短按或拖棋盘即可（见 [CARD_ACTIONS.md](./CARD_ACTIONS.md)）。选定后：**绿** overlay = `move_range` 内可达空格；**红** overlay = 攻击距离 footprint（含 min 死区）。**玩家**普攻/加强攻可选红圈内**友方**为目标；**对手 AI** 仍只打敌方。
@@ -48,7 +48,7 @@
 - **开战前部署**：先进部署阶段，左半盘拖己方；敌方已在右半；确认后抽手牌（见 [DEPLOYMENT.md](./DEPLOYMENT.md)）。
 - **胜负**：敌方全灭 → 胜利；己方全灭 → 失败。
 - **玩家行动段**抽手牌；点选移动或打出攻击/主动技卡后再点目标；点「结束行动」或手牌打完自动结束 → 先弃剩余手牌 → 对手 AI **逐单位**串行动画 → 自动回到玩家（见 [COMBAT.md](./COMBAT.md)、[CARD_ACTIONS.md](./CARD_ACTIONS.md)）。
-- 回到玩家段：重置己方移力池、清空攻击卡授权后抽牌（玩家无段内攻次预算）；回到对手段：重置对手**移力池**与 `attacked_this_side_turn`。
+- 回到玩家段：重置己方移力池、清空移动/攻击卡授权后抽牌（玩家无段内攻次预算）；回到对手段：重置对手**移力池**与 `attacked_this_side_turn`。
 - **未做**：商店、招募、CombatEventBus、召唤。
 
 ## 验收（开发）
