@@ -1177,7 +1177,7 @@ func _test_ephemeral_attack_not_in_piles() -> bool:
 	deck.build_from_living_player_units(board)
 	var before := deck.total_cards()
 	deck.begin_player_turn()
-	# 临时攻卡工具仍可用（游侠已无击杀/出牌抽牌被动）。
+	# 临时攻卡工具仍可用（游侠猎召不发放临攻卡；箭袋已删）。
 	deck.add_ephemeral_attack_to_hand()
 	var eph := deck.hand[deck.hand.size() - 1]
 	if not eph.ephemeral or eph.kind != TacticalActionCardScript.Kind.ATTACK:

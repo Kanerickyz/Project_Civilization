@@ -22,6 +22,9 @@ func _initialize() -> void:
 	if not _test_archer_no_attack_card_draw_passive():
 		quit(1)
 		return
+	if not _test_archer_kill_ally_attacks():
+		quit(1)
+		return
 	if not _test_knight_ally_death_draws():
 		quit(1)
 		return
@@ -258,8 +261,15 @@ func _test_archer_no_attack_card_draw_passive() -> bool:
 	var archer := _player_unit(board, "archer")
 	if archer == null:
 		return false
-	if archer.def.triggered_ability != null:
-		push_error("TacticalUnits: archer should have no triggered passive")
+	var ab := archer.def.triggered_ability
+	if ab == null or not ab.ally_attack_on_kill:
+		push_error("TacticalUnits: archer should have hunt_call kill passive")
+		return false
+	if ab.draw_cards_on_trigger != 0 or ab.grant_ephemeral_attack_on_kill:
+		push_error("TacticalUnits: archer must not restore arrow-bag draw / ephemeral")
+		return false
+	if ab.trigger_kind != TacticalActiveAbility.TriggerKind.ON_SELF_KILL:
+		push_error("TacticalUnits: archer passive must be ON_SELF_KILL")
 		return false
 	var hand_before := deck.hand.size()
 	var draw_before := deck.draw_pile.size()
@@ -281,7 +291,7 @@ func _test_archer_no_attack_card_draw_passive() -> bool:
 	if deck.draw_pile.size() != draw_before:
 		push_error("TacticalUnits: archer must not consume draw pile")
 		return false
-	# 击杀也不发临时攻卡。
+	# 击杀也不发临时攻卡（猎召可打出友军攻击，但不加临攻卡）。
 	var foe := _opponent_unit(board, "rider")
 	if foe == null:
 		return false
@@ -293,6 +303,119 @@ func _test_archer_no_attack_card_draw_passive() -> bool:
 		return false
 	if deck.hand.size() != hand_mid:
 		push_error("TacticalUnits: archer kill must not grant ephemeral attack")
+		return false
+	return true
+
+
+## 游侠猎召：击杀时周围 1 格友方有合法敌则各攻一次（最近）；无目标跳过；攻击力 0 跳过。
+func _test_archer_kill_ally_attacks() -> bool:
+	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer := _player_unit(board, "archer")
+	var ally_near := _player_unit(board, "knight")
+	var ally_far := _player_unit(board, "mini_pekka")
+	var healer := _player_unit(board, "healer")
+	var foe_a := _opponent_unit(board, "rider")
+	if archer == null or ally_near == null or ally_far == null or healer == null or foe_a == null:
+		push_error("TacticalUnits: hunt_call needs archer+knight+pekka+healer+rider")
+		return false
+	# 清场：把其余单位挪远，避免误邻。
+	for u in board.living_units():
+		if u == archer or u == ally_near or u == ally_far or u == healer or u == foe_a:
+			continue
+		u.cell = Vector2i(9, 7) if u.faction == TacticalFactionScript.Id.OPPONENT else Vector2i(0, 7)
+	archer.cell = Vector2i(2, 2)
+	ally_near.cell = Vector2i(3, 2)
+	healer.cell = Vector2i(2, 3)
+	ally_far.cell = Vector2i(5, 2)
+	foe_a.cell = Vector2i(4, 2)
+	_relocate_off_cell(board, archer.cell, archer)
+	_relocate_off_cell(board, ally_near.cell, ally_near)
+	_relocate_off_cell(board, healer.cell, healer)
+	_relocate_off_cell(board, ally_far.cell, ally_far)
+	_relocate_off_cell(board, foe_a.cell, foe_a)
+	# 邻格盾卫可打邻敌；远距大剑不在半径；医师攻 0 跳过。
+	foe_a.hp = 1
+	var far_hp_before := ally_far.hp
+	var foe_b: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u != foe_a and u.is_alive():
+			foe_b = u
+			break
+	if foe_b == null:
+		push_error("TacticalUnits: hunt_call needs a second rider")
+		return false
+	foe_b.cell = Vector2i(6, 2)
+	_relocate_off_cell(board, foe_b.cell, foe_b)
+	foe_b.hp = foe_b.effective_max_hp()
+	var foe_b_before := foe_b.hp
+	# 盾卫 (3,2) 邻格敌 (3,3)；foe_b 距 3 不可打。
+	var foe_near: TacticalUnitInstance = null
+	for u in board.living_units():
+		if (
+			u.faction == TacticalFactionScript.Id.OPPONENT
+			and u != foe_a
+			and u != foe_b
+			and u.is_alive()
+		):
+			foe_near = u
+			break
+	if foe_near == null:
+		push_error("TacticalUnits: hunt_call needs a third rider for neighbor target")
+		return false
+	foe_near.cell = Vector2i(3, 3)
+	_relocate_off_cell(board, foe_near.cell, foe_near)
+	foe_near.hp = 5
+	var foe_near_before := foe_near.hp
+	var res := board.apply_damage(foe_a, 99, archer)
+	if not bool(res.get("killed", false)):
+		push_error("TacticalUnits: archer should kill foe_a for hunt_call")
+		return false
+	if foe_a.is_alive():
+		push_error("TacticalUnits: foe_a should be dead")
+		return false
+	# 邻格盾卫应攻击最近敌（(3,3) 距 1）；医师攻 0 跳过；远距大剑不在半径内不攻。
+	if foe_near.hp >= foe_near_before:
+		push_error(
+			"TacticalUnits: neighbor knight should attack after hunt_call, hp %d→%d"
+			% [foe_near_before, foe_near.hp]
+		)
+		return false
+	if foe_b.hp != foe_b_before:
+		push_error("TacticalUnits: out-of-range foe must not be hit by hunt_call ally")
+		return false
+	if ally_far.hp != far_hp_before:
+		push_error("TacticalUnits: far ally must not be mutated by hunt_call")
+		return false
+	var saw_tag := false
+	for ev in res.get("passive_fx", []) as Array:
+		if not (ev is Dictionary):
+			continue
+		if str((ev as Dictionary).get("text", "")) == "猎召":
+			saw_tag = true
+			break
+	if not saw_tag:
+		push_error(
+			"TacticalUnits: hunt_call should emit 猎召 fx, got %s" % [res.get("passive_fx", [])]
+		)
+		return false
+	# 无邻格友军可攻时：仅游侠击杀，不崩。
+	var board2 := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var archer2 := _player_unit(board2, "archer")
+	var foe2 := _opponent_unit(board2, "rider")
+	if archer2 == null or foe2 == null:
+		return false
+	for u in board2.living_units():
+		if u == archer2 or u == foe2:
+			continue
+		u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
+	archer2.cell = Vector2i(2, 2)
+	foe2.cell = Vector2i(4, 2)
+	_relocate_off_cell(board2, archer2.cell, archer2)
+	_relocate_off_cell(board2, foe2.cell, foe2)
+	foe2.hp = 1
+	var res2 := board2.apply_damage(foe2, 1, archer2)
+	if not bool(res2.get("killed", false)):
+		push_error("TacticalUnits: lone archer kill should still succeed")
 		return false
 	return true
 
