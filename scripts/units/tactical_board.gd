@@ -63,6 +63,25 @@ func is_passable(cell: Vector2i) -> bool:
 	return _catalog.is_passable(terrain_at(cell))
 
 
+## 移动寻路用：地块可通行，且不被敌方单位占据。友方中间格可穿过；落点是否为空由调用方另检。
+func is_passable_for_move(cell: Vector2i, mover: TacticalUnitInstance) -> bool:
+	if not is_passable(cell):
+		return false
+	if mover == null:
+		return true
+	var occupant := unit_at(cell)
+	if occupant == null or occupant == mover:
+		return true
+	return occupant.faction == mover.faction
+
+
+func _move_passable_callable(mover: TacticalUnitInstance) -> Callable:
+	if mover == null:
+		return is_passable
+	return func(cell: Vector2i) -> bool:
+		return is_passable_for_move(cell, mover)
+
+
 ## 盘内可见格（非 void 缺格）。
 func is_present(cell: Vector2i) -> bool:
 	if not GridMathScript.in_bounds(cell, grid_width, grid_height):
@@ -82,18 +101,24 @@ func has_attack_los(from: Vector2i, to: Vector2i) -> bool:
 	return true
 
 
-## 8 邻接、绕开不可通行格、禁止斜穿墙角的路径步数；单位不阻挡路径中间。不可达返回 -1。
-func path_distance(from: Vector2i, to: Vector2i, max_cost: int = -1) -> int:
-	return GridPathfindingScript.path_distance(from, to, is_passable, max_cost)
+## 8 邻接、绕开不可通行格与敌方占格、禁止斜穿墙角的路径步数。mover 为 null 时仅看地块。不可达返回 -1。
+func path_distance(
+	from: Vector2i, to: Vector2i, max_cost: int = -1, mover: TacticalUnitInstance = null
+) -> int:
+	return GridPathfindingScript.path_distance(from, to, _move_passable_callable(mover), max_cost)
 
 
-func path_distances_from(origin: Vector2i, max_cost: int = -1) -> Dictionary:
-	return GridPathfindingScript.distances_from(origin, is_passable, max_cost)
+func path_distances_from(
+	origin: Vector2i, max_cost: int = -1, mover: TacticalUnitInstance = null
+) -> Dictionary:
+	return GridPathfindingScript.distances_from(origin, _move_passable_callable(mover), max_cost)
 
 
-## 最短路径格序（含起终点）；不可达返回空。
-func shortest_path(from: Vector2i, to: Vector2i, max_cost: int = -1) -> Array[Vector2i]:
-	return GridPathfindingScript.shortest_path(from, to, is_passable, max_cost)
+## 最短路径格序（含起终点）；不可达返回空。mover 非空时绕开敌方占格。
+func shortest_path(
+	from: Vector2i, to: Vector2i, max_cost: int = -1, mover: TacticalUnitInstance = null
+) -> Array[Vector2i]:
+	return GridPathfindingScript.shortest_path(from, to, _move_passable_callable(mover), max_cost)
 
 
 func add_unit(instance: TacticalUnitInstance) -> void:
@@ -150,7 +175,7 @@ func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 					continue
 				out.append(cell)
 		return out
-	# 多段累计：每段落脚格须为空且路径步数 ≤ move_range，总步数 ≤ 剩余移力。
+	# 多段累计：每段落脚格须为空且路径步数 ≤ move_range，总步数 ≤ 剩余移力；路径绕开敌方。
 	var dist: Dictionary = {unit.cell: 0}
 	var queue: Array[Vector2i] = [unit.cell]
 	var head := 0
@@ -158,7 +183,7 @@ func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 		var cur: Vector2i = queue[head]
 		head += 1
 		var cur_d: int = dist[cur]
-		var hop := path_distances_from(cur, unit.def.move_range)
+		var hop := path_distances_from(cur, unit.def.move_range, unit)
 		for gx in range(grid_width):
 			for gy in range(grid_height):
 				var cell := Vector2i(gx, gy)
@@ -484,7 +509,9 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		if step <= 0 or step > cap:
 			return false
 	else:
-		step = path_distance(unit.cell, dest, mini(unit.def.move_range, unit.remaining_move_budget))
+		step = path_distance(
+			unit.cell, dest, mini(unit.def.move_range, unit.remaining_move_budget), unit
+		)
 		if step <= 0:
 			return false
 	unit.cell = dest

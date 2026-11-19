@@ -586,7 +586,7 @@ func _tween_unit_along_path(
 	spr: Sprite2D, from_cell: Vector2i, to_cell: Vector2i, unit: TacticalUnitInstance
 ) -> void:
 	_kill_unit_move_tween(unit)
-	var path := _resolve_move_path(from_cell, to_cell)
+	var path := _resolve_move_path(from_cell, to_cell, unit)
 	if path.size() < 2:
 		path = [from_cell, to_cell] as Array[Vector2i]
 	var hops := path.size() - 1
@@ -627,8 +627,15 @@ func _apply_move_hop(t: float, spr: Sprite2D, start_w: Vector2, end_w: Vector2) 
 	spr.z_index = UNIT_Z_BASE + int(round(spr.position.y * 100.0))
 
 
-func _resolve_move_path(from_cell: Vector2i, to_cell: Vector2i) -> Array[Vector2i]:
-	return GridPathfindingScript.shortest_path(from_cell, to_cell, _view_cell_passable)
+func _resolve_move_path(
+	from_cell: Vector2i, to_cell: Vector2i, mover: TacticalUnitInstance = null
+) -> Array[Vector2i]:
+	return GridPathfindingScript.shortest_path(
+		from_cell,
+		to_cell,
+		func(cell: Vector2i) -> bool:
+			return _view_cell_passable_for_move(cell, mover)
+	)
 
 
 func _view_cell_passable(cell: Vector2i) -> bool:
@@ -639,6 +646,23 @@ func _view_cell_passable(cell: Vector2i) -> bool:
 	var tid := terrain_id_at(cell)
 	var cat := _get_catalog()
 	return cat.is_present(tid) and cat.is_passable(tid)
+
+
+## 表现层移动格序：与逻辑一致，绕开敌方占格；友方中间可穿过。
+func _view_cell_passable_for_move(cell: Vector2i, mover: TacticalUnitInstance) -> bool:
+	if not _view_cell_passable(cell):
+		return false
+	if mover == null:
+		return true
+	for key in _unit_sprites.keys():
+		var other: TacticalUnitInstance = key as TacticalUnitInstance
+		if other == null or other == mover or not other.is_alive():
+			continue
+		if other.cell != cell:
+			continue
+		if other.faction != mover.faction:
+			return false
+	return true
 
 
 func _kill_unit_move_tween(unit: TacticalUnitInstance) -> void:

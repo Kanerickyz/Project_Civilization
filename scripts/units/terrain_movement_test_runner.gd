@@ -27,6 +27,7 @@ func _initialize() -> void:
 		_test_try_move_into_wall_and_bounds,
 		_test_no_corner_cutting,
 		_test_no_wall_matches_legacy,
+		_test_enemy_blocks_path_middle,
 		_test_shortest_path_around_wall,
 		_test_cluster_seed_reproducible,
 		_test_sandbox_board_units_passable,
@@ -227,28 +228,110 @@ func _legacy_reachable(board: TacticalBoard, unit: TacticalUnitInstance) -> Arra
 
 
 func _test_no_wall_matches_legacy() -> bool:
-	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	for budget_override in [-1, 1, 2, 3, 6]:
-		for u in board.living_units():
-			# 瞬移单位走切比雪夫可达，不适用无墙 legacy 路径模型。
-			if u.def != null and u.def.teleports:
-				continue
-			if budget_override >= 0:
-				u.remaining_move_budget = budget_override
-			var got := board.reachable_move_cells(u)
-			var want := _legacy_reachable(board, u)
-			if got != want:
-				push_error("TerrainMove: no-wall reachable differs from legacy for %s budget %d" % [u.def.id, u.remaining_move_budget])
-				return false
+	# 无墙对照依赖切比雪夫；敌方挡路会使路径与切比雪夫分叉，故分阵营清空对方后再比。
+	for side in [TacticalFactionScript.Id.PLAYER, TacticalFactionScript.Id.OPPONENT]:
+		var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
+		for u in board.units:
+			if u.faction != side:
+				u.hp = 0
+		for budget_override in [-1, 1, 2, 3, 6]:
+			for u in board.living_units():
+				# 瞬移单位走切比雪夫可达，不适用无墙 legacy 路径模型。
+				if u.def != null and u.def.teleports:
+					continue
+				if budget_override >= 0:
+					u.remaining_move_budget = budget_override
+				var got := board.reachable_move_cells(u)
+				var want := _legacy_reachable(board, u)
+				if got != want:
+					push_error(
+						"TerrainMove: no-wall reachable differs from legacy for %s budget %d"
+						% [u.def.id, u.remaining_move_budget]
+					)
+					return false
+	var board2 := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	for u in board2.units:
+		if u.faction != TacticalFactionScript.Id.PLAYER:
+			u.hp = 0
 	var archer: TacticalUnitInstance = null
-	for u in board.living_units():
+	for u in board2.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
 			archer = u
 	archer.remaining_move_budget = archer.def.action_move_budget()
 	var start := archer.cell
 	var dest := start + Vector2i(2, 2)
-	if not board.try_move(archer, dest) or archer.remaining_move_budget != archer.def.action_move_budget() - 2:
+	if board2.unit_at(dest) != null:
+		dest = start + Vector2i(1, 0)
+	if not board2.try_move(archer, dest):
+		push_error("TerrainMove: no-wall try_move should succeed")
+		return false
+	var spent := GridMathScript.chebyshev(start, dest)
+	if archer.remaining_move_budget != archer.def.action_move_budget() - spent:
 		push_error("TerrainMove: no-wall try_move should cost chebyshev")
+		return false
+	return true
+
+
+## 敌方占格挡路：不可穿过；可绕行；友方中间不挡；落点仍须空。
+func _test_enemy_blocks_path_middle() -> bool:
+	var board: TacticalBoard = TacticalBoardScript.new()
+	board.setup(8, 8)
+	var knight := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/knight.tres"), TacticalFactionScript.Id.PLAYER, Vector2i(2, 2)
+	)
+	var foe := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/rider.tres"), TacticalFactionScript.Id.OPPONENT, Vector2i(3, 2)
+	)
+	board.add_unit(knight)
+	board.add_unit(foe)
+	# 预算=移距=2：单跳穿不过敌格；更大预算可多段绕行，不在此测。
+	knight.remaining_move_budget = 2
+	if board.path_distance(knight.cell, Vector2i(4, 2), -1, knight) == 2:
+		push_error("TerrainMove: path through enemy cell must not stay length 2")
+		return false
+	if board.path_distance(knight.cell, Vector2i(4, 2), -1, knight) < 4:
+		push_error("TerrainMove: detour around enemy should cost at least 4")
+		return false
+	if Vector2i(4, 2) in board.reachable_move_cells(knight):
+		push_error("TerrainMove: (4,2) behind enemy must not be reachable with budget 2")
+		return false
+	if board.try_move(knight, Vector2i(4, 2)):
+		push_error("TerrainMove: try_move through enemy must fail")
+		return false
+	# 斜穿敌角：(2,2)->(3,3) 须经 (3,2)/(2,3)；敌在 (3,2) → 禁角，代价 2。
+	if board.path_distance(knight.cell, Vector2i(3, 3), -1, knight) != 2:
+		push_error("TerrainMove: diagonal past enemy corner should cost 2")
+		return false
+	# 友方中间不挡：把敌换成友方占 (3,2)，直线到空格 (4,2) 仍 2 步。
+	foe.hp = 0
+	var ally := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/wardrum.tres"), TacticalFactionScript.Id.PLAYER, Vector2i(3, 2)
+	)
+	board.add_unit(ally)
+	if board.path_distance(knight.cell, Vector2i(4, 2), -1, knight) != 2:
+		push_error("TerrainMove: ally middle should not block path length 2")
+		return false
+	if not (Vector2i(4, 2) in board.reachable_move_cells(knight)):
+		push_error("TerrainMove: empty cell beyond ally should stay reachable")
+		return false
+	if board.try_move(knight, Vector2i(3, 2)):
+		push_error("TerrainMove: landing on ally must still fail")
+		return false
+	# 对手侧对称：敌不可穿过玩家。
+	var rider := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/rider.tres"), TacticalFactionScript.Id.OPPONENT, Vector2i(5, 5)
+	)
+	var blocker := TacticalUnitInstanceScript.new(
+		_def("res://resources/units/knight.tres"), TacticalFactionScript.Id.PLAYER, Vector2i(6, 5)
+	)
+	board.add_unit(rider)
+	board.add_unit(blocker)
+	rider.remaining_move_budget = 2
+	if board.path_distance(rider.cell, Vector2i(7, 5), -1, rider) == 2:
+		push_error("TerrainMove: opponent path through player must not stay length 2")
+		return false
+	if board.try_move(rider, Vector2i(7, 5)):
+		push_error("TerrainMove: opponent try_move through player must fail")
 		return false
 	return true
 
