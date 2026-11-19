@@ -528,6 +528,9 @@ func _test_wardrum_attack_card_buff() -> bool:
 	if not ("+1攻" in fx_texts) or not ("+1血" in fx_texts):
 		push_error("TacticalUnits: wardrum passive should emit +1攻/+1血 fx, got %s" % [fx_texts])
 		return false
+	if not ("战鼓同频" in fx_texts):
+		push_error("TacticalUnits: wardrum passive should emit owner label 战鼓同频, got %s" % [fx_texts])
+		return false
 	# 半径 1：距离 2 不吃。
 	var pekka := _player_unit(board, "mini_pekka")
 	if pekka == null:
