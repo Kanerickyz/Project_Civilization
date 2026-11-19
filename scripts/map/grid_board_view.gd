@@ -554,10 +554,9 @@ const UNIT_HIT_FLASH_HOLD_SEC := 0.08
 const UNIT_HIT_FLASH_FADE_SEC := 0.22
 const DAMAGE_POPUP_FONT_SIZE := 28
 const DAMAGE_POPUP_LIFT_PX := 56.0
-## 被动触发（参考小丑牌）：单位抖、弹出、金高亮 + 更冲的飘字。
+## 被动触发（参考小丑牌）：单位抖、弹出 + 更冲的飘字（无金色高亮）。
 const PASSIVE_TRIGGER_SHAKE_FRAC := 0.07
 const PASSIVE_TRIGGER_SCALE := 1.22
-const PASSIVE_TRIGGER_HIGHLIGHT := Color(1.45, 1.28, 0.55, 1.0)
 const PASSIVE_POPUP_FONT_SIZE := 32
 const PASSIVE_POPUP_LIFT_PX := 64.0
 
@@ -803,7 +802,7 @@ func _spawn_float_label(
 	tw.finished.connect(lbl.queue_free)
 
 
-## 被动触发单位：左右连抖 + 弹出缩放 + 金色高亮（小丑牌 joker 触发感）。
+## 被动触发单位：左右连抖 + 弹出缩放（无金色高亮/描边）。
 func play_passive_trigger(unit: TacticalUnitInstance) -> Tween:
 	if config == null or unit == null or not _unit_sprites.has(unit):
 		return null
@@ -825,19 +824,12 @@ func play_passive_trigger(unit: TacticalUnitInstance) -> Tween:
 	spr.modulate = rest
 	var shake := config.cell_size * PASSIVE_TRIGGER_SHAKE_FRAC
 	var peak := base_scale * PASSIVE_TRIGGER_SCALE
-	var highlight := Color(
-		rest.r * PASSIVE_TRIGGER_HIGHLIGHT.r,
-		rest.g * PASSIVE_TRIGGER_HIGHLIGHT.g,
-		rest.b * PASSIVE_TRIGGER_HIGHLIGHT.b,
-		rest.a
-	)
 	var tw := create_tween()
-	# 弹出 + 金高亮与首拍晃动并行；随后连抖回位（小丑牌 joker 触发感）。
+	# 弹出与首拍晃动并行；随后连抖回位（无 modulate 金染）。
 	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.04).set_trans(Tween.TRANS_SINE)
 	tw.parallel().tween_property(spr, "scale", peak, 0.12).set_trans(Tween.TRANS_BACK).set_ease(
 		Tween.EASE_OUT
 	)
-	tw.parallel().tween_property(spr, "modulate", highlight, 0.08).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(spr, "position", home + Vector2(-shake, 0.0), 0.04).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(spr, "position", home + Vector2(shake * 0.65, 0.0), 0.04).set_trans(
 		Tween.TRANS_SINE
@@ -846,7 +838,6 @@ func play_passive_trigger(unit: TacticalUnitInstance) -> Tween:
 	tw.tween_property(spr, "scale", base_scale, 0.18).set_trans(Tween.TRANS_SINE).set_ease(
 		Tween.EASE_IN_OUT
 	)
-	tw.parallel().tween_property(spr, "modulate", rest, 0.2).set_trans(Tween.TRANS_SINE)
 	_unit_passive_tweens[unit] = tw
 	tw.finished.connect(
 		func() -> void:
@@ -856,10 +847,7 @@ func play_passive_trigger(unit: TacticalUnitInstance) -> Tween:
 				return
 			spr.position = _unit_combat_home(unit, spr)
 			_restore_unit_base_scale(unit)
-			var end_mod := _look().unit_modulate
-			if unit.is_stealthed():
-				end_mod.a = STEALTH_SPRITE_ALPHA
-			spr.modulate = end_mod
+			spr.modulate = rest
 			_ensure_unit_idle(unit)
 	)
 	return tw
