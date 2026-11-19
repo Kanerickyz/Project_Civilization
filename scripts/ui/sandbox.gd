@@ -1126,7 +1126,7 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 				_selected_unit = null
 			if _focus_unit == knight:
 				_focus_unit = null
-	_play_passive_fx(res.get("passive_fx", []) as Array)
+	await _play_skill_fx_async(res.get("passive_fx", []) as Array)
 	if knight != null and knight.is_alive() and knight.remaining_move_budget > 0:
 		_pending_kind = PendingKind.MOVE
 		_focus_unit = knight
@@ -1189,8 +1189,8 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		return
 	# 成功后消耗队首授权（玩家无 attacked_this_side_turn 预算）。
 	_deck.consume_attack_authorization(attacker)
-	# 攻击卡真正打出（有效目标 + 结算成功）后触发鼓手等被动。
-	_append_attack_card_passive_logs()
+	# 攻击卡真正打出（有效目标 + 结算成功）后触发鼓手等被动（串行播完再冲刺）。
+	await _append_attack_card_passive_logs()
 	var tw := _board_view.play_unit_attack(attacker, target_cell)
 	if tw != null:
 		await tw.finished
@@ -1208,6 +1208,10 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 	_refresh_all()
 	# 攻击/友方死亡抽牌等补牌结算完后再判空手。
 	_maybe_auto_end_player_turn_if_hand_empty()
+
+
+## 连锁/溅射等多段命中、被动飘字之间的播放间隔（与同格飘字 0.4s 对齐）。
+const SKILL_PLAY_INTERVAL_SEC := 0.4
 
 
 func _feedback_from_attack(
@@ -1232,6 +1236,7 @@ func _feedback_from_attack(
 	var col: TacticalUnitInstance = res.get("collision_target") as TacticalUnitInstance
 	var col_dmg: int = int(res.get("collision_damage", 0))
 	if col != null and col_dmg > 0:
+		await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 		_board_view.play_damage_popup(col.cell, col_dmg)
 		_board_view.play_unit_hit(col)
 		if res.get("collision_killed", false):
@@ -1252,6 +1257,7 @@ func _feedback_from_attack(
 		var vdmg: int = int((hit as Dictionary).get("damage", 0))
 		if vu == null or vdmg <= 0:
 			continue
+		await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 		_board_view.play_damage_popup(vcell if vcell.x >= 0 else vu.cell, vdmg)
 		_board_view.play_unit_hit(vu)
 		if bool((hit as Dictionary).get("killed", false)):
@@ -1267,8 +1273,8 @@ func _feedback_from_attack(
 	if res.get("knockback_moved", false) and target != null and target.is_alive():
 		_refresh_all()
 		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
-	# 友方死亡抽牌 / 击杀加攻等被动飘字。
-	_play_passive_fx(res.get("passive_fx", []) as Array)
+	# 猎召等反应攻击 / 被动飘字：按队列串行（动画+飘字）。
+	await _play_skill_fx_async(res.get("passive_fx", []) as Array)
 
 
 func _unit_kill_silhouette_tex(unit: TacticalUnitInstance) -> Texture2D:
@@ -1443,6 +1449,7 @@ func _resolve_heal_potion_at(cell: Vector2i) -> bool:
 		_board_view.clear_skill_drag_preview()
 	_last_log = str(res.get("log", "恢复药水"))
 	var fx: Array = res.get("passive_fx", []) as Array
+	# 恢复药水路径不锁输入整段；飘字串行由队列承接，此处 kick 异步即可。
 	_play_passive_fx(fx)
 	_refresh_all()
 	_maybe_auto_end_player_turn_if_hand_empty()
@@ -1766,11 +1773,11 @@ func capture_play_charge_toward(dir_cell: Vector2i) -> bool:
 	return true
 
 
-## 鼓手等：攻击卡成功结算后的触发被动日志拼到 _last_log，并播飘字。
+## 鼓手等：攻击卡成功结算后的触发被动日志拼到 _last_log，并串行播飘字/触发。
 func _append_attack_card_passive_logs() -> void:
 	var fx: Array = []
 	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board, fx)
-	_play_passive_fx(fx)
+	await _play_skill_fx_async(fx)
 	if logs.is_empty():
 		return
 	if _last_log.is_empty():
@@ -1779,27 +1786,73 @@ func _append_attack_card_passive_logs() -> void:
 		_last_log = "%s · %s" % [_last_log, "；".join(logs)]
 
 
-## 被动触发可见反馈：短飘字入同格队列逐个弹 + 单位晃动/弹出（无金色高亮）。
+## 兼容截图脚本：kick 串行播放（不等待）。
 func _play_passive_fx(fx_list: Array) -> void:
+	_play_skill_fx_async(fx_list)
+
+
+## 被动/猎召等：按事件队列串行（动画+飘字），相邻间隔 SKILL_PLAY_INTERVAL_SEC。
+func _play_skill_fx_async(fx_list: Array) -> void:
 	if _board_view == null or fx_list.is_empty():
 		return
-	var pulsed_cells: Dictionary = {}
+	var started := false
 	for ev in fx_list:
 		if not (ev is Dictionary):
 			continue
-		var cell: Vector2i = (ev as Dictionary).get("cell", Vector2i(-999, -999)) as Vector2i
-		var text := str((ev as Dictionary).get("text", ""))
+		var d: Dictionary = ev as Dictionary
+		var kind := str(d.get("kind", ""))
+		if kind == "reaction_attack":
+			if started:
+				await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
+			started = true
+			await _play_reaction_attack_async(d)
+			continue
+		var cell: Vector2i = d.get("cell", Vector2i(-999, -999)) as Vector2i
+		var text := str(d.get("text", ""))
 		if text.is_empty() or cell.x <= -900:
 			continue
-		var color: Color = (ev as Dictionary).get("color", Color("ffe08a")) as Color
-		var key := "%d,%d" % [cell.x, cell.y]
-		# 同格多条由 GridBoardView 串行队列间隔弹出，不再并行 stack 错开。
+		if started:
+			await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
+		started = true
+		var color: Color = d.get("color", Color("ffe08a")) as Color
 		_board_view.play_passive_float_text(cell, text, color)
-		if pulsed_cells.has(key):
-			continue
-		pulsed_cells[key] = true
 		if _board == null:
 			continue
 		var unit := _board.unit_at(cell)
 		if unit != null and unit.is_alive():
 			_board_view.play_passive_trigger(unit)
+
+
+## 猎召等反应攻击：先播触发飘字/晃动，再冲刺与命中反馈（不含再入队的 passive_fx）。
+func _play_reaction_attack_async(ev: Dictionary) -> void:
+	if _board_view == null:
+		return
+	var attacker: TacticalUnitInstance = ev.get("attacker") as TacticalUnitInstance
+	var target: TacticalUnitInstance = ev.get("target") as TacticalUnitInstance
+	var target_cell: Vector2i = ev.get("target_cell", Vector2i(-1, -1)) as Vector2i
+	var tag := str(ev.get("text", ""))
+	var color: Color = ev.get("color", Color("ffe08a")) as Color
+	if attacker != null and tag != "":
+		var tag_cell: Vector2i = ev.get("cell", attacker.cell) as Vector2i
+		_board_view.play_passive_float_text(tag_cell, tag, color)
+		if attacker.is_alive():
+			_board_view.play_passive_trigger(attacker)
+	if attacker != null and attacker.is_alive() and target_cell.x >= 0:
+		var tw := _board_view.play_unit_attack(attacker, target_cell)
+		if tw != null:
+			await tw.finished
+	if target == null:
+		return
+	var mini := {
+		"damage": int(ev.get("damage", 0)),
+		"killed": bool(ev.get("killed", false)),
+		"knockback_moved": bool(ev.get("knockback_moved", false)),
+		"knockback_from": ev.get("knockback_from", Vector2i(-1, -1)),
+		"collision_target": ev.get("collision_target"),
+		"collision_damage": int(ev.get("collision_damage", 0)),
+		"collision_killed": bool(ev.get("collision_killed", false)),
+		"volley_hits": ev.get("volley_hits", []),
+		# 嵌套 fx 已按序排在父队列后续事件中，此处不再递归播放。
+		"passive_fx": [],
+	}
+	await _feedback_from_attack(target, mini, target_cell)

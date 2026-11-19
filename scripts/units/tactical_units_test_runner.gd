@@ -388,15 +388,24 @@ func _test_archer_kill_ally_attacks() -> bool:
 		push_error("TacticalUnits: far ally must not be mutated by hunt_call")
 		return false
 	var saw_tag := false
+	var saw_reaction := false
 	for ev in res.get("passive_fx", []) as Array:
 		if not (ev is Dictionary):
 			continue
-		if str((ev as Dictionary).get("text", "")) == "猎召":
+		var d: Dictionary = ev as Dictionary
+		if str(d.get("text", "")) == "猎召":
 			saw_tag = true
-			break
+		if str(d.get("kind", "")) == "reaction_attack":
+			saw_reaction = true
 	if not saw_tag:
 		push_error(
 			"TacticalUnits: hunt_call should emit 猎召 fx, got %s" % [res.get("passive_fx", [])]
+		)
+		return false
+	if not saw_reaction:
+		push_error(
+			"TacticalUnits: hunt_call should emit reaction_attack play step, got %s"
+			% [res.get("passive_fx", [])]
 		)
 		return false
 	# 无邻格友军可攻时：仅游侠击杀，不崩。
@@ -626,15 +635,24 @@ func _test_pekka_enemy_death_attack() -> bool:
 		push_error("TacticalUnits: pekka pursuit must not grant atk")
 		return false
 	var saw_tag := false
+	var saw_reaction := false
 	for ev in res.get("passive_fx", []) as Array:
 		if not (ev is Dictionary):
 			continue
-		if str((ev as Dictionary).get("text", "")) == "追斩":
+		var d: Dictionary = ev as Dictionary
+		if str(d.get("text", "")) == "追斩":
 			saw_tag = true
-			break
+		if str(d.get("kind", "")) == "reaction_attack":
+			saw_reaction = true
 	if not saw_tag:
 		push_error(
 			"TacticalUnits: pursuit should emit 追斩 fx, got %s" % [res.get("passive_fx", [])]
+		)
+		return false
+	if not saw_reaction:
+		push_error(
+			"TacticalUnits: pursuit should emit reaction_attack play step, got %s"
+			% [res.get("passive_fx", [])]
 		)
 		return false
 	# 攻距内无敌：仅死亡，不崩、不加攻。

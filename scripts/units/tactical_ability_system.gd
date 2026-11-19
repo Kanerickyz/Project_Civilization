@@ -281,6 +281,7 @@ static func _grant_ephemeral_attack(
 
 
 ## 敌方死亡被动：自身攻击范围内仍有敌则普攻一次（最近；同距低 HP）。
+## 出击写入 kind=reaction_attack，与猎召同走沙盘串行播放。
 static func _apply_self_attack_on_enemy_death(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
@@ -305,11 +306,8 @@ static func _apply_self_attack_on_enemy_death(
 	if not bool(atk.get("ok", false)):
 		return []
 	var tag := ab.display_name if not ab.display_name.is_empty() else "追斩"
-	_emit_fx(fx_out, unit.cell, tag, Color("ffe08a"))
-	var nested_fx: Array = atk.get("passive_fx", []) as Array
-	if fx_out is Array and not nested_fx.is_empty():
-		(fx_out as Array).append_array(nested_fx)
 	var victim: TacticalUnitInstance = atk.get("target") as TacticalUnitInstance
+	_append_reaction_attack_fx(fx_out, unit, victim, target_cell, tag, atk)
 	var vname := victim.def.display_name if victim != null and victim.def != null else "?"
 	board.changed.emit()
 	return [
@@ -324,7 +322,44 @@ static func _apply_self_attack_on_enemy_death(
 	]
 
 
+## 把一次反应出击写入 fx_out（本段 + 嵌套 passive_fx）。
+static func _append_reaction_attack_fx(
+	fx_out: Variant,
+	attacker: TacticalUnitInstance,
+	victim: TacticalUnitInstance,
+	target_cell: Vector2i,
+	tag: String,
+	atk: Dictionary
+) -> void:
+	if not (fx_out is Array) or attacker == null:
+		return
+	(fx_out as Array).append(
+		{
+			"kind": "reaction_attack",
+			"cell": attacker.cell,
+			"text": tag,
+			"color": Color("ffe08a"),
+			"attacker": attacker,
+			"target": victim,
+			"target_cell": target_cell,
+			"damage": int(atk.get("damage", 0)),
+			"killed": bool(atk.get("killed", false)),
+			"knockback_moved": bool(atk.get("knockback_moved", false)),
+			"knockback_from": atk.get("knockback_from", Vector2i(-1, -1)),
+			"collision_target": atk.get("collision_target"),
+			"collision_damage": int(atk.get("collision_damage", 0)),
+			"collision_killed": bool(atk.get("collision_killed", false)),
+			"volley_hits": atk.get("volley_hits", []),
+		}
+	)
+	var nested_fx: Array = atk.get("passive_fx", []) as Array
+	if not nested_fx.is_empty():
+		(fx_out as Array).append_array(nested_fx)
+
+
 ## 击杀被动：周围友方各尝试普攻一次；无合法敌则跳过；用友军自身攻距/攻。
+## 每段出击写入 fx_out 的 kind=reaction_attack（含 tag 飘字字段），供沙盘串行播动画+飘字；
+## 嵌套被动/连锁反应按结算顺序追加在该段之后。
 static func _apply_ally_attack_on_kill(
 	board: TacticalBoard,
 	killer: TacticalUnitInstance,
@@ -357,12 +392,8 @@ static func _apply_ally_attack_on_kill(
 		if not bool(atk.get("ok", false)):
 			continue
 		fired += 1
-		_emit_fx(fx_out, ally.cell, tag, Color("ffe08a"))
-		# 嵌套伤害/击杀被动飘字并入本次击杀反馈。
-		var nested_fx: Array = atk.get("passive_fx", []) as Array
-		if fx_out is Array and not nested_fx.is_empty():
-			(fx_out as Array).append_array(nested_fx)
 		var victim: TacticalUnitInstance = atk.get("target") as TacticalUnitInstance
+		_append_reaction_attack_fx(fx_out, ally, victim, target_cell, tag, atk)
 		var vname := victim.def.display_name if victim != null and victim.def != null else "?"
 		hit_logs.append(
 			"%s→%s %d%s"
