@@ -1177,12 +1177,12 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		return
 	# 成功后消耗队首授权（玩家无 attacked_this_side_turn 预算）。
 	_deck.consume_attack_authorization(attacker)
-	# 攻击卡真正打出（有效目标 + 结算成功）后触发鼓手等被动（串行播完再冲刺）。
-	await _append_attack_card_passive_logs()
+	# 先播攻击冲刺/命中/击退/猎召等，再结算「当攻击牌打出时」加成（鼓手等）。
 	var tw := _board_view.play_unit_attack(attacker, target_cell)
 	if tw != null:
 		await tw.finished
 	await _feedback_from_attack(target, atk, target_cell)
+	await _append_attack_card_passive_logs()
 	_pending_kind = PendingKind.NONE
 	# 同单位连拖多张攻击卡：仍有余次则继续瞄准。
 	if attacker.is_alive() and _deck.is_attack_authorized(attacker):
@@ -1832,7 +1832,7 @@ func capture_play_charge_toward(dir_cell: Vector2i) -> bool:
 	return true
 
 
-## 鼓手等：攻击卡成功结算后的触发被动日志拼到 _last_log，并串行播飘字/触发。
+## 鼓手等：攻击效果播完后结算「当攻击牌打出时」被动；日志拼到 _last_log，并串行播飘字/触发。
 func _append_attack_card_passive_logs() -> void:
 	var fx: Array = []
 	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board, fx)
