@@ -321,6 +321,10 @@ func on_player_unit_died(unit: TacticalUnitInstance) -> int:
 			removed += _remove_one_bound_skill(
 				int(TacticalActionCard.Kind.SKILL_CHARGE), unit_id
 			)
+		"healer":
+			removed += _remove_one_bound_skill(
+				int(TacticalActionCard.Kind.SKILL_HEAL_POTION), unit_id
+			)
 	var cleared_auth := false
 	if attack_bonus_queues.has(unit):
 		attack_bonus_queues.erase(unit)
@@ -367,6 +371,8 @@ static func _skill_cards_for_unit_id(unit_id: String) -> Array[TacticalActionCar
 			out.append(TacticalActionCardScript.make_skill_stealth("assassin"))
 		"archer":
 			out.append(TacticalActionCardScript.make_skill_volley("archer"))
+		"healer":
+			out.append(TacticalActionCardScript.make_skill_heal_potion("healer"))
 	return out
 
 

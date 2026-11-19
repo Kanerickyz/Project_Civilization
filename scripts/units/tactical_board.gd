@@ -204,6 +204,59 @@ func attack_range_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
 	return out
 
 
+## 医师「恢复药水」：以 target_cell 为中心，切比雪夫 ≤ radius 的友方各恢复 amount 血（可含施法者）。
+func apply_heal_potion(
+	caster: TacticalUnitInstance,
+	target_cell: Vector2i,
+	amount: int = 2,
+	radius: int = 1
+) -> Dictionary:
+	var result := {
+		"ok": false,
+		"log": "",
+		"healed": [],
+		"passive_fx": [],
+	}
+	if caster == null or not caster.is_alive() or caster.def == null:
+		result["log"] = "无效恢复药水"
+		return result
+	if caster.def.id != "healer":
+		result["log"] = "恢复药水只能由医师投掷"
+		return result
+	if not GridMathScript.in_bounds(target_cell, grid_width, grid_height):
+		result["log"] = "目标格越界"
+		return result
+	var heal_amt := maxi(1, amount)
+	var heal_r := maxi(0, radius)
+	var healed: Array = []
+	var passive_fx: Array = []
+	for u in living_units():
+		if u.faction != caster.faction:
+			continue
+		if GridMathScript.chebyshev(target_cell, u.cell) > heal_r:
+			continue
+		var gained := u.apply_heal(heal_amt)
+		if gained <= 0:
+			continue
+		healed.append({"unit": u, "amount": gained})
+		passive_fx.append(
+			{"cell": u.cell, "text": "+%d血" % gained, "color": Color("7dff9a")}
+		)
+	result["healed"] = healed
+	result["passive_fx"] = passive_fx
+	result["ok"] = true
+	if healed.is_empty():
+		result["log"] = "%s 恢复药水：范围内无友方可回血" % caster.def.display_name
+	else:
+		result["log"] = "%s 恢复药水：%d 名友方各恢复最多 %d 血" % [
+			caster.def.display_name,
+			healed.size(),
+			heal_amt,
+		]
+	changed.emit()
+	return result
+
+
 ## 鼓手「鼓舞」：周围 radius 格内其他友方各 +1 狂暴（不含自身）。
 func apply_inspire_frenzy(drummer: TacticalUnitInstance, radius: int = 1) -> Dictionary:
 	var result := {"ok": false, "buffed": 0, "log": ""}

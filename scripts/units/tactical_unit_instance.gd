@@ -83,6 +83,15 @@ func is_alive() -> bool:
 	return hp > 0
 
 
+## 恢复当前 HP，不抬上限；返回实际增加量。
+func apply_heal(amount: int) -> int:
+	if amount <= 0 or not is_alive():
+		return 0
+	var before := hp
+	hp = mini(effective_max_hp(), hp + amount)
+	return hp - before
+
+
 func add_armor(amount: int) -> void:
 	if amount <= 0:
 		return

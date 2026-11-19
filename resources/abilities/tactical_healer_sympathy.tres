@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="TacticalActiveAbility" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/units/tactical_active_ability.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+id = "healer_sympathy"
+display_name = "共情"
+autochess_ability_id = "self_hurt_ally_heal"
+rules_hint = "受到攻击实际扣血时：周围 1 格其他友方各恢复 1 点血（不含自身；不抬上限）。"
+trigger_kind = 1
+range_chebyshev = 1
+self_atk_on_trigger = 0
+self_atk_on_kill = 0
+ally_atk_buff = 0
+ally_hp_buff = 0
+ally_buff_radius = 1
+ally_heal_on_trigger = 1
+grant_ephemeral_attack_on_kill = false
+draw_cards_on_trigger = 0
