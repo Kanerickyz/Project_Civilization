@@ -228,8 +228,8 @@ static func _apply_ally_heal_on_hurt(
 		return []
 	board.changed.emit()
 	var tag := ab.display_name if not ab.display_name.is_empty() else "共情"
-	# 触发者本体短标签，供单位晃动/高亮对齐（数值仍在受益友方格）。
-	_emit_fx(fx_out, unit.cell, tag, Color("ffd24a"))
+	# 触发者本体短标签，供单位晃动/弹出对齐（数值仍在受益友方格；非金色）。
+	_emit_fx(fx_out, unit.cell, tag, Color("f5f5f5"))
 	return [
 		"%s %s：%d 名周围友方恢复 %d 血" % [unit.def.display_name, tag, healed, amount],
 	]
@@ -369,7 +369,7 @@ static func _apply_ally_buff(
 		return []
 	board.changed.emit()
 	var label := ab.display_name if not ab.display_name.is_empty() else tag
-	_emit_fx(fx_out, unit.cell, label, Color("ffd24a"))
+	_emit_fx(fx_out, unit.cell, label, Color("f5f5f5"))
 	var parts: PackedStringArray = []
 	if ab.ally_atk_buff != 0:
 		parts.append("攻击+%d" % ab.ally_atk_buff)

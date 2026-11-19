@@ -1779,7 +1779,7 @@ func _append_attack_card_passive_logs() -> void:
 		_last_log = "%s · %s" % [_last_log, "；".join(logs)]
 
 
-## 被动触发可见反馈：短飘字 + 单位晃动/弹出/金高亮（小丑牌触发感）。
+## 被动触发可见反馈：短飘字 + 单位晃动/弹出（无金色高亮）。
 func _play_passive_fx(fx_list: Array) -> void:
 	if _board_view == null or fx_list.is_empty():
 		return
