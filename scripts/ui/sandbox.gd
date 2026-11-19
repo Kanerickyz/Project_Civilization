@@ -38,6 +38,8 @@ var _last_log: String = ""
 var _input_locked: bool = false
 ## 玩家结束行动（含空手自动结束）进行中，防止重入把回合钟多拨一次而跳过对手段。
 var _ending_player_action: bool = false
+## 技能提示 / 反应攻击串行播放中（含 kick 的 _play_passive_fx）。
+var _skill_fx_playing: bool = false
 var _game_over: bool = false
 var _turn_banner_panel: PanelContainer
 var _turn_banner: Label
@@ -174,12 +176,13 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 		await get_tree().create_timer(0.38).timeout
 		for dead in killed_now:
 			_board_view.play_unit_death(dead)
-			_play_kill_impact(dead)
 			if _selected_unit == dead:
 				_selected_unit = null
 			if _focus_unit == dead:
 				_focus_unit = null
 				_pending_kind = PendingKind.NONE
+		# 同 tick 多死：一条红带 + 多剪影各锚死亡位。
+		_play_kill_impacts(killed_now)
 		if killed_now.size() > 0:
 			await get_tree().create_timer(0.22).timeout
 			if _check_victory():
@@ -1112,20 +1115,22 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 	if not path.is_empty():
 		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
 	var hits: Array = res.get("hits", []) as Array
+	var charge_killed: Array = []
 	for hit in hits:
 		if hit is Dictionary:
-			await _feedback_from_charge_hit(hit as Dictionary)
+			await _feedback_from_charge_hit(hit as Dictionary, charge_killed)
 	if int(res.get("self_damage", 0)) > 0 and knight != null:
 		_board_view.play_damage_popup(knight.cell, int(res["self_damage"]))
 		_board_view.play_unit_hit(knight)
 		if bool(res.get("self_killed", false)):
 			_purge_dead_unit_cards(knight)
 			_board_view.play_unit_death(knight)
-			_play_kill_impact(knight)
+			charge_killed.append(knight)
 			if _selected_unit == knight:
 				_selected_unit = null
 			if _focus_unit == knight:
 				_focus_unit = null
+	_play_kill_impacts(charge_killed)
 	await _play_skill_fx_async(res.get("passive_fx", []) as Array)
 	if knight != null and knight.is_alive() and knight.remaining_move_budget > 0:
 		_pending_kind = PendingKind.MOVE
@@ -1136,7 +1141,7 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 	_maybe_auto_end_player_turn_if_hand_empty()
 
 
-func _feedback_from_charge_hit(hit: Dictionary) -> void:
+func _feedback_from_charge_hit(hit: Dictionary, killed_out: Array = []) -> void:
 	var vu: TacticalUnitInstance = hit.get("unit") as TacticalUnitInstance
 	var vcell: Vector2i = hit.get("cell", Vector2i(-1, -1)) as Vector2i
 	var vdmg: int = int(hit.get("damage", 0))
@@ -1147,7 +1152,7 @@ func _feedback_from_charge_hit(hit: Dictionary) -> void:
 	if bool(hit.get("killed", false)):
 		_purge_dead_unit_cards(vu)
 		_board_view.play_unit_death(vu)
-		_play_kill_impact(vu)
+		killed_out.append(vu)
 		if _selected_unit == vu:
 			_selected_unit = null
 		if _focus_unit == vu:
@@ -1224,10 +1229,11 @@ func _feedback_from_attack(
 		popup_cell = from_kb if from_kb.x >= 0 else target.cell
 	_board_view.play_damage_popup(popup_cell, dmg)
 	_board_view.play_unit_hit(target)
+	var killed_now: Array = []
 	if res.get("killed", false):
 		_purge_dead_unit_cards(target)
 		_board_view.play_unit_death(target)
-		_play_kill_impact(target)
+		killed_now.append(target)
 		if _selected_unit == target:
 			_selected_unit = null
 		if _focus_unit == target:
@@ -1242,7 +1248,7 @@ func _feedback_from_attack(
 		if res.get("collision_killed", false):
 			_purge_dead_unit_cards(col)
 			_board_view.play_unit_death(col)
-			_play_kill_impact(col)
+			killed_now.append(col)
 			if _selected_unit == col:
 				_selected_unit = null
 			if _focus_unit == col:
@@ -1263,12 +1269,14 @@ func _feedback_from_attack(
 		if bool((hit as Dictionary).get("killed", false)):
 			_purge_dead_unit_cards(vu)
 			_board_view.play_unit_death(vu)
-			_play_kill_impact(vu)
+			killed_now.append(vu)
 			if _selected_unit == vu:
 				_selected_unit = null
 			if _focus_unit == vu:
 				_focus_unit = null
 				_pending_kind = PendingKind.NONE
+	# 同次结算多死：伤害可分拍，击杀红带+剪影一次同闪（各锚死亡位）。
+	_play_kill_impacts(killed_now)
 	# 击退成功：refresh 触发从旧格到新格的位移 Tween（可见推开，禁止瞬移）。
 	if res.get("knockback_moved", false) and target != null and target.is_alive():
 		_refresh_all()
@@ -1307,16 +1315,42 @@ func _unit_kill_silhouette_anchor_local(unit: TacticalUnitInstance) -> Vector2:
 
 
 func _play_kill_impact(unit: TacticalUnitInstance = null) -> void:
+	var units: Array = []
+	if unit != null:
+		units.append(unit)
+	_play_kill_impacts(units)
+
+
+## 同批死亡：一条红带冲击 + 每名死者一枚剪影（各锚死亡位）。
+func _play_kill_impacts(units: Array) -> void:
 	if _game_over or _kill_impact == null:
 		return
-	if _kill_impact.has_method("play"):
+	var entries: Array = []
+	for u_v in units:
+		var unit: TacticalUnitInstance = u_v as TacticalUnitInstance
+		if unit == null:
+			continue
 		var tex := _unit_kill_silhouette_tex(unit)
+		entries.append(
+			{
+				"tex": tex,
+				"screen_size": _unit_kill_silhouette_screen_size(unit, tex),
+				"anchor_local": _unit_kill_silhouette_anchor_local(unit),
+			}
+		)
+	if entries.is_empty():
+		return
+	if entries.size() == 1 and _kill_impact.has_method("play"):
+		var e: Dictionary = entries[0] as Dictionary
 		_kill_impact.call(
 			"play",
-			tex,
-			_unit_kill_silhouette_screen_size(unit, tex),
-			_unit_kill_silhouette_anchor_local(unit)
+			e.get("tex") as Texture2D,
+			e.get("screen_size", Vector2.ZERO) as Vector2,
+			e.get("anchor_local", Vector2.INF) as Vector2
 		)
+		return
+	if _kill_impact.has_method("play_many"):
+		_kill_impact.call("play_many", entries)
 
 
 ## GUI 截图：强制播一次击杀冲击（默认红狼骑剪影；可传贴图与死亡位锚点单位）。
@@ -1340,6 +1374,14 @@ func capture_play_kill_impact(
 	var anchor := _unit_kill_silhouette_anchor_local(anchor_unit)
 	if _kill_impact.has_method("play"):
 		_kill_impact.call("play", tex, screen_sz, anchor)
+	return _kill_impact.visible
+
+
+## GUI 截图：多死者同闪（各锚死亡位）。
+func capture_play_kill_impacts(anchor_units: Array) -> bool:
+	if _kill_impact == null or anchor_units.is_empty():
+		return false
+	_play_kill_impacts(anchor_units)
 	return _kill_impact.visible
 
 
@@ -1396,7 +1438,7 @@ func _on_deploy_cell_clicked(cell: Vector2i) -> void:
 
 ## 手牌打完后自动结束行动。须在鸣鼓换手抽牌、盾卫友方死亡抽牌等补牌结算之后调用；
 ## 攻/隐身/冲撞/恢复药水瞄准未完成时不触发（卡已离手但仍待点目标）。
-## 先锁输入再 deferred 启动，避免同步结算路径丢弃 async、或间隙里重入把钟多拨一次。
+## 先锁输入再 deferred 启动；进对手段前等技能提示/飘字/反应/击杀剪影等播完。
 func _maybe_auto_end_player_turn_if_hand_empty() -> void:
 	if not _should_auto_end_player_action():
 		return
@@ -1404,7 +1446,12 @@ func _maybe_auto_end_player_turn_if_hand_empty() -> void:
 	_input_locked = true
 	_refresh_action_buttons()
 	_refresh_all()
-	call_deferred("_end_player_action_async")
+	call_deferred("_auto_end_player_action_after_fx_async")
+
+
+func _auto_end_player_action_after_fx_async() -> void:
+	await _await_presentation_idle_async()
+	await _end_player_action_async()
 
 
 func _should_auto_end_player_action() -> bool:
@@ -1422,6 +1469,27 @@ func _should_auto_end_player_action() -> bool:
 	):
 		return false
 	return true
+
+
+## 技能串行、飘字队列、被动抖动/位移、击杀红带剪影是否仍在播。
+func _is_presentation_busy() -> bool:
+	if _skill_fx_playing:
+		return true
+	if _kill_impact != null and _kill_impact.has_method("is_flashing"):
+		if bool(_kill_impact.call("is_flashing")):
+			return true
+	if _board_view != null and _board_view.has_method("is_combat_presentation_busy"):
+		if bool(_board_view.call("is_combat_presentation_busy")):
+			return true
+	return false
+
+
+## 等到战斗表现空闲再继续（自动结束进对手段用）；带上限避免死等。
+func _await_presentation_idle_async() -> void:
+	var guard := 0
+	while _is_presentation_busy() and guard < 240:
+		await get_tree().create_timer(0.05, true, false, true).timeout
+		guard += 1
 
 
 func _heal_potion_aim_cells(caster: TacticalUnitInstance) -> Array[Vector2i]:
@@ -1470,6 +1538,13 @@ func _end_player_action_async() -> void:
 	# 先锁输入，避免弃牌/refresh 重入再次 end_turn 把钟拨回玩家。
 	_input_locked = true
 	_refresh_action_buttons()
+	# 进对手段前再等一拍表现（按钮结束也可能踩在飘字/剪影尾巴上）。
+	await _await_presentation_idle_async()
+	if _game_over or not _clock.player_active:
+		_ending_player_action = false
+		_input_locked = false
+		_refresh_all()
+		return
 	_deck.end_player_turn()
 	_pending_kind = PendingKind.NONE
 	_focus_unit = null
@@ -1791,13 +1866,17 @@ func _play_passive_fx(fx_list: Array) -> void:
 	_play_skill_fx_async(fx_list)
 
 
-## 被动/猎召等：按事件队列串行（动画+飘字），相邻间隔 SKILL_PLAY_INTERVAL_SEC。
+## 被动/猎召等：技能名/抖动播完后，按 sync 批处理效果（同类同步弹、不同类按序）。
 func _play_skill_fx_async(fx_list: Array) -> void:
 	if _board_view == null or fx_list.is_empty():
 		return
+	_skill_fx_playing = true
 	var started := false
-	for ev in fx_list:
+	var i := 0
+	while i < fx_list.size():
+		var ev: Variant = fx_list[i]
 		if not (ev is Dictionary):
+			i += 1
 			continue
 		var d: Dictionary = ev as Dictionary
 		var kind := str(d.get("kind", ""))
@@ -1806,24 +1885,79 @@ func _play_skill_fx_async(fx_list: Array) -> void:
 				await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 			started = true
 			await _play_reaction_attack_async(d)
+			i += 1
 			continue
-		var cell: Vector2i = d.get("cell", Vector2i(-999, -999)) as Vector2i
-		var text := str(d.get("text", ""))
-		if text.is_empty() or cell.x <= -900:
+		if kind == "skill_prompt":
+			if started:
+				await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
+			started = true
+			await _play_skill_prompt_async(d)
+			i += 1
+			continue
+		# 数值/效果：连续同 sync 键一并弹出（如全体 +攻 再全体 +血）。
+		var batch: Array = []
+		var sync := str(d.get("sync", ""))
+		if sync.is_empty():
+			batch.append(d)
+			i += 1
+		else:
+			while i < fx_list.size():
+				var nxt: Variant = fx_list[i]
+				if not (nxt is Dictionary):
+					break
+				var nd: Dictionary = nxt as Dictionary
+				var nkind := str(nd.get("kind", ""))
+				if nkind == "reaction_attack" or nkind == "skill_prompt":
+					break
+				if str(nd.get("sync", "")) != sync:
+					break
+				batch.append(nd)
+				i += 1
+		var playable: Array = []
+		for b_v in batch:
+			var b: Dictionary = b_v as Dictionary
+			var cell: Vector2i = b.get("cell", Vector2i(-999, -999)) as Vector2i
+			var text := str(b.get("text", ""))
+			if text.is_empty() or cell.x <= -900:
+				continue
+			playable.append(b)
+		if playable.is_empty():
 			continue
 		if started:
 			await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 		started = true
-		var color: Color = d.get("color", Color("ffe08a")) as Color
-		_board_view.play_passive_float_text(cell, text, color)
-		if _board == null:
-			continue
-		var unit := _board.unit_at(cell)
-		if unit != null and unit.is_alive():
-			_board_view.play_passive_trigger(unit)
+		for b_v in playable:
+			var b: Dictionary = b_v as Dictionary
+			var cell: Vector2i = b.get("cell", Vector2i(-999, -999)) as Vector2i
+			var text := str(b.get("text", ""))
+			var color: Color = b.get("color", Color("ffe08a")) as Color
+			_board_view.play_passive_float_text(cell, text, color)
+	_skill_fx_playing = false
 
 
-## 猎召等反应攻击：先播触发飘字/晃动，再冲刺与命中反馈（不含再入队的 passive_fx）。
+## 被动短能力名：飘字 + 单位抖动，等抖动结束再让后续效果入队。
+func _play_skill_prompt_async(ev: Dictionary) -> void:
+	if _board_view == null:
+		return
+	var cell: Vector2i = ev.get("cell", Vector2i(-999, -999)) as Vector2i
+	var text := str(ev.get("text", ""))
+	if text.is_empty() or cell.x <= -900:
+		return
+	var color: Color = ev.get("color", Color("f5f5f5")) as Color
+	_board_view.play_passive_float_text(cell, text, color)
+	var unit: TacticalUnitInstance = null
+	if _board != null:
+		unit = _board.unit_at(cell)
+	var tw: Tween = null
+	if unit != null and unit.is_alive():
+		tw = _board_view.play_passive_trigger(unit)
+	if tw != null:
+		await tw.finished
+	else:
+		await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
+
+
+## 猎召等反应攻击：先播技能名/抖动，再冲刺与命中伤害飘字（不含再入队的 passive_fx）。
 func _play_reaction_attack_async(ev: Dictionary) -> void:
 	if _board_view == null:
 		return
@@ -1835,8 +1969,13 @@ func _play_reaction_attack_async(ev: Dictionary) -> void:
 	if attacker != null and tag != "":
 		var tag_cell: Vector2i = ev.get("cell", attacker.cell) as Vector2i
 		_board_view.play_passive_float_text(tag_cell, tag, color)
+		var shake_tw: Tween = null
 		if attacker.is_alive():
-			_board_view.play_passive_trigger(attacker)
+			shake_tw = _board_view.play_passive_trigger(attacker)
+		if shake_tw != null:
+			await shake_tw.finished
+		else:
+			await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 	if attacker != null and attacker.is_alive() and target_cell.x >= 0:
 		var tw := _board_view.play_unit_attack(attacker, target_cell)
 		if tw != null:

@@ -117,10 +117,27 @@ static func process_player_attack_card_played(
 	return logs
 
 
-static func _emit_fx(fx_out: Variant, cell: Vector2i, text: String, color: Color) -> void:
+static func _emit_fx(
+	fx_out: Variant,
+	cell: Vector2i,
+	text: String,
+	color: Color,
+	kind: String = "",
+	sync: String = ""
+) -> void:
 	if text.is_empty() or not (fx_out is Array):
 		return
-	(fx_out as Array).append({"cell": cell, "text": text, "color": color})
+	var ev := {"cell": cell, "text": text, "color": color}
+	if not kind.is_empty():
+		ev["kind"] = kind
+	if not sync.is_empty():
+		ev["sync"] = sync
+	(fx_out as Array).append(ev)
+
+
+## 触发者短能力名提示（先于数值/伤害效果入队）。
+static func _emit_skill_prompt(fx_out: Variant, cell: Vector2i, text: String) -> void:
+	_emit_fx(fx_out, cell, text, Color("f5f5f5"), "skill_prompt")
 
 
 static func _try_trigger(
@@ -233,23 +250,26 @@ static func _apply_ally_heal_on_hurt(
 	if radius < 0:
 		radius = 1
 	var allies := board.allies_in_radius(unit.cell, unit.faction, radius, unit.cell)
-	var healed := 0
+	var gains: Array = []
 	for ally in allies:
 		if ally == unit:
 			continue
-		var gained := ally.apply_heal(amount)
+		var gained: int = (ally as TacticalUnitInstance).apply_heal(amount)
 		if gained <= 0:
 			continue
-		healed += 1
-		_emit_fx(fx_out, ally.cell, "+%d血" % gained, Color("7dff9a"))
-	if healed == 0:
+		gains.append({"ally": ally, "gained": gained})
+	if gains.is_empty():
 		return []
-	board.changed.emit()
 	var tag := ab.display_name if not ab.display_name.is_empty() else "共情"
-	# 触发者本体短标签，供单位晃动/弹出对齐（数值仍在受益友方格；非金色）。
-	_emit_fx(fx_out, unit.cell, tag, Color("f5f5f5"))
+	# 先入队触发短能力名，再同步排队受益加血飘字。
+	_emit_skill_prompt(fx_out, unit.cell, tag)
+	for g in gains:
+		var a: TacticalUnitInstance = (g as Dictionary).get("ally") as TacticalUnitInstance
+		var amt: int = int((g as Dictionary).get("gained", 0))
+		_emit_fx(fx_out, a.cell, "+%d血" % amt, Color("7dff9a"), "", "buff_hp")
+	board.changed.emit()
 	return [
-		"%s %s：%d 名周围友方恢复 %d 血" % [unit.def.display_name, tag, healed, amount],
+		"%s %s：%d 名周围友方恢复 %d 血" % [unit.def.display_name, tag, gains.size(), amount],
 	]
 
 
@@ -443,26 +463,38 @@ static func _apply_ally_buff(
 	var allies := board.allies_in_radius(
 		unit.cell, unit.faction, ab.ally_buff_radius, Vector2i(-999, -999)
 	)
-	var buffed := 0
+	var buff_targets: Array = []
 	for ally in allies:
 		if ally == unit:
 			continue
+		buff_targets.append(ally)
+	if buff_targets.is_empty():
+		return []
+	var label := ab.display_name if not ab.display_name.is_empty() else tag
+	# 先入队触发短能力名；再全体同步加攻，再全体同步加血（同类同步、不同类按序）。
+	_emit_skill_prompt(fx_out, unit.cell, label)
+	var buffed := 0
+	for ally_v in buff_targets:
+		var ally: TacticalUnitInstance = ally_v as TacticalUnitInstance
 		if ab.ally_atk_buff != 0:
 			ally.atk_bonus += ab.ally_atk_buff
 		if ab.ally_hp_buff != 0:
 			ally.max_hp_bonus += ab.ally_hp_buff
 			ally.hp += ab.ally_hp_buff
 		buffed += 1
-		# 每名受益友方：加攻/加血各一条飘字事件（同格由视图队列逐个弹）。
-		if ab.ally_atk_buff != 0:
-			_emit_fx(fx_out, ally.cell, "+%d攻" % ab.ally_atk_buff, Color("ffe08a"))
-		if ab.ally_hp_buff != 0:
-			_emit_fx(fx_out, ally.cell, "+%d血" % ab.ally_hp_buff, Color("7dff9a"))
-	if buffed == 0:
-		return []
+	if ab.ally_atk_buff != 0:
+		for ally_v in buff_targets:
+			var ally: TacticalUnitInstance = ally_v as TacticalUnitInstance
+			_emit_fx(
+				fx_out, ally.cell, "+%d攻" % ab.ally_atk_buff, Color("ffe08a"), "", "buff_atk"
+			)
+	if ab.ally_hp_buff != 0:
+		for ally_v in buff_targets:
+			var ally: TacticalUnitInstance = ally_v as TacticalUnitInstance
+			_emit_fx(
+				fx_out, ally.cell, "+%d血" % ab.ally_hp_buff, Color("7dff9a"), "", "buff_hp"
+			)
 	board.changed.emit()
-	var label := ab.display_name if not ab.display_name.is_empty() else tag
-	_emit_fx(fx_out, unit.cell, label, Color("f5f5f5"))
 	var parts: PackedStringArray = []
 	if ab.ally_atk_buff != 0:
 		parts.append("攻击+%d" % ab.ally_atk_buff)
