@@ -27,6 +27,8 @@ enum TriggerKind {
 @export var trigger_kind: TriggerKind = TriggerKind.ON_SELF_HURT
 @export var range_chebyshev: int = 1
 @export var self_atk_on_trigger: int = 0
+## 触发时自身生命上限 +N，并恢复等量当前 HP（本场）。
+@export var self_hp_on_trigger: int = 0
 @export var self_atk_on_kill: int = 0
 @export var ally_atk_buff: int = 0
 @export var ally_hp_buff: int = 0
