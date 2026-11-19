@@ -101,6 +101,7 @@ static func process_enemy_death(
 
 
 ## 玩家一张攻击瞄准卡选定有效目标并成功结算后：扫描存活己方单位的 ON_PLAYER_ATTACK_CARD 被动。
+## 沙盘须先播完本次攻击效果（冲刺/命中/击退/猎召等），再调用本函数结算加成。
 ## 授权未出手、取消瞄准、无效/回手不触发。
 static func process_player_attack_card_played(
 	board: TacticalBoard, fx_out: Variant = null
