@@ -83,7 +83,8 @@ static func process_ally_death(
 	return logs
 
 
-## 玩家打出一张攻击瞄准卡后：扫描存活己方单位的 ON_PLAYER_ATTACK_CARD 被动。
+## 玩家一张攻击瞄准卡选定有效目标并成功结算后：扫描存活己方单位的 ON_PLAYER_ATTACK_CARD 被动。
+## 授权未出手、取消瞄准、无效/回手不触发。
 static func process_player_attack_card_played(
 	board: TacticalBoard, fx_out: Variant = null
 ) -> Array[String]:

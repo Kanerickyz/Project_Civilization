@@ -10,7 +10,7 @@ enum TriggerKind {
 	ON_SELF_KILL,
 	ON_SELF_MOVE_END,
 	ON_SELF_DEATH,
-	## 玩家打出一张攻击瞄准卡（普攻/加强/燃爆）时，由存活己方单位触发。
+	## 玩家攻击瞄准卡选定有效目标并成功结算后（普攻/加强/燃爆/万箭），由存活己方单位触发。
 	ON_PLAYER_ATTACK_CARD,
 	## 同阵营其他单位阵亡时，由仍存活的友方触发。
 	ON_ALLY_DEATH,

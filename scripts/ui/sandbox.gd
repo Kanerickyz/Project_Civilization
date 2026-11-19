@@ -913,7 +913,7 @@ func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitIns
 			_last_log = "万箭齐发：%s · 目标及攻击方向左右两格 · 点红圈内单位" % target.def.display_name
 		else:
 			_last_log = "攻击者：%s · 点红圈内单位（含友方；本卡一次）" % target.def.display_name
-		_append_attack_card_passive_logs()
+		# 鼓手等 ON_PLAYER_ATTACK_CARD：须等选定有效目标并成功结算后再触发（授权/取消/无效不触发）。
 	else:
 		_last_log = "未知卡类型"
 		_pending_kind = PendingKind.NONE
@@ -1189,6 +1189,8 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		return
 	# 成功后消耗队首授权（玩家无 attacked_this_side_turn 预算）。
 	_deck.consume_attack_authorization(attacker)
+	# 攻击卡真正打出（有效目标 + 结算成功）后触发鼓手等被动。
+	_append_attack_card_passive_logs()
 	var tw := _board_view.play_unit_attack(attacker, target_cell)
 	if tw != null:
 		await tw.finished
@@ -1764,7 +1766,7 @@ func capture_play_charge_toward(dir_cell: Vector2i) -> bool:
 	return true
 
 
-## 鼓手等：打出攻击牌时的触发被动日志拼到 _last_log，并播飘字。
+## 鼓手等：攻击卡成功结算后的触发被动日志拼到 _last_log，并播飘字。
 func _append_attack_card_passive_logs() -> void:
 	var fx: Array = []
 	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(_board, fx)
