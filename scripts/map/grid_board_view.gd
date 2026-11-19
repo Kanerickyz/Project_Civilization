@@ -559,6 +559,12 @@ const PASSIVE_TRIGGER_SHAKE_FRAC := 0.07
 const PASSIVE_TRIGGER_SCALE := 1.22
 const PASSIVE_POPUP_FONT_SIZE := 32
 const PASSIVE_POPUP_LIFT_PX := 64.0
+## 同格飘字串行：相邻两条（伤害/加攻/加血等）开始弹出间隔。
+const FLOAT_QUEUE_INTERVAL_SEC := 0.4
+## cell_key -> Array[Dictionary] 待播飘字；同格不并行叠。
+var _float_queues: Dictionary = {}
+## cell_key -> true 时该格正在播或等待间隔，禁止立刻弹出下一条。
+var _float_queue_busy: Dictionary = {}
 
 
 func unit_move_duration_sec() -> float:
@@ -709,65 +715,113 @@ func play_damage_popup(cell: Vector2i, amount: int) -> void:
 	play_float_text(cell, "-%d" % maxi(0, amount), Color("ff5533"))
 
 
-## stack_index：同格多条飘字时错开，避免完全叠死。
+## 伤害等通用飘字：入同格串行队列（间隔 FLOAT_QUEUE_INTERVAL_SEC）。
+## stack_index 保留兼容，已忽略（同格不再并行错开叠字）。
 func play_float_text(
-	cell: Vector2i, text: String, color: Color = Color("ff5533"), stack_index: int = 0
+	cell: Vector2i, text: String, color: Color = Color("ff5533"), _stack_index: int = 0
 ) -> void:
-	_spawn_float_label(
-		cell,
-		text,
-		color,
-		stack_index,
-		DAMAGE_POPUP_FONT_SIZE,
-		DAMAGE_POPUP_LIFT_PX,
-		Vector2(0.55, 0.55),
-		Vector2(1.12, 1.12),
-		0.14,
-		0.55,
-		0.38,
-		0.2,
-		5
+	_enqueue_float_label(
+		{
+			"cell": cell,
+			"text": text,
+			"color": color,
+			"font_size": DAMAGE_POPUP_FONT_SIZE,
+			"lift_px": DAMAGE_POPUP_LIFT_PX,
+			"start_scale": Vector2(0.55, 0.55),
+			"peak_scale": Vector2(1.12, 1.12),
+			"pop_sec": 0.14,
+			"lift_sec": 0.55,
+			"fade_sec": 0.38,
+			"fade_delay": 0.2,
+			"outline_size": 5,
+		}
 	)
 
 
-## 被动数值/能力名飘字：更强 BACK 弹出，贴近小丑牌触发字效。
+## 被动数值/能力名飘字：更强 BACK 弹出；与伤害共用同格队列。
 func play_passive_float_text(
-	cell: Vector2i, text: String, color: Color = Color("ffe08a"), stack_index: int = 0
+	cell: Vector2i, text: String, color: Color = Color("ffe08a"), _stack_index: int = 0
 ) -> void:
-	_spawn_float_label(
-		cell,
-		text,
-		color,
-		stack_index,
-		PASSIVE_POPUP_FONT_SIZE,
-		PASSIVE_POPUP_LIFT_PX,
-		Vector2(0.28, 0.28),
-		Vector2(1.32, 1.32),
-		0.18,
-		0.62,
-		0.42,
-		0.24,
-		6
+	_enqueue_float_label(
+		{
+			"cell": cell,
+			"text": text,
+			"color": color,
+			"font_size": PASSIVE_POPUP_FONT_SIZE,
+			"lift_px": PASSIVE_POPUP_LIFT_PX,
+			"start_scale": Vector2(0.28, 0.28),
+			"peak_scale": Vector2(1.32, 1.32),
+			"pop_sec": 0.18,
+			"lift_sec": 0.62,
+			"fade_sec": 0.42,
+			"fade_delay": 0.24,
+			"outline_size": 6,
+		}
 	)
 
 
-func _spawn_float_label(
-	cell: Vector2i,
-	text: String,
-	color: Color,
-	stack_index: int,
-	font_size: int,
-	lift_px: float,
-	start_scale: Vector2,
-	peak_scale: Vector2,
-	pop_sec: float,
-	lift_sec: float,
-	fade_sec: float,
-	fade_delay: float,
-	outline_size: int
-) -> void:
+func _float_cell_key(cell: Vector2i) -> String:
+	return "%d,%d" % [cell.x, cell.y]
+
+
+func _enqueue_float_label(item: Dictionary) -> void:
 	if config == null:
 		return
+	var text := str(item.get("text", ""))
+	if text.is_empty():
+		return
+	var cell: Vector2i = item.get("cell", Vector2i(-999, -999)) as Vector2i
+	var key := _float_cell_key(cell)
+	if not _float_queues.has(key):
+		_float_queues[key] = []
+	(_float_queues[key] as Array).append(item)
+	_pump_float_queue(cell)
+
+
+func _pump_float_queue(cell: Vector2i) -> void:
+	var key := _float_cell_key(cell)
+	if bool(_float_queue_busy.get(key, false)):
+		return
+	if not _float_queues.has(key):
+		return
+	var q: Array = _float_queues[key] as Array
+	if q.is_empty():
+		_float_queues.erase(key)
+		return
+	_float_queue_busy[key] = true
+	var item: Dictionary = q.pop_front() as Dictionary
+	if q.is_empty():
+		_float_queues.erase(key)
+	_spawn_float_label(item)
+	# 相邻两条间隔 0.4s（从本条开始算起），再播下一条。
+	var tree := get_tree()
+	if tree == null:
+		_float_queue_busy.erase(key)
+		return
+	tree.create_timer(FLOAT_QUEUE_INTERVAL_SEC, true, false, true).timeout.connect(
+		func() -> void:
+			_float_queue_busy.erase(key)
+			_pump_float_queue(cell)
+	)
+
+
+func _spawn_float_label(item: Dictionary) -> void:
+	if config == null or _labels_root == null:
+		return
+	var cell: Vector2i = item.get("cell", Vector2i(-999, -999)) as Vector2i
+	var text := str(item.get("text", ""))
+	if text.is_empty():
+		return
+	var color: Color = item.get("color", Color("ff5533")) as Color
+	var font_size := int(item.get("font_size", DAMAGE_POPUP_FONT_SIZE))
+	var lift_px := float(item.get("lift_px", DAMAGE_POPUP_LIFT_PX))
+	var start_scale: Vector2 = item.get("start_scale", Vector2(0.55, 0.55)) as Vector2
+	var peak_scale: Vector2 = item.get("peak_scale", Vector2(1.12, 1.12)) as Vector2
+	var pop_sec := float(item.get("pop_sec", 0.14))
+	var lift_sec := float(item.get("lift_sec", 0.55))
+	var fade_sec := float(item.get("fade_sec", 0.38))
+	var fade_delay := float(item.get("fade_delay", 0.2))
+	var outline_size := int(item.get("outline_size", 5))
 	# 与常驻 HP 读数同一套世界坐标（格心投影 + 头顶偏移），勿再抬 3D Y / 混像素。
 	var world := _cell_to_world(cell, config.cell_size)
 	var head := Vector2(0.0, -config.unit_world_height * 1.35)
@@ -787,7 +841,7 @@ func _spawn_float_label(
 	lbl.pivot_offset = lbl.size * 0.5
 	_position_world_on_label(lbl, world + head)
 	_clamp_label_in_viewport(lbl)
-	var start_pos := lbl.position + Vector2(14.0 * float(stack_index), -16.0 * float(stack_index))
+	var start_pos := lbl.position
 	lbl.position = start_pos
 	var tw := create_tween()
 	tw.set_parallel(true)
