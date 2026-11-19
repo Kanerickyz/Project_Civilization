@@ -33,6 +33,8 @@ enum TriggerKind {
 @export var ally_heal_on_trigger: int = 0
 ## 击杀时往玩家手牌加 1 张临时攻击卡（仅玩家击杀生效）。
 @export var grant_ephemeral_attack_on_kill: bool = false
+## 击杀时：周围友方各尝试攻击一次（各用自身攻距/攻；无合法敌则跳过）。
+@export var ally_attack_on_kill: bool = false
 ## 玩家打出攻击牌时从牌库抽 N 张（需 board.player_deck）。
 @export var draw_cards_on_trigger: int = 0
 ## 触发时对中心格及周围（切比雪夫 ≤ aoe_burn_radius）存活单位施加燃烧层数。

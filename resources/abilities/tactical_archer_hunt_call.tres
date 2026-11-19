@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="TacticalActiveAbility" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/units/tactical_active_ability.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+id = "hunt_call"
+display_name = "猎召"
+autochess_ability_id = "kill_ally_attack"
+rules_hint = "击杀敌方时：周围 1 格友方各尝试攻击一次；有敌在其攻击范围内则打最近敌人（同距取低 HP），否则跳过。"
+trigger_kind = 3
+range_chebyshev = 1
+self_atk_on_trigger = 0
+self_atk_on_kill = 0
+ally_atk_buff = 0
+ally_hp_buff = 0
+ally_buff_radius = 1
+ally_heal_on_trigger = 0
+grant_ephemeral_attack_on_kill = false
+draw_cards_on_trigger = 0
+ally_attack_on_kill = true

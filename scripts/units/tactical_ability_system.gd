@@ -3,6 +3,7 @@ extends RefCounted
 
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 
 ## 时机触发战术能力；不替代 TurnClock.end_turn，无玩家点按释放。
 ## 可选 fx_out：追加 Dictionary 飘字事件 {cell, text, color}，供沙盘可见反馈。
@@ -240,6 +241,8 @@ static func _apply_kill_effects(
 	logs.append_array(_apply_self_atk(board, killer, ab.self_atk_on_kill, "猎杀", fx_out))
 	if ab.grant_ephemeral_attack_on_kill:
 		logs.append_array(_grant_ephemeral_attack(board, killer, fx_out))
+	if ab.ally_attack_on_kill:
+		logs.append_array(_apply_ally_attack_on_kill(board, killer, ab, fx_out))
 	return logs
 
 
@@ -253,6 +256,82 @@ static func _grant_ephemeral_attack(
 	board.player_deck.add_ephemeral_attack_to_hand()
 	_emit_fx(fx_out, killer.cell, "+1临攻", Color("7ec8ff"))
 	return ["%s 猎获：手牌+1 临时攻击卡（用完销毁）" % killer.def.display_name]
+
+
+## 击杀被动：周围友方各尝试普攻一次；无合法敌则跳过；用友军自身攻距/攻。
+static func _apply_ally_attack_on_kill(
+	board: TacticalBoard,
+	killer: TacticalUnitInstance,
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
+) -> Array[String]:
+	if board == null or killer == null or not killer.is_alive():
+		return []
+	var radius := ab.ally_buff_radius if ab.ally_buff_radius > 0 else ab.range_chebyshev
+	if radius < 0:
+		radius = 1
+	var allies := board.allies_in_radius(killer.cell, killer.faction, radius, killer.cell)
+	var tag := ab.display_name if not ab.display_name.is_empty() else "猎召"
+	var fired := 0
+	var hit_logs: PackedStringArray = []
+	for ally in allies:
+		if ally == null or ally == killer or not ally.is_alive():
+			continue
+		if ally.effective_attack() <= 0:
+			continue
+		var cells: Array[Vector2i] = TacticalCombatScript.attackable_cells(board, ally, false)
+		if cells.is_empty():
+			continue
+		var target_cell := _pick_nearest_enemy_cell(board, ally, cells)
+		if target_cell.x < -900:
+			continue
+		var atk: Dictionary = TacticalCombatScript.try_basic_attack(
+			board, ally, target_cell, ally.faction, false
+		)
+		if not bool(atk.get("ok", false)):
+			continue
+		fired += 1
+		_emit_fx(fx_out, ally.cell, tag, Color("ffe08a"))
+		# 嵌套伤害/击杀被动飘字并入本次击杀反馈。
+		var nested_fx: Array = atk.get("passive_fx", []) as Array
+		if fx_out is Array and not nested_fx.is_empty():
+			(fx_out as Array).append_array(nested_fx)
+		var victim: TacticalUnitInstance = atk.get("target") as TacticalUnitInstance
+		var vname := victim.def.display_name if victim != null and victim.def != null else "?"
+		hit_logs.append(
+			"%s→%s %d%s"
+			% [
+				ally.def.display_name,
+				vname,
+				int(atk.get("damage", 0)),
+				"（击杀）" if bool(atk.get("killed", false)) else "",
+			]
+		)
+	if fired == 0:
+		return []
+	board.changed.emit()
+	return [
+		"%s %s：%d 名周围友方出击（%s）"
+		% [killer.def.display_name, tag, fired, "、".join(hit_logs)],
+	]
+
+
+static func _pick_nearest_enemy_cell(
+	board: TacticalBoard, attacker: TacticalUnitInstance, cells: Array[Vector2i]
+) -> Vector2i:
+	var best := Vector2i(-999, -999)
+	var best_dist := 999999
+	var best_hp := 999999
+	for c in cells:
+		var t := board.unit_at(c)
+		if t == null or not t.is_alive() or t.faction == attacker.faction:
+			continue
+		var d := GridMathScript.chebyshev(attacker.cell, c)
+		if d < best_dist or (d == best_dist and t.hp < best_hp):
+			best_dist = d
+			best_hp = t.hp
+			best = c
+	return best
 
 
 static func _apply_ally_buff(
