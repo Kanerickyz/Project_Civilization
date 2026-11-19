@@ -504,14 +504,17 @@ func _test_wardrum_attack_card_buff() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var drum := _player_unit(board, "wardrum")
 	var archer := _player_unit(board, "archer")
-	if drum == null or archer == null:
+	var knight := _player_unit(board, "knight")
+	if drum == null or archer == null or knight == null:
 		return false
 	drum.cell = Vector2i(2, 2)
 	archer.cell = Vector2i(3, 2)
+	knight.cell = Vector2i(1, 2)
 	var before_atk := archer.atk_bonus
 	var before_max := archer.effective_max_hp()
 	var before_hp := archer.hp
-	# 移动结束不再鼓阵。
+	var knight_before_atk := knight.atk_bonus
+	# 移动结束不再鼓阵（落到空邻格，勿占友方格）。
 	if not board.try_move(drum, Vector2i(2, 3)):
 		push_error("TacticalUnits: wardrum move setup failed")
 		return false
@@ -520,6 +523,7 @@ func _test_wardrum_attack_card_buff() -> bool:
 		return false
 	drum.cell = Vector2i(2, 2)
 	archer.cell = Vector2i(3, 2)
+	knight.cell = Vector2i(2, 3)
 	var fx: Array = []
 	var logs := TacticalAbilitySystemScript.process_player_attack_card_played(board, fx)
 	if logs.is_empty():
@@ -531,15 +535,59 @@ func _test_wardrum_attack_card_buff() -> bool:
 	if archer.effective_max_hp() != before_max + 1 or archer.hp != before_hp + 1:
 		push_error("TacticalUnits: wardrum attack card should +1 hp nearby")
 		return false
+	if knight.atk_bonus != knight_before_atk + 1:
+		push_error("TacticalUnits: wardrum should buff both nearby allies")
+		return false
 	var fx_texts: PackedStringArray = []
-	for ev in fx:
-		if ev is Dictionary:
-			fx_texts.append(str((ev as Dictionary).get("text", "")))
+	var prompt_idx := -1
+	var first_atk := -1
+	var last_atk := -1
+	var first_hp := -1
+	var atk_sync := 0
+	var hp_sync := 0
+	for i in fx.size():
+		var ev: Variant = fx[i]
+		if not (ev is Dictionary):
+			continue
+		var d: Dictionary = ev as Dictionary
+		var text := str(d.get("text", ""))
+		fx_texts.append(text)
+		if str(d.get("kind", "")) == "skill_prompt" and text == "战鼓同频":
+			prompt_idx = i
+		elif text == "+1攻":
+			if first_atk < 0:
+				first_atk = i
+			last_atk = i
+			if str(d.get("sync", "")) == "buff_atk":
+				atk_sync += 1
+		elif text == "+1血":
+			if first_hp < 0:
+				first_hp = i
+			if str(d.get("sync", "")) == "buff_hp":
+				hp_sync += 1
 	if not ("+1攻" in fx_texts) or not ("+1血" in fx_texts):
 		push_error("TacticalUnits: wardrum passive should emit +1攻/+1血 fx, got %s" % [fx_texts])
 		return false
-	if not ("战鼓同频" in fx_texts):
-		push_error("TacticalUnits: wardrum passive should emit owner label 战鼓同频, got %s" % [fx_texts])
+	if prompt_idx < 0:
+		push_error(
+			"TacticalUnits: wardrum passive should emit skill_prompt 战鼓同频, got %s" % [fx]
+		)
+		return false
+	if prompt_idx > first_atk or prompt_idx > first_hp:
+		push_error(
+			"TacticalUnits: skill_prompt must precede effect floats, got order %s" % [fx_texts]
+		)
+		return false
+	# 全体加攻块在全体加血块之前；同类带 sync 键供沙盘同步弹。
+	if last_atk >= first_hp:
+		push_error(
+			"TacticalUnits: all +攻 must precede all +血, got order %s" % [fx_texts]
+		)
+		return false
+	if atk_sync < 2 or hp_sync < 2:
+		push_error(
+			"TacticalUnits: wardrum fx need sync buff_atk/buff_hp for both allies, got %s" % [fx]
+		)
 		return false
 	# 半径 1：距离 2 不吃。
 	var pekka := _player_unit(board, "mini_pekka")
@@ -1246,16 +1294,28 @@ func _test_healer_sympathy_on_hurt() -> bool:
 		push_error("TacticalUnits: dist>1 ally must not heal from sympathy")
 		return false
 	var fx: Array = res.get("passive_fx", []) as Array
-	var saw_heal_fx := false
-	for ev in fx:
+	var prompt_idx := -1
+	var heal_idx := -1
+	for i in fx.size():
+		var ev: Variant = fx[i]
 		if not (ev is Dictionary):
 			continue
-		var text := str((ev as Dictionary).get("text", ""))
-		if text == "+1血":
-			saw_heal_fx = true
-			break
-	if not saw_heal_fx:
+		var d: Dictionary = ev as Dictionary
+		var text := str(d.get("text", ""))
+		if str(d.get("kind", "")) == "skill_prompt" and text == "共情":
+			prompt_idx = i
+		elif text == "+1血" and heal_idx < 0:
+			heal_idx = i
+	if heal_idx < 0:
 		push_error("TacticalUnits: sympathy should emit +1血 fx, got %s" % [fx])
+		return false
+	if prompt_idx < 0:
+		push_error("TacticalUnits: sympathy should emit skill_prompt 共情, got %s" % [fx])
+		return false
+	if prompt_idx > heal_idx:
+		push_error(
+			"TacticalUnits: sympathy skill_prompt must precede +1血, got %s" % [fx]
+		)
 		return false
 	# 满血友方不抬上限。
 	ally_near.hp = ally_near.effective_max_hp()

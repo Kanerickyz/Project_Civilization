@@ -805,6 +805,24 @@ func _pump_float_queue(cell: Vector2i) -> void:
 	)
 
 
+## 战斗表现是否仍在播：飘字队列/在飞标签、被动抖动、位移 Tween。
+func is_combat_presentation_busy() -> bool:
+	if not _float_queues.is_empty():
+		return true
+	for busy_v in _float_queue_busy.values():
+		if bool(busy_v):
+			return true
+	if _labels_root != null:
+		for child in _labels_root.get_children():
+			if child is Label:
+				return true
+	if not _unit_passive_tweens.is_empty():
+		return true
+	if not _unit_move_tweens.is_empty():
+		return true
+	return false
+
+
 func _spawn_float_label(item: Dictionary) -> void:
 	if config == null or _labels_root == null:
 		return

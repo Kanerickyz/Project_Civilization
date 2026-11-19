@@ -1,6 +1,6 @@
 extends Control
 ## 击杀全屏打击感：红斜横带 + 死亡位被击杀单位黑剪影，短暂闪现。
-## 纯 2D `_draw` / CanvasItem，无 Light2D/3D。
+## 同时多死：一条红带 + 多枚剪影（各锚死亡位）。纯 2D `_draw` / CanvasItem，无 Light2D/3D。
 
 const BAND_COLOR := Color(0.90, 0.06, 0.10, 1.0)
 const SILHOUETTE_COLOR := Color(0.02, 0.02, 0.03, 1.0)
@@ -17,11 +17,12 @@ const SILHOUETTE_BAND_FILL_FALLBACK := 0.28
 const PUNCH_START := 1.12
 
 var _tween: Tween
+## 兼容单剪影截图脚本：取 play / play_many 的首枚。
 var _silhouette_tex: Texture2D
-## 与棋盘单位屏幕尺寸对齐；为零则走横带回退。
 var _silhouette_screen_size: Vector2 = Vector2.ZERO
-## 剪影锚点（本 Control 局部坐标）；未设置时回退屏幕中心。
 var _anchor_local: Vector2 = Vector2.INF
+## 多剪影：[{tex, screen_size, anchor_local}, ...]
+var _silhouettes: Array = []
 var _punch: float = 1.0
 
 
@@ -37,19 +38,47 @@ func _ready() -> void:
 	resized.connect(queue_redraw)
 
 
-## 重播：瞬显 → 微冲缩放 → 短停 → 淡出。
-## silhouette_tex：被击杀单位精灵；screen_size 与棋盘单位屏幕尺寸一致；
-## anchor_local：死亡单位在本层局部坐标（INF 则居中回退）；缺省贴图时画抽象冲击核。
+## 单剪影重播（兼容旧调用）。
 func play(
 	silhouette_tex: Texture2D = null,
 	screen_size: Vector2 = Vector2.ZERO,
 	anchor_local: Vector2 = Vector2.INF
 ) -> void:
+	play_many(
+		[
+			{
+				"tex": silhouette_tex,
+				"screen_size": screen_size,
+				"anchor_local": anchor_local,
+			}
+		]
+	)
+
+
+## 多剪影同闪：一条红带，剪影各锚死亡位。
+func play_many(entries: Array) -> void:
 	if _tween != null and is_instance_valid(_tween):
 		_tween.kill()
-	_silhouette_tex = silhouette_tex
-	_silhouette_screen_size = screen_size
-	_anchor_local = anchor_local
+	_silhouettes.clear()
+	for ev in entries:
+		if not (ev is Dictionary):
+			continue
+		var d: Dictionary = ev as Dictionary
+		_silhouettes.append(
+			{
+				"tex": d.get("tex") as Texture2D,
+				"screen_size": d.get("screen_size", Vector2.ZERO) as Vector2,
+				"anchor_local": d.get("anchor_local", Vector2.INF) as Vector2,
+			}
+		)
+	if _silhouettes.is_empty():
+		_silhouettes.append(
+			{"tex": null, "screen_size": Vector2.ZERO, "anchor_local": Vector2.INF}
+		)
+	var first: Dictionary = _silhouettes[0] as Dictionary
+	_silhouette_tex = first.get("tex") as Texture2D
+	_silhouette_screen_size = first.get("screen_size", Vector2.ZERO) as Vector2
+	_anchor_local = first.get("anchor_local", Vector2.INF) as Vector2
 	visible = true
 	# 保持 Control.scale=1，冲击用 _punch，避免整层亚像素缩放造成锯齿/糊边。
 	scale = Vector2.ONE
@@ -72,11 +101,16 @@ func play(
 		_silhouette_tex = null
 		_silhouette_screen_size = Vector2.ZERO
 		_anchor_local = Vector2.INF
+		_silhouettes.clear()
 	)
 
 
 func is_flashing() -> bool:
 	return visible and modulate.a > 0.05
+
+
+func silhouette_count() -> int:
+	return _silhouettes.size()
 
 
 func _set_punch(value: float) -> void:
@@ -89,7 +123,7 @@ func _draw() -> void:
 	if sz.x < 8.0 or sz.y < 8.0:
 		return
 	_draw_red_band(sz)
-	_draw_impact_silhouette(sz)
+	_draw_impact_silhouettes(sz)
 
 
 func _draw_red_band(sz: Vector2) -> void:
@@ -152,40 +186,48 @@ func _jag_offset(i: int, salt: int) -> float:
 			return 0.4
 
 
-func _silhouette_center(sz: Vector2) -> Vector2:
-	# 优先死亡位锚点；不硬夹到屏缘（贴边单位仍对准标记，剪影可略越界）。
-	if is_finite(_anchor_local.x) and is_finite(_anchor_local.y):
-		return _anchor_local
-	return sz * 0.5
-
-
-func _draw_impact_silhouette(sz: Vector2) -> void:
-	var c := _silhouette_center(sz)
-	if _silhouette_tex != null:
-		_draw_unit_silhouette(c, sz)
+func _draw_impact_silhouettes(sz: Vector2) -> void:
+	if _silhouettes.is_empty():
+		_draw_fallback_burst(sz * 0.5, sz)
 		return
-	_draw_fallback_burst(c, sz)
+	for ev in _silhouettes:
+		var d: Dictionary = ev as Dictionary
+		var tex: Texture2D = d.get("tex") as Texture2D
+		var screen_size: Vector2 = d.get("screen_size", Vector2.ZERO) as Vector2
+		var anchor: Vector2 = d.get("anchor_local", Vector2.INF) as Vector2
+		var c := anchor if is_finite(anchor.x) and is_finite(anchor.y) else sz * 0.5
+		if tex != null:
+			_draw_unit_silhouette_at(c, sz, tex, screen_size)
+		else:
+			_draw_fallback_burst(c, sz)
 
 
 ## 用单位精灵乘纯黑 modulate：透明区仍透明，实体成黑剪影。
 ## 优先按棋盘单位屏幕尺寸绘制；像素对齐 + 最近邻，减少锯齿。
-func _draw_unit_silhouette(c: Vector2, sz: Vector2) -> void:
-	var tex_sz := _silhouette_tex.get_size()
+func _draw_unit_silhouette_at(
+	c: Vector2, sz: Vector2, tex: Texture2D, screen_size: Vector2
+) -> void:
+	var tex_sz := tex.get_size()
 	if tex_sz.x < 1.0 or tex_sz.y < 1.0:
 		_draw_fallback_burst(c, sz)
 		return
-	var draw_sz := _resolve_silhouette_draw_size(tex_sz, sz)
+	var draw_sz := _resolve_silhouette_draw_size(tex_sz, sz, screen_size)
 	# 整像素对齐：位置与尺寸都取整，避免半像素采样起毛。
 	draw_sz = Vector2(maxf(1.0, roundf(draw_sz.x)), maxf(1.0, roundf(draw_sz.y)))
 	var origin := Vector2(roundf(c.x - draw_sz.x * 0.5), roundf(c.y - draw_sz.y * 0.5))
 	var rect := Rect2(origin, draw_sz)
-	draw_texture_rect(_silhouette_tex, rect, false, SILHOUETTE_COLOR)
+	draw_texture_rect(tex, rect, false, SILHOUETTE_COLOR)
 
 
-func _resolve_silhouette_draw_size(tex_sz: Vector2, sz: Vector2) -> Vector2:
+func _resolve_silhouette_draw_size(
+	tex_sz: Vector2, sz: Vector2, screen_size: Vector2 = Vector2.ZERO
+) -> Vector2:
 	var punch := maxf(_punch, 0.01)
-	if _silhouette_screen_size.x > 1.0 and _silhouette_screen_size.y > 1.0:
-		return _silhouette_screen_size * punch
+	var use_sz := screen_size
+	if use_sz.x <= 1.0 or use_sz.y <= 1.0:
+		use_sz = _silhouette_screen_size
+	if use_sz.x > 1.0 and use_sz.y > 1.0:
+		return use_sz * punch
 	# 无棋盘尺寸时回退：按横带高度较小占比，避免再次盖满红带。
 	var band_h := sz.y * BAND_HEIGHT_RATIO
 	var target_h := band_h * SILHOUETTE_BAND_FILL_FALLBACK * punch
