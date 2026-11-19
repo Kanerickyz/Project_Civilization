@@ -3,8 +3,8 @@ extends Resource
 ## 方格棋盘尺寸与镜头参数。正式数值放 resources/map/board_config.tres。
 
 
-@export var grid_width: int = 6
-@export var grid_height: int = 6
+@export var grid_width: int = 8
+@export var grid_height: int = 8
 @export var cell_size: float = 1.0
 @export var tile_height: float = 0.14
 @export var tile_inset: float = 0.98

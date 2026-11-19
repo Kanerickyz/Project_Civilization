@@ -5,6 +5,7 @@ const TacticalBoardScript := preload("res://scripts/units/tactical_board.gd")
 const TacticalUnitInstanceScript := preload("res://scripts/units/tactical_unit_instance.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const ClusterTerrainGeneratorScript := preload("res://scripts/map/cluster_terrain_generator.gd")
+const BoardEdgeShapeScript := preload("res://scripts/map/board_edge_shape.gd")
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 
 const PLAYER_UNIT_PATHS: Array[String] = [
@@ -52,6 +53,7 @@ static func build_board_for_config(config: BoardConfig, seed_value: int = -1) ->
 		config.grid_width, config.grid_height, seed_value
 	)
 	var map: MapData = gen["map"] as MapData
+	BoardEdgeShapeScript.apply_to_map(map)
 	board.set_terrain(map)
 	var rng := RandomNumberGenerator.new()
 	if seed_value >= 0:

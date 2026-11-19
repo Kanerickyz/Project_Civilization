@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="TerrainCatalog" load_steps=7 format=3]
+[gd_resource type="Resource" script_class="TerrainCatalog" load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/map/terrain_catalog.gd" id="1_tcat"]
 [ext_resource type="Script" path="res://scripts/map/terrain_type_def.gd" id="4_tdef"]
@@ -6,8 +6,9 @@
 [ext_resource type="Resource" path="res://resources/terrain/wall_straight.tres" id="3_wall"]
 [ext_resource type="Resource" path="res://resources/terrain/lake.tres" id="5_lake"]
 [ext_resource type="Resource" path="res://resources/terrain/forest.tres" id="6_forest"]
+[ext_resource type="Resource" path="res://resources/terrain/void_cell.tres" id="7_void"]
 
 [resource]
 script = ExtResource("1_tcat")
-types = Array[ExtResource("4_tdef")]([ExtResource("2_grass"), ExtResource("3_wall"), ExtResource("5_lake"), ExtResource("6_forest")])
+types = Array[ExtResource("4_tdef")]([ExtResource("2_grass"), ExtResource("3_wall"), ExtResource("5_lake"), ExtResource("6_forest"), ExtResource("7_void")])
 default_id = &"grass"

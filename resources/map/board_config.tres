@@ -5,8 +5,8 @@
 
 [resource]
 script = ExtResource("1_boardcfg")
-grid_width = 6
-grid_height = 6
+grid_width = 8
+grid_height = 8
 cell_size = 1.0
 tile_height = 0.14
 tile_inset = 0.98
@@ -16,7 +16,7 @@ color_dark = Color(0.164706, 0.203922, 0.25098, 1)
 camera_pitch_deg = 45.0
 camera_yaw_deg = 45.0
 camera_distance = 36.0
-camera_ortho_size = 5.4
+camera_ortho_size = 7.2
 camera_zoom_min = 0.35
 camera_zoom_max = 1.9
 camera_zoom_default = 1.0

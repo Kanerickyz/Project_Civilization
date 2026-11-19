@@ -247,6 +247,7 @@ func set_terrain_cells(cells: Dictionary) -> void:
 		if key is Vector2i:
 			_terrain_cells[key] = _normalize_terrain_id(cells[key])
 	for cell in _tile_nodes.keys():
+		_update_tile_geometry(cell)
 		_apply_tile_visual(cell)
 
 
@@ -635,7 +636,9 @@ func _view_cell_passable(cell: Vector2i) -> bool:
 		return false
 	if cell.x < 0 or cell.y < 0 or cell.x >= config.grid_width or cell.y >= config.grid_height:
 		return false
-	return _get_catalog().is_passable(terrain_id_at(cell))
+	var tid := terrain_id_at(cell)
+	var cat := _get_catalog()
+	return cat.is_present(tid) and cat.is_passable(tid)
 
 
 func _kill_unit_move_tween(unit: TacticalUnitInstance) -> void:
@@ -1502,7 +1505,23 @@ func _apply_tile_visual(cell: Vector2i) -> void:
 	var root: Node2D = _tile_nodes[cell] as Node2D
 	var terrain_id := terrain_id_at(cell)
 	var def := _get_catalog().get_def(terrain_id)
+	var present := _get_catalog().is_present(terrain_id)
+	root.visible = present
 	var grass: Polygon2D = root.get_node_or_null("Grass") as Polygon2D
+	if not present:
+		if grass != null:
+			grass.polygon = PackedVector2Array()
+		var ov_hide: Polygon2D = root.get_node_or_null("Overlay") as Polygon2D
+		if ov_hide != null:
+			ov_hide.visible = false
+			ov_hide.polygon = PackedVector2Array()
+		var wall_hide: Node2D = root.get_node_or_null("Wall") as Node2D
+		if wall_hide != null:
+			wall_hide.visible = false
+		var forest_hide: Node2D = root.get_node_or_null("Forest") as Node2D
+		if forest_hide != null:
+			forest_hide.visible = false
+		return
 	if grass != null:
 		grass.color = _grass_color_for_cell(cell, terrain_id)
 	var wall: Node2D = root.get_node_or_null("Wall") as Node2D
@@ -1540,6 +1559,9 @@ func _apply_overlay(cell: Vector2i) -> void:
 	if not _overlay_nodes.has(cell):
 		return
 	var ov: Polygon2D = _overlay_nodes[cell] as Polygon2D
+	if not _get_catalog().is_present(terrain_id_at(cell)):
+		ov.visible = false
+		return
 	var tag := ""
 	if cell == _overlay_selected:
 		tag = "s"
@@ -2130,9 +2152,16 @@ func _update_tile_geometry(cell: Vector2i) -> void:
 	if not _tile_nodes.has(cell):
 		return
 	var root: Node2D = _tile_nodes[cell] as Node2D
-	var half := config.cell_size * config.tile_inset * 0.5
 	var center_proj := _cell_to_world(cell, config.cell_size)
 	root.position = center_proj
+	if not _get_catalog().is_present(terrain_id_at(cell)):
+		var grass_void: Polygon2D = root.get_node("Grass") as Polygon2D
+		grass_void.polygon = PackedVector2Array()
+		var ov_void: Polygon2D = root.get_node("Overlay") as Polygon2D
+		ov_void.polygon = PackedVector2Array()
+		root.visible = false
+		return
+	var half := config.cell_size * config.tile_inset * 0.5
 	var top_corners := [
 		_cell_ground_corner(cell, -half, -half),
 		_cell_ground_corner(cell, half, -half),
@@ -2144,6 +2173,7 @@ func _update_tile_geometry(cell: Vector2i) -> void:
 	grass.polygon = poly
 	var ov: Polygon2D = root.get_node("Overlay") as Polygon2D
 	ov.polygon = poly
+	root.visible = true
 	root.z_as_relative = false
 	root.z_index = _draw_depth_for_cell(cell)
 	_update_wall_geometry(cell, 0.0)
@@ -2718,13 +2748,16 @@ func _pick_cell_at_world(world: Vector2) -> Variant:
 		return _world_to_cell(ground)
 	# 先用反投影猜一格，命中可视多边形则直接用（快路径）。
 	var guess: Variant = _world_to_cell(_oblique_unproject_ground(world))
-	if guess is Vector2i and _world_hits_cell_poly(world, guess as Vector2i):
-		return guess
+	if guess is Vector2i and _get_catalog().is_present(terrain_id_at(guess as Vector2i)):
+		if _world_hits_cell_poly(world, guess as Vector2i):
+			return guess
 	# 否则扫全部可见格：取屏幕纵深最大者（更靠前、与绘制一致）。
 	var best: Variant = null
 	var best_z := -2147483648
 	for cell in _tile_nodes.keys():
 		var c: Vector2i = cell as Vector2i
+		if not _get_catalog().is_present(terrain_id_at(c)):
+			continue
 		if not _world_hits_cell_poly(world, c):
 			continue
 		var z := _draw_depth_for_cell(c)

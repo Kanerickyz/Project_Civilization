@@ -58,9 +58,16 @@ func terrain_display_name(cell: Vector2i) -> String:
 
 
 func is_passable(cell: Vector2i) -> bool:
-	if not GridMathScript.in_bounds(cell, grid_width, grid_height):
+	if not is_present(cell):
 		return false
 	return _catalog.is_passable(terrain_at(cell))
+
+
+## 盘内可见格（非 void 缺格）。
+func is_present(cell: Vector2i) -> bool:
+	if not GridMathScript.in_bounds(cell, grid_width, grid_height):
+		return false
+	return _catalog.is_present(terrain_at(cell))
 
 
 func is_burn_immune_cell(cell: Vector2i) -> bool:
