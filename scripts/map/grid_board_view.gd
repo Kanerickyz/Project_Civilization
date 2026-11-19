@@ -805,7 +805,8 @@ func _pump_float_queue(cell: Vector2i) -> void:
 	)
 
 
-## 战斗表现是否仍在播：飘字队列/在飞标签、被动抖动、位移 Tween。
+## 战斗表现是否仍在播：飘字队列/在飞飘字、被动抖动、位移 Tween。
+## 勿把常驻血攻 Label（同挂 _labels_root）当成在播，否则结束行动会空等超时。
 func is_combat_presentation_busy() -> bool:
 	if not _float_queues.is_empty():
 		return true
@@ -814,7 +815,7 @@ func is_combat_presentation_busy() -> bool:
 			return true
 	if _labels_root != null:
 		for child in _labels_root.get_children():
-			if child is Label:
+			if child is Label and bool(child.get_meta("combat_float", false)):
 				return true
 	if not _unit_passive_tweens.is_empty():
 		return true
@@ -844,6 +845,7 @@ func _spawn_float_label(item: Dictionary) -> void:
 	var world := _cell_to_world(cell, config.cell_size)
 	var head := Vector2(0.0, -config.unit_world_height * 1.35)
 	var lbl := Label.new()
+	lbl.set_meta("combat_float", true)
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.text = text
