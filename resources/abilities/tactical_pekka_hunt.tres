@@ -4,13 +4,19 @@
 
 [resource]
 script = ExtResource("1_ab")
-id = "hunt_instinct"
-display_name = "猎杀本能"
-autochess_ability_id = "kill_gain_atk_mid"
-rules_hint = "击杀敌方单位时：自身攻击+2（本场，可叠加）。"
-trigger_kind = 3
+id = "pursuit_slash"
+display_name = "追斩"
+autochess_ability_id = "enemy_death_self_attack"
+rules_hint = "任意敌方死亡时：若自身攻击范围内仍有敌方，则攻击一次（选最近；同距取低 HP）。"
+trigger_kind = 8
 range_chebyshev = 1
 self_atk_on_trigger = 0
-self_atk_on_kill = 2
+self_atk_on_kill = 0
 ally_atk_buff = 0
-ally_buff_radius = 2
+ally_hp_buff = 0
+ally_buff_radius = 1
+ally_heal_on_trigger = 0
+grant_ephemeral_attack_on_kill = false
+ally_attack_on_kill = false
+self_attack_on_enemy_death = true
+draw_cards_on_trigger = 0

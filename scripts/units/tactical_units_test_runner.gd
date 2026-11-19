@@ -34,7 +34,7 @@ func _initialize() -> void:
 	if not _test_wardrum_attack_card_buff():
 		quit(1)
 		return
-	if not _test_pekka_no_passive():
+	if not _test_pekka_enemy_death_attack():
 		quit(1)
 		return
 	if not _test_basic_attack_flag():
@@ -326,14 +326,15 @@ func _test_archer_kill_ally_attacks() -> bool:
 	archer.cell = Vector2i(2, 2)
 	ally_near.cell = Vector2i(3, 2)
 	healer.cell = Vector2i(2, 3)
-	ally_far.cell = Vector2i(5, 2)
+	# 大剑放远且无邻敌，避免追斩干扰猎召断言。
+	ally_far.cell = Vector2i(0, 0)
 	foe_a.cell = Vector2i(4, 2)
 	_relocate_off_cell(board, archer.cell, archer)
 	_relocate_off_cell(board, ally_near.cell, ally_near)
 	_relocate_off_cell(board, healer.cell, healer)
 	_relocate_off_cell(board, ally_far.cell, ally_far)
 	_relocate_off_cell(board, foe_a.cell, foe_a)
-	# 邻格盾卫可打邻敌；远距大剑不在半径；医师攻 0 跳过。
+	# 邻格盾卫可打邻敌；远距大剑无邻敌；医师攻 0 跳过。
 	foe_a.hp = 1
 	var far_hp_before := ally_far.hp
 	var foe_b: TacticalUnitInstance = null
@@ -373,7 +374,7 @@ func _test_archer_kill_ally_attacks() -> bool:
 	if foe_a.is_alive():
 		push_error("TacticalUnits: foe_a should be dead")
 		return false
-	# 邻格盾卫应攻击最近敌（(3,3) 距 1）；医师攻 0 跳过；远距大剑不在半径内不攻。
+	# 邻格盾卫应攻击最近敌（(3,3) 距 1）；医师攻 0 跳过；远距大剑无邻敌不追斩。
 	if foe_near.hp >= foe_near_before:
 		push_error(
 			"TacticalUnits: neighbor knight should attack after hunt_call, hp %d→%d"
@@ -559,23 +560,126 @@ func _test_wardrum_attack_card_buff() -> bool:
 	return true
 
 
-func _test_pekka_no_passive() -> bool:
+## 大剑追斩：任意敌方死亡时，攻距内仍有敌则打最近；无敌则跳过；不因击杀加攻。
+func _test_pekka_enemy_death_attack() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var pekka := _player_unit(board, "mini_pekka")
-	var foe := _opponent_unit(board, "rider")
-	if pekka == null or foe == null:
+	var archer := _player_unit(board, "archer")
+	var foe_a := _opponent_unit(board, "rider")
+	if pekka == null or archer == null or foe_a == null:
+		push_error("TacticalUnits: pursuit needs pekka+archer+rider")
 		return false
-	if pekka.def.triggered_ability != null:
-		push_error("TacticalUnits: mini_pekka should have no passive")
+	var ab := pekka.def.triggered_ability
+	if ab == null or not ab.self_attack_on_enemy_death:
+		push_error("TacticalUnits: mini_pekka should have pursuit slash passive")
 		return false
-	foe.hp = 1
-	var before := pekka.effective_attack()
-	board.apply_damage(foe, 1, pekka)
-	if foe.is_alive():
-		push_error("TacticalUnits: pekka should kill weak rider")
+	if ab.trigger_kind != TacticalActiveAbility.TriggerKind.ON_ENEMY_DEATH:
+		push_error("TacticalUnits: pekka passive must be ON_ENEMY_DEATH")
 		return false
-	if pekka.effective_attack() != before:
-		push_error("TacticalUnits: pekka kill must not grant atk")
+	for u in board.living_units():
+		if u == pekka or u == archer or u == foe_a:
+			continue
+		u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
+	pekka.cell = Vector2i(3, 3)
+	archer.cell = Vector2i(1, 1)
+	foe_a.cell = Vector2i(5, 5)
+	_relocate_off_cell(board, pekka.cell, pekka)
+	_relocate_off_cell(board, archer.cell, archer)
+	_relocate_off_cell(board, foe_a.cell, foe_a)
+	var foe_b: TacticalUnitInstance = null
+	for u in board.living_units():
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u != foe_a and u.is_alive():
+			foe_b = u
+			break
+	if foe_b == null:
+		push_error("TacticalUnits: pursuit needs a second rider")
+		return false
+	foe_b.cell = Vector2i(4, 3)
+	_relocate_off_cell(board, foe_b.cell, foe_b)
+	foe_b.hp = foe_b.effective_max_hp()
+	var foe_b_before := foe_b.hp
+	var foe_far: TacticalUnitInstance = null
+	for u in board.living_units():
+		if (
+			u.faction == TacticalFactionScript.Id.OPPONENT
+			and u != foe_a
+			and u != foe_b
+			and u.is_alive()
+		):
+			foe_far = u
+			break
+	if foe_far == null:
+		push_error("TacticalUnits: pursuit needs a third rider out of range")
+		return false
+	foe_far.cell = Vector2i(8, 1)
+	_relocate_off_cell(board, foe_far.cell, foe_far)
+	foe_far.hp = foe_far.effective_max_hp()
+	var foe_far_before := foe_far.hp
+	foe_a.hp = 1
+	var atk_before := pekka.effective_attack()
+	# 他人击杀远处敌：大剑邻格仍有敌 → 追斩最近。
+	var res := board.apply_damage(foe_a, 1, archer)
+	if not bool(res.get("killed", false)):
+		push_error("TacticalUnits: archer should kill foe_a for pursuit")
+		return false
+	if foe_b.hp >= foe_b_before:
+		push_error(
+			"TacticalUnits: pekka should attack nearest in-range foe, hp %d→%d"
+			% [foe_b_before, foe_b.hp]
+		)
+		return false
+	if foe_far.hp != foe_far_before:
+		push_error("TacticalUnits: out-of-range foe must not be hit by pursuit")
+		return false
+	if pekka.effective_attack() != atk_before:
+		push_error("TacticalUnits: pekka pursuit must not grant atk")
+		return false
+	var saw_tag := false
+	var saw_reaction := false
+	for ev in res.get("passive_fx", []) as Array:
+		if not (ev is Dictionary):
+			continue
+		var d: Dictionary = ev as Dictionary
+		if str(d.get("text", "")) == "追斩":
+			saw_tag = true
+		if str(d.get("kind", "")) == "reaction_attack":
+			saw_reaction = true
+	if not saw_tag:
+		push_error(
+			"TacticalUnits: pursuit should emit 追斩 fx, got %s" % [res.get("passive_fx", [])]
+		)
+		return false
+	if not saw_reaction:
+		push_error(
+			"TacticalUnits: pursuit should emit reaction_attack play step, got %s"
+			% [res.get("passive_fx", [])]
+		)
+		return false
+	# 攻距内无敌：仅死亡，不崩、不加攻。
+	var board2 := TacticalSandboxRosterScript.build_demo_board(10, 8)
+	var pekka2 := _player_unit(board2, "mini_pekka")
+	var foe2 := _opponent_unit(board2, "rider")
+	if pekka2 == null or foe2 == null:
+		return false
+	for u in board2.living_units():
+		if u == pekka2 or u == foe2:
+			continue
+		u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
+	pekka2.cell = Vector2i(1, 1)
+	foe2.cell = Vector2i(5, 5)
+	_relocate_off_cell(board2, pekka2.cell, pekka2)
+	_relocate_off_cell(board2, foe2.cell, foe2)
+	foe2.hp = 1
+	var before2 := pekka2.effective_attack()
+	var res2 := board2.apply_damage(foe2, 1, pekka2)
+	if foe2.is_alive():
+		push_error("TacticalUnits: pekka should kill lone rider")
+		return false
+	if not bool(res2.get("killed", false)):
+		push_error("TacticalUnits: lone rider kill should still succeed")
+		return false
+	if pekka2.effective_attack() != before2:
+		push_error("TacticalUnits: pekka kill with no in-range foe must not grant atk")
 		return false
 	return true
 

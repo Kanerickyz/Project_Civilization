@@ -14,6 +14,8 @@ enum TriggerKind {
 	ON_PLAYER_ATTACK_CARD,
 	## 同阵营其他单位阵亡时，由仍存活的友方触发。
 	ON_ALLY_DEATH,
+	## 敌方单位阵亡时，由仍存活的己方单位触发。
+	ON_ENEMY_DEATH,
 }
 
 
@@ -35,6 +37,8 @@ enum TriggerKind {
 @export var grant_ephemeral_attack_on_kill: bool = false
 ## 击杀时：周围友方各尝试攻击一次（各用自身攻距/攻；无合法敌则跳过）。
 @export var ally_attack_on_kill: bool = false
+## 任意敌方死亡时：若自身攻击范围内仍有敌，则普攻一次（最近；同距低 HP）。
+@export var self_attack_on_enemy_death: bool = false
 ## 玩家打出攻击牌时从牌库抽 N 张（需 board.player_deck）。
 @export var draw_cards_on_trigger: int = 0
 ## 触发时对中心格及周围（切比雪夫 ≤ aoe_burn_radius）存活单位施加燃烧层数。

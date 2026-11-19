@@ -335,6 +335,10 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 				self, source, target, passive_fx
 			)
 			hurt_logs.append_array(kill_logs)
+		# 敌方死亡反应（大剑追斩等）在击杀者被动之后，便于与猎召嵌套攻击共存。
+		hurt_logs.append_array(
+			TacticalAbilitySystem.process_enemy_death(self, target, passive_fx)
+		)
 	result["ok"] = true
 	result["log"] = " · ".join(hurt_logs) if hurt_logs.size() > 0 else ""
 	result["passive_fx"] = passive_fx
