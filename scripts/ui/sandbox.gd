@@ -1779,11 +1779,10 @@ func _append_attack_card_passive_logs() -> void:
 		_last_log = "%s · %s" % [_last_log, "；".join(logs)]
 
 
-## 被动触发可见反馈：短飘字 + 单位晃动/弹出（无金色高亮）。
+## 被动触发可见反馈：短飘字入同格队列逐个弹 + 单位晃动/弹出（无金色高亮）。
 func _play_passive_fx(fx_list: Array) -> void:
 	if _board_view == null or fx_list.is_empty():
 		return
-	var stack_by_cell: Dictionary = {}
 	var pulsed_cells: Dictionary = {}
 	for ev in fx_list:
 		if not (ev is Dictionary):
@@ -1794,9 +1793,8 @@ func _play_passive_fx(fx_list: Array) -> void:
 			continue
 		var color: Color = (ev as Dictionary).get("color", Color("ffe08a")) as Color
 		var key := "%d,%d" % [cell.x, cell.y]
-		var stack := int(stack_by_cell.get(key, 0))
-		stack_by_cell[key] = stack + 1
-		_board_view.play_passive_float_text(cell, text, color, stack)
+		# 同格多条由 GridBoardView 串行队列间隔弹出，不再并行 stack 错开。
+		_board_view.play_passive_float_text(cell, text, color)
 		if pulsed_cells.has(key):
 			continue
 		pulsed_cells[key] = true

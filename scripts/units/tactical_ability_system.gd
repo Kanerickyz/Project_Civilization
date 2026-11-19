@@ -360,7 +360,7 @@ static func _apply_ally_buff(
 			ally.max_hp_bonus += ab.ally_hp_buff
 			ally.hp += ab.ally_hp_buff
 		buffed += 1
-		# 每名受益友方各一条飘字（加攻/加血可并排）。
+		# 每名受益友方：加攻/加血各一条飘字事件（同格由视图队列逐个弹）。
 		if ab.ally_atk_buff != 0:
 			_emit_fx(fx_out, ally.cell, "+%d攻" % ab.ally_atk_buff, Color("ffe08a"))
 		if ab.ally_hp_buff != 0:
