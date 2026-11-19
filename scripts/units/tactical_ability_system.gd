@@ -69,18 +69,33 @@ static func process_unit_death(
 
 
 ## 同阵营其他单位阵亡后：扫描仍存活友方的 ON_ALLY_DEATH 被动（不含死者自身）。
+## 自身攻/血加成（如狼群）对齐鼓手：先各自短能力名，再全体齐弹 +攻，再全体齐弹 +血。
 static func process_ally_death(
 	board: TacticalBoard, dead: TacticalUnitInstance, fx_out: Variant = null
 ) -> Array[String]:
 	if board == null or dead == null:
 		return []
 	var logs: Array[String] = []
+	var self_stat_batch: Array = []
 	for u in board.living_units():
 		if u == dead or u.faction != dead.faction:
+			continue
+		var ab: TacticalActiveAbility = u.def.triggered_ability if u.def != null else null
+		if ab == null or ab.trigger_kind != TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
+			continue
+		if ab.self_atk_on_trigger != 0 or ab.self_hp_on_trigger != 0:
+			self_stat_batch.append({"unit": u, "ab": ab})
 			continue
 		logs.append_array(
 			_try_trigger(board, u, TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH, fx_out)
 		)
+	if not self_stat_batch.is_empty():
+		logs.append_array(_apply_batched_self_stats_on_ally_death(board, self_stat_batch, fx_out))
+		for item_v in self_stat_batch:
+			var item: Dictionary = item_v as Dictionary
+			var u: TacticalUnitInstance = item.get("unit") as TacticalUnitInstance
+			var ab: TacticalActiveAbility = item.get("ab") as TacticalActiveAbility
+			logs.append_array(_draw_cards_on_trigger(board, u, ab, fx_out))
 	return logs
 
 
@@ -241,6 +256,7 @@ static func _apply_self_atk(
 
 
 ## 友方死亡等：自身攻/血本场加成（抬上限并回等量血）；先短能力名再数值飘字。
+## 多单位同批请用 `_apply_batched_self_stats_on_ally_death`（齐弹 +攻 再齐弹 +血）。
 static func _apply_self_stats_on_trigger(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
@@ -253,24 +269,71 @@ static func _apply_self_stats_on_trigger(
 	var hp := ab.self_hp_on_trigger
 	if atk == 0 and hp == 0:
 		return []
-	var tag := ab.display_name if not ab.display_name.is_empty() else "强化"
-	_emit_skill_prompt(fx_out, unit.cell, tag)
-	if atk != 0:
-		unit.atk_bonus += atk
+	return _apply_batched_self_stats_on_ally_death(
+		board, [{"unit": unit, "ab": ab}], fx_out
+	)
+
+
+## 狼群等：多名存活友方同时吃自身攻/血加成时，对齐鼓手齐弹顺序。
+## 入队：各单位短能力名 → 全体 sync=buff_atk → 全体 sync=buff_hp。
+static func _apply_batched_self_stats_on_ally_death(
+	board: TacticalBoard, batch: Array, fx_out: Variant = null
+) -> Array[String]:
+	if board == null or batch.is_empty():
+		return []
+	var applied: Array = []
+	for item_v in batch:
+		var item: Dictionary = item_v as Dictionary
+		var unit: TacticalUnitInstance = item.get("unit") as TacticalUnitInstance
+		var ab: TacticalActiveAbility = item.get("ab") as TacticalActiveAbility
+		if unit == null or not unit.is_alive() or ab == null:
+			continue
+		var atk := ab.self_atk_on_trigger
+		var hp := ab.self_hp_on_trigger
+		if atk == 0 and hp == 0:
+			continue
+		var tag := ab.display_name if not ab.display_name.is_empty() else "强化"
+		if atk != 0:
+			unit.atk_bonus += atk
+		if hp != 0:
+			unit.max_hp_bonus += hp
+			unit.hp += hp
+		applied.append({"unit": unit, "ab": ab, "atk": atk, "hp": hp, "tag": tag})
+	if applied.is_empty():
+		return []
+	for row_v in applied:
+		var row: Dictionary = row_v as Dictionary
+		var unit: TacticalUnitInstance = row.get("unit") as TacticalUnitInstance
+		_emit_skill_prompt(fx_out, unit.cell, str(row.get("tag", "")))
+	for row_v in applied:
+		var row: Dictionary = row_v as Dictionary
+		var atk: int = int(row.get("atk", 0))
+		if atk == 0:
+			continue
+		var unit: TacticalUnitInstance = row.get("unit") as TacticalUnitInstance
 		_emit_fx(fx_out, unit.cell, "+%d攻" % atk, Color("ffe08a"), "", "buff_atk")
-	if hp != 0:
-		unit.max_hp_bonus += hp
-		unit.hp += hp
+	for row_v in applied:
+		var row: Dictionary = row_v as Dictionary
+		var hp: int = int(row.get("hp", 0))
+		if hp == 0:
+			continue
+		var unit: TacticalUnitInstance = row.get("unit") as TacticalUnitInstance
 		_emit_fx(fx_out, unit.cell, "+%d血" % hp, Color("7dff9a"), "", "buff_hp")
 	board.changed.emit()
-	var parts: PackedStringArray = []
-	if atk != 0:
-		parts.append("攻击+%d" % atk)
-	if hp != 0:
-		parts.append("生命+%d" % hp)
-	return [
-		"%s %s：%s（本场）" % [unit.def.display_name, tag, "、".join(parts)],
-	]
+	var logs: Array[String] = []
+	for row_v in applied:
+		var row: Dictionary = row_v as Dictionary
+		var unit: TacticalUnitInstance = row.get("unit") as TacticalUnitInstance
+		var tag := str(row.get("tag", ""))
+		var atk: int = int(row.get("atk", 0))
+		var hp: int = int(row.get("hp", 0))
+		var parts: PackedStringArray = []
+		if atk != 0:
+			parts.append("攻击+%d" % atk)
+		if hp != 0:
+			parts.append("生命+%d" % hp)
+		logs.append("%s %s：%s（本场）" % [unit.def.display_name, tag, "、".join(parts)])
+	return logs
 
 
 ## 受击被动：周围友方恢复当前 HP（排除自身；不抬上限）。

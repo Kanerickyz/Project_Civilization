@@ -539,21 +539,61 @@ func _test_rider_pack_on_ally_death() -> bool:
 	var prompts := 0
 	var atk_fx := 0
 	var hp_fx := 0
-	for ev in fx:
+	var fx_texts: PackedStringArray = []
+	var prompt_idx := -1
+	var first_atk := -1
+	var last_atk := -1
+	var first_hp := -1
+	var atk_sync := 0
+	var hp_sync := 0
+	for i in fx.size():
+		var ev: Variant = fx[i]
 		if not (ev is Dictionary):
 			continue
 		var d: Dictionary = ev as Dictionary
-		if str(d.get("kind", "")) == "skill_prompt" and str(d.get("text", "")) == "狼群":
+		var text := str(d.get("text", ""))
+		fx_texts.append(text)
+		if str(d.get("kind", "")) == "skill_prompt" and text == "狼群":
 			prompts += 1
-		elif str(d.get("text", "")) == "+2攻":
+			if prompt_idx < 0:
+				prompt_idx = i
+		elif text == "+2攻":
 			atk_fx += 1
-		elif str(d.get("text", "")) == "+2血":
+			if first_atk < 0:
+				first_atk = i
+			last_atk = i
+			if str(d.get("sync", "")) == "buff_atk":
+				atk_sync += 1
+		elif text == "+2血":
 			hp_fx += 1
+			if first_hp < 0:
+				first_hp = i
+			if str(d.get("sync", "")) == "buff_hp":
+				hp_sync += 1
 	var n := survivors.size()
 	if prompts != n or atk_fx != n or hp_fx != n:
 		push_error(
 			"TacticalUnits: pack fx mismatch prompts=%d atk=%d hp=%d want %d"
 			% [prompts, atk_fx, hp_fx, n]
+		)
+		return false
+	if prompt_idx < 0 or first_atk < 0 or first_hp < 0:
+		push_error("TacticalUnits: pack fx missing prompt/atk/hp, got %s" % [fx_texts])
+		return false
+	if prompt_idx > first_atk or prompt_idx > first_hp:
+		push_error(
+			"TacticalUnits: pack skill_prompt must precede effect floats, got %s" % [fx_texts]
+		)
+		return false
+	# 对齐鼓手：全体 +攻 块在全体 +血 块之前；同类带 sync 供沙盘齐弹。
+	if last_atk >= first_hp:
+		push_error(
+			"TacticalUnits: pack all +攻 must precede all +血, got order %s" % [fx_texts]
+		)
+		return false
+	if atk_sync != n or hp_sync != n:
+		push_error(
+			"TacticalUnits: pack fx need sync buff_atk/buff_hp for all survivors, got %s" % [fx]
 		)
 		return false
 	# 玩家死亡不触发狼群。
