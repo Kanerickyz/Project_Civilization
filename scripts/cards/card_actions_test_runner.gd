@@ -16,7 +16,7 @@ func _initialize() -> void:
 	if not _test_sts_draw_discard_and_reshuffle():
 		quit(1)
 		return
-	if not _test_player_click_move_uses_budget():
+	if not _test_player_side_start_has_no_free_move():
 		quit(1)
 		return
 	if not _test_move_card_grants_move_range():
@@ -40,10 +40,10 @@ func _initialize() -> void:
 	if not _test_end_turn_discards_hand():
 		quit(1)
 		return
-	if not _test_player_side_turn_resets_move_budget():
+	if not _test_player_side_turn_zeros_move_budget():
 		quit(1)
 		return
-	if not _test_player_move_budget_multi_step():
+	if not _test_opponent_side_turn_resets_move_budget():
 		quit(1)
 		return
 	if not _test_attack_card_authorizes_repeat_hits():
@@ -136,7 +136,7 @@ func _test_build_generic_plus_skills_player_only() -> bool:
 	if skills != 10:
 		push_error("CardActions: expected 10 skill cards, got %d" % skills)
 		return false
-	# 每人通用移+攻各 1 + 主动技；与点格移力池共存。
+	# 每人通用移+攻各 1 + 主动技；玩家仅经移动卡移动。
 	var expected := living_players * 2 + skills
 	if deck.draw_pile.size() != expected or deck.total_cards() != expected:
 		push_error(
@@ -248,7 +248,7 @@ func _test_sts_draw_discard_and_reshuffle() -> bool:
 	return true
 
 
-func _test_player_click_move_uses_budget() -> bool:
+func _test_player_side_start_has_no_free_move() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	var unit: TacticalUnitInstance = null
@@ -257,27 +257,23 @@ func _test_player_click_move_uses_budget() -> bool:
 			unit = u
 			break
 	if unit == null:
-		push_error("CardActions: need archer for click-move test")
+		push_error("CardActions: need archer for no-free-move test")
 		return false
-	if unit.remaining_move_budget != unit.def.move_range:
+	if unit.remaining_move_budget != 0:
 		push_error(
-			"CardActions: player side start budget should be move_range %d, got %d"
-			% [unit.def.move_range, unit.remaining_move_budget]
+			"CardActions: player side start budget should be 0, got %d"
+			% unit.remaining_move_budget
 		)
+		return false
+	if not board.reachable_move_cells(unit).is_empty():
+		push_error("CardActions: without move card should have no reachable cells")
 		return false
 	for u in board.living_units():
 		if u != unit and (u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2)):
 			u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
 	unit.cell = Vector2i(2, 2)
-	var before := unit.remaining_move_budget
-	if not board.try_move(unit, Vector2i(3, 2)):
-		push_error("CardActions: click move should succeed with budget")
-		return false
-	if unit.remaining_move_budget != before - 1:
-		push_error(
-			"CardActions: budget should drop by path steps, got %d"
-			% unit.remaining_move_budget
-		)
+	if board.try_move(unit, Vector2i(3, 2)):
+		push_error("CardActions: try_move without card budget must fail")
 		return false
 	return true
 
@@ -535,7 +531,7 @@ func _test_end_turn_discards_hand() -> bool:
 	return true
 
 
-func _test_player_side_turn_resets_move_budget() -> bool:
+func _test_player_side_turn_zeros_move_budget() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
 	var unit: TacticalUnitInstance = null
 	for u in board.living_units():
@@ -543,57 +539,43 @@ func _test_player_side_turn_resets_move_budget() -> bool:
 			unit = u
 			break
 	if unit == null:
-		push_error("CardActions: need archer for budget reset test")
+		push_error("CardActions: need archer for player budget zero test")
 		return false
-	unit.remaining_move_budget = 0
-	if not board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: empty budget should block reachability")
-		return false
+	unit.remaining_move_budget = 3
 	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
-	var want := unit.def.action_move_budget()
-	if unit.remaining_move_budget != want:
+	if unit.remaining_move_budget != 0:
 		push_error(
-			"CardActions: side reset should refill budget %d, got %d"
-			% [want, unit.remaining_move_budget]
+			"CardActions: player side reset should zero budget, got %d"
+			% unit.remaining_move_budget
 		)
 		return false
-	if board.reachable_move_cells(unit).is_empty():
-		push_error("CardActions: after reset should have reachable cells")
+	if not board.reachable_move_cells(unit).is_empty():
+		push_error("CardActions: after player reset should have no free reachable cells")
 		return false
 	return true
 
 
-func _test_player_move_budget_multi_step() -> bool:
+func _test_opponent_side_turn_resets_move_budget() -> bool:
 	var board := TacticalSandboxRosterScript.build_demo_board(10, 8)
-	board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	var unit: TacticalUnitInstance = null
 	for u in board.living_units():
-		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == "archer":
+		if u.faction == TacticalFactionScript.Id.OPPONENT and u.def.id == "rider":
 			unit = u
 			break
 	if unit == null:
-		push_error("CardActions: need archer for multi-step move test")
+		push_error("CardActions: need rider for opponent budget reset test")
 		return false
-	if unit.def.move_range != 3:
-		push_error("CardActions: archer move_range should be 3")
+	unit.remaining_move_budget = 0
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	var want := unit.def.action_move_budget()
+	if unit.remaining_move_budget != want:
+		push_error(
+			"CardActions: opponent side reset should refill budget %d, got %d"
+			% [want, unit.remaining_move_budget]
+		)
 		return false
-	for u in board.living_units():
-		if u != unit and (
-			u.cell == Vector2i(2, 2) or u.cell == Vector2i(3, 2) or u.cell == Vector2i(4, 2)
-		):
-			u.cell = Vector2i(0, 7) if u.faction == TacticalFactionScript.Id.PLAYER else Vector2i(9, 7)
-	unit.cell = Vector2i(2, 2)
-	if not board.try_move(unit, Vector2i(3, 2)):
-		push_error("CardActions: first budget step should succeed")
-		return false
-	if unit.remaining_move_budget != 2:
-		push_error("CardActions: after 1 step budget should be 2, got %d" % unit.remaining_move_budget)
-		return false
-	if not board.try_move(unit, Vector2i(4, 2)):
-		push_error("CardActions: second budget step should succeed")
-		return false
-	if unit.remaining_move_budget != 1:
-		push_error("CardActions: after 2 steps budget should be 1, got %d" % unit.remaining_move_budget)
+	if board.reachable_move_cells(unit).is_empty():
+		push_error("CardActions: after opponent reset should have reachable cells")
 		return false
 	return true
 

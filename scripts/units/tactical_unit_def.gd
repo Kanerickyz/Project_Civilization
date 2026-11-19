@@ -6,7 +6,7 @@ extends Resource
 @export var max_hp: int = 1
 @export var attack: int = 1
 @export var move_range: int = 1
-## 本行动段移动力池基准；0 表示与 move_range 相同（玩家点格移力与对手 AI 均用）。
+## 本行动段移动力池基准；0 表示与 move_range 相同（对手 AI 用；玩家仅经移动卡授权获得）。
 @export var move_budget: int = 0
 @export var attack_range: int = 1
 ## 最小射程死区（切比雪夫）：距离 ≤ 此值不可攻击。默认 0=无死区（可攻邻格）。游侠为 1。

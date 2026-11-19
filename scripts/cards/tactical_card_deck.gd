@@ -17,7 +17,7 @@ var draw_count: int = 5
 var draw_pile: Array[TacticalActionCard] = []
 var hand: Array[TacticalActionCard] = []
 var discard_pile: Array[TacticalActionCard] = []
-## 本段已获移动卡授权的己方单位（对象作键）；与点格移力池共存。
+## 本段已获移动卡授权的己方单位（对象作键）；玩家仅经卡移动。
 var move_authorized: Dictionary = {}
 ## 本段攻击授权队列：单位 → Array[Dictionary]（bonus / burn / volley 键）。
 ## 同单位连拖多张攻击卡会入队多次，可连续结算多次攻击。
@@ -70,7 +70,7 @@ func clear() -> void:
 
 
 ## 按场上己方存活：每人通用移+攻各 1；另按角色贡献主动技。绝不收录敌方。
-## 移动卡与点格移力池共存：卡用于重置额度并授权一次移动。
+## 移动卡：重置额度并授权一次移动（玩家无点格免费移）。
 func build_from_living_player_units(board: TacticalBoard) -> void:
 	clear()
 	if board == null:
@@ -178,7 +178,7 @@ func resolve_wardrum_redraw() -> int:
 
 
 ## 打出移动卡并选定己方单位：授权本段移动一次（路径步数 ≤ move_range）。
-## 与点格移力池共存：卡重置额度；成功走一步后须 consume。
+## 卡重置额度；成功走一步后须 consume。
 func authorize_move(unit: TacticalUnitInstance) -> bool:
 	if unit == null or not unit.is_alive():
 		return false

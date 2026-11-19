@@ -459,7 +459,11 @@ func _clear_pending_target(keep_move_focus: bool = true) -> void:
 		_deck.pending_volley = false
 	if not keep_move_focus:
 		_focus_unit = null
-	elif _focus_unit != null and _focus_unit.is_alive() and _focus_unit.remaining_move_budget > 0:
+	elif (
+		_focus_unit != null
+		and _focus_unit.is_alive()
+		and _deck.is_move_authorized(_focus_unit)
+	):
 		_pending_kind = PendingKind.MOVE
 	else:
 		_focus_unit = null
@@ -538,7 +542,7 @@ func _compose_hint() -> String:
 			return _last_log
 		return "部署：拖己方到左半盘 · 「开始战斗」"
 	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
-		return "移动中：%s · 点绿格（余移力 %d）" % [
+		return "移动中：%s · 点绿格（本卡一次 · 步数 ≤%d）" % [
 			_focus_unit.def.display_name,
 			_focus_unit.remaining_move_budget,
 		]
@@ -574,7 +578,7 @@ func _refresh_action_buttons() -> void:
 func _refresh_unit_panel() -> void:
 	var u := _focus_unit if _focus_unit != null else _selected_unit
 	if u == null or not u.is_alive():
-		_unit_panel.text = "未选中单位\n（点己方移动 / 拖移攻卡）"
+		_unit_panel.text = "未选中单位\n（拖移动/攻击卡行动）"
 		return
 	var ab := u.def.triggered_ability
 	var skill_line := ab.display_name if ab != null else "—"
@@ -872,7 +876,7 @@ func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitIns
 	if card.kind == TacticalActionCardScript.Kind.MOVE:
 		_deck.authorize_move(target)
 		_pending_kind = PendingKind.MOVE
-		_last_log = "移动：%s · 点绿格（本卡仅一次；亦可点选分步用移力）" % target.def.display_name
+		_last_log = "移动：%s · 点绿格（本卡仅一次）" % target.def.display_name
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_ARMOR:
 		var grant := maxi(1, card.armor_grant)
 		target.add_armor(grant)
@@ -969,14 +973,15 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 
 	var clicked := _board.unit_at(cell)
 
-	# 移动瞄准：点选己方后点绿格；可切换到其他己方。
+	# 移动瞄准：须已打出移动卡授权；点绿格走一步后本卡用完。
 	if _pending_kind == PendingKind.MOVE and _focus_unit != null:
+		if not _deck.is_move_authorized(_focus_unit):
+			_last_log = "无移动授权 · 请拖移动卡到己方"
+			_pending_kind = PendingKind.NONE
+			_refresh_all()
+			return
 		if clicked != null:
-			if clicked.faction == TacticalFactionScript.Id.PLAYER:
-				_select_player_for_move(clicked)
-				_refresh_all()
-				return
-			_last_log = "移动请点空格"
+			_last_log = "移动请点空绿格"
 			_refresh_all()
 			return
 		if not _board.is_passable(cell):
@@ -984,31 +989,18 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 			_refresh_all()
 			return
 		if _focus_unit.remaining_move_budget <= 0:
-			_last_log = "%s 移力已用尽 · 可拖移动卡续航" % _focus_unit.def.display_name
+			_last_log = "%s 无移力 · 请再拖移动卡" % _focus_unit.def.display_name
 			_pending_kind = PendingKind.NONE
 			_refresh_all()
 			return
 		if _board.try_move(_focus_unit, cell):
-			var used_card := _deck.is_move_authorized(_focus_unit)
-			if used_card:
-				_deck.consume_move_authorization(_focus_unit)
-				_pending_kind = PendingKind.NONE
-				_last_log = "%s 移动至 (%d,%d) · 本卡已用完" % [
-					_focus_unit.def.display_name,
-					cell.x,
-					cell.y,
-				]
-			else:
-				_last_log = "%s 移动至 (%d,%d) · 余移力 %d" % [
-					_focus_unit.def.display_name,
-					cell.x,
-					cell.y,
-					_focus_unit.remaining_move_budget,
-				]
-				if _focus_unit.remaining_move_budget > 0:
-					_pending_kind = PendingKind.MOVE
-				else:
-					_pending_kind = PendingKind.NONE
+			_deck.consume_move_authorization(_focus_unit)
+			_pending_kind = PendingKind.NONE
+			_last_log = "%s 移动至 (%d,%d) · 本卡已用完" % [
+				_focus_unit.def.display_name,
+				cell.x,
+				cell.y,
+			]
 			_refresh_all()
 			_input_locked = true
 			_refresh_action_buttons()
@@ -1071,38 +1063,22 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		_refresh_all()
 		return
 
-	# 无待结算卡：点己方进入移动；点敌方查看；点空地提示。
+	# 无待结算卡：点单位仅查看；移动须拖移动卡。
 	if clicked != null:
 		_selected_unit = clicked
+		_focus_unit = null
+		_pending_kind = PendingKind.NONE
 		if clicked.faction == TacticalFactionScript.Id.PLAYER:
-			_select_player_for_move(clicked)
+			_last_log = "已选 %s · 拖移动/攻击卡行动" % clicked.def.display_name
 		elif TacticalEnemyAiScript.uses_behavior_sm(clicked):
-			_focus_unit = null
-			_pending_kind = PendingKind.NONE
 			_last_log = "查看 %s · 绿=可移动 · 红=可攻击 · 虚影=下回合意图" % clicked.def.display_name
 		else:
-			_focus_unit = null
-			_pending_kind = PendingKind.NONE
 			_last_log = "查看 %s" % clicked.def.display_name
 		_refresh_all()
 		return
 	if not _board.is_passable(cell):
 		_last_log = "%s不可通行" % _board.terrain_display_name(cell)
 	_refresh_all()
-
-
-func _select_player_for_move(unit: TacticalUnitInstance) -> void:
-	_selected_unit = unit
-	_focus_unit = unit
-	if unit.remaining_move_budget > 0:
-		_pending_kind = PendingKind.MOVE
-		_last_log = "已选 %s · 点绿格移动（余移力 %d）" % [
-			unit.def.display_name,
-			unit.remaining_move_budget,
-		]
-	else:
-		_pending_kind = PendingKind.NONE
-		_last_log = "%s 本段移力已用尽 · 可拖移动卡续航或拖攻击卡" % unit.def.display_name
 
 
 func _run_player_charge_async(target_cell: Vector2i) -> void:
@@ -1141,9 +1117,7 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 				_focus_unit = null
 	_play_kill_impacts(charge_killed)
 	await _play_skill_fx_async(res.get("passive_fx", []) as Array)
-	if knight != null and knight.is_alive() and knight.remaining_move_budget > 0:
-		_pending_kind = PendingKind.MOVE
-		_focus_unit = knight
+	_pending_kind = PendingKind.NONE
 	_check_victory()
 	_input_locked = false
 	_refresh_all()
@@ -1210,12 +1184,9 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		await tw.finished
 	await _feedback_from_attack(target, atk, target_cell)
 	_pending_kind = PendingKind.NONE
-	# 同单位连拖多张攻击卡：仍有余次则继续瞄准，否则若有移力则切回移动。
+	# 同单位连拖多张攻击卡：仍有余次则继续瞄准。
 	if attacker.is_alive() and _deck.is_attack_authorized(attacker):
 		_pending_kind = PendingKind.ATTACK
-		_focus_unit = attacker
-	elif attacker.is_alive() and attacker.remaining_move_budget > 0:
-		_pending_kind = PendingKind.MOVE
 		_focus_unit = attacker
 	_check_victory()
 	_input_locked = false
@@ -1682,7 +1653,10 @@ func _on_back_pressed() -> void:
 func capture_select_player_unit(unit_id: String) -> void:
 	for u in _board.living_units():
 		if u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == unit_id:
-			_select_player_for_move(u)
+			_selected_unit = u
+			_focus_unit = null
+			_pending_kind = PendingKind.NONE
+			_last_log = "已选 %s · 拖移动/攻击卡行动" % u.def.display_name
 			_refresh_all()
 			return
 
