@@ -40,6 +40,8 @@ var _input_locked: bool = false
 var _ending_player_action: bool = false
 ## 技能提示 / 反应攻击串行播放中（含 kick 的 _play_passive_fx）。
 var _skill_fx_playing: bool = false
+## 回合开始 STS 逐张抽牌动画中：跳过 _refresh_hand_ui，避免整手闪现。
+var _hand_draw_animating: bool = false
 var _game_over: bool = false
 var _turn_banner_panel: PanelContainer
 var _turn_banner: Label
@@ -93,9 +95,9 @@ func _begin_battle_after_deploy() -> void:
 	_fire_battle_start_triggers()
 	_board.reset_side_turn_flags(TacticalFactionScript.Id.PLAYER)
 	await _apply_side_turn_start_triggers(TacticalFactionScript.Id.PLAYER)
-	_deck.begin_player_turn()
+	_last_log = "战斗开始 · 抽牌中"
+	await _begin_player_turn_with_draw_async()
 	_last_log = "战斗开始 · 已抽手牌"
-	_refresh_all()
 	_show_turn_banner()
 
 
@@ -624,6 +626,8 @@ func _refresh_unit_panel() -> void:
 func _refresh_hand_ui() -> void:
 	if _hand_fan == null:
 		return
+	if _hand_draw_animating:
+		return
 	if _in_deployment:
 		_hand_fan.set_hand([], [], [])
 		_hand_fan.set_interactive(false)
@@ -640,6 +644,30 @@ func _refresh_hand_ui() -> void:
 		_clock.player_active and not _game_over and not _input_locked and not _in_deployment
 	)
 	_hand_fan.set_interactive(player_turn)
+
+
+## 玩家行动段开始：先锁输入再抽牌数据，UI 逐张飞入（STS）；期间刷新跳过手牌整手闪现。
+func _begin_player_turn_with_draw_async() -> void:
+	_hand_draw_animating = true
+	_input_locked = true
+	_refresh_action_buttons()
+	if _hand_fan != null:
+		_hand_fan.set_interactive(false)
+		_hand_fan.clear_hand()
+	_deck.begin_player_turn()
+	_refresh_all()
+	if _hand_fan != null and _deck != null and not _deck.hand.is_empty():
+		var labels: Array[String] = []
+		var kinds: Array[int] = []
+		var details: Array[String] = []
+		for card in _deck.hand:
+			labels.append(card.display_label())
+			kinds.append(int(card.kind))
+			details.append(card.rules_detail())
+		await _hand_fan.play_draw_sequence(labels, kinds, details)
+	_hand_draw_animating = false
+	_input_locked = false
+	_refresh_all()
 
 
 func _show_turn_banner() -> void:
@@ -1613,10 +1641,10 @@ func _run_opponent_turn_async() -> void:
 		_input_locked = false
 		_refresh_all()
 		return
-	_deck.begin_player_turn()
+	_last_log = "对手结束行动 · 抽牌中"
+	await _begin_player_turn_with_draw_async()
 	_last_log = "对手结束行动 · 已抽手牌"
 	_show_turn_banner()
-	_input_locked = false
 	_refresh_all()
 
 
