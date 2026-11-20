@@ -1270,13 +1270,6 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		root = Control.new()
 		root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		root.name = "HpBar"
-		var text := Label.new()
-		text.name = "Text"
-		text.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		text.add_theme_color_override("font_outline_color", Color("0a1018"))
-		text.add_theme_constant_override("outline_size", 3)
-		root.add_child(text)
 		var segs := HBoxContainer.new()
 		segs.name = "Segments"
 		segs.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1289,6 +1282,11 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		root.add_child(armor_row)
 		_labels_root.add_child(root)
 		_hp_bars[unit] = root
+	# 旧版头顶曾有 HP/攻 数字 Label；统一隐藏，只留分段条。
+	var legacy_text := root.get_node_or_null("Text") as Label
+	if legacy_text != null:
+		legacy_text.visible = false
+		legacy_text.text = ""
 	_update_hp_bar(unit)
 	_ensure_burn_badge(unit)
 	_ensure_frenzy_badge(unit)
@@ -1335,67 +1333,38 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	if not _hp_bars.has(unit) or not _unit_sprites.has(unit):
 		return
 	var root := _hp_bars[unit] as Control
-	var text := root.get_node("Text") as Label
 	var segs := root.get_node("Segments") as HBoxContainer
 	var armor_row := root.get_node("ArmorSegments") as HBoxContainer
-	_apply_ui_label_font(text, 11)
+	var legacy_text := root.get_node_or_null("Text") as Label
+	if legacy_text != null:
+		legacy_text.visible = false
+		legacy_text.text = ""
 	var spr := _unit_sprites[unit] as Sprite2D
 	var cur_hp := unit.hp
 	var max_hp := maxi(1, unit.effective_max_hp())
 	var armor_now := unit.armor
 	var preview: Dictionary = _action_preview_deltas.get(unit, {}) as Dictionary
 	var preview_hp := cur_hp
-	var preview_max := max_hp
 	var preview_armor := armor_now
 	var has_preview := not preview.is_empty()
 	if has_preview:
 		preview_hp = int(preview.get("hp", cur_hp))
-		preview_max = maxi(1, int(preview.get("max_hp", max_hp)))
 		preview_armor = int(preview.get("armor", armor_now))
-	# 数字：当前/上限；预览时显示将变成的血量。
-	var show_hp := preview_hp if has_preview else cur_hp
-	var show_max := preview_max if has_preview else max_hp
-	var bits: PackedStringArray = [
-		"%d/%d" % [show_hp, show_max],
-		"攻%d" % unit.effective_attack(),
-	]
+	# 头顶只留分段血条（+甲段）；生命/攻数字不显示，预览靠段色变化。
 	var show_armor := preview_armor if has_preview else armor_now
-	if show_armor > 0:
-		bits.append("甲%d" % show_armor)
-	if unit.is_stealthed():
-		bits.append("隐")
-	text.text = " ".join(bits)
-	text.reset_size()
-	if has_preview and int(preview.get("hp_delta", 0)) < 0:
-		text.add_theme_color_override("font_color", HP_PREVIEW_LOSS)
-	elif has_preview and int(preview.get("hp_delta", 0)) > 0:
-		text.add_theme_color_override("font_color", HP_PREVIEW_GAIN)
-	elif cur_hp <= max_hp / 3:
-		text.add_theme_color_override("font_color", Color("ff6666"))
-	elif unit.is_stealthed():
-		text.add_theme_color_override("font_color", Color("b8c4d8"))
-	elif armor_now > 0:
-		text.add_theme_color_override("font_color", Color("9ad0ff"))
-	elif unit.atk_bonus > 0:
-		text.add_theme_color_override("font_color", Color("ffe08a"))
-	else:
-		text.add_theme_color_override("font_color", Color("e8f0ff"))
 	_rebuild_hp_segments(segs, cur_hp, max_hp, preview_hp if has_preview else -1)
 	_rebuild_armor_segments(armor_row, show_armor)
 	var seg_w := segs.get_combined_minimum_size().x
 	var armor_w := armor_row.get_combined_minimum_size().x if armor_row.visible else 0.0
-	var width := maxf(text.size.x, maxf(seg_w, armor_w))
-	var height := text.size.y + HP_SEG_H + 2.0
+	var width := maxf(seg_w, armor_w)
+	var height := HP_SEG_H
 	if armor_row.visible:
 		height += HP_SEG_H + 1.0
-	root.size = Vector2(width, height)
-	text.position = Vector2((width - text.size.x) * 0.5, 0.0)
-	segs.position = Vector2((width - seg_w) * 0.5, text.size.y + 1.0)
+	root.size = Vector2(maxf(width, 1.0), height)
+	segs.position = Vector2((width - seg_w) * 0.5, 0.0)
 	if armor_row.visible:
-		armor_row.position = Vector2(
-			(width - armor_w) * 0.5, text.size.y + HP_SEG_H + 2.0
-		)
-	var head_off := Vector2(0.0, -config.unit_world_height * 1.18)
+		armor_row.position = Vector2((width - armor_w) * 0.5, HP_SEG_H + 1.0)
+	var head_off := Vector2(0.0, -config.unit_world_height * 1.12)
 	_position_world_on_label(root, _unit_world_position(spr) + head_off)
 
 
