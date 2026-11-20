@@ -1543,10 +1543,14 @@ func _feedback_from_attack(
 				_pending_kind = PendingKind.NONE
 	# 同次结算多死：伤害可分拍，击杀红带+剪影一次同闪（各锚死亡位）。
 	_play_kill_impacts(killed_now)
-	# 击退成功：refresh 触发从旧格到新格的位移 Tween（可见推开，禁止瞬移）。
+	# 击退成功：解除表现 hold（若有），再 refresh 播从命中格到落点的 tween。
 	if res.get("knockback_moved", false) and target != null and target.is_alive():
+		var kb_from: Vector2i = res.get("knockback_from", Vector2i(-1, -1)) as Vector2i
+		if kb_from.x >= 0:
+			_board_view.release_held_unit_visual(target, kb_from)
 		_refresh_all()
-		await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+		await get_tree().process_frame
+		await _await_presentation_idle_async()
 	# 猎召等反应攻击 / 被动飘字：按队列串行（动画+飘字）。
 	await _play_skill_fx_async(res.get("passive_fx", []) as Array)
 
@@ -1796,6 +1800,25 @@ func _append_attack_kill_victim(
 	out.append(unit)
 
 
+## 收集本批攻击事件中已逻辑击退、但仍需等攻击后再播位移的目标。
+func _collect_attack_event_knockbacks(events: Array) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	for ev in events:
+		if str(ev.get("kind", "")) != "attack":
+			continue
+		var res: Dictionary = ev.get("result", {}) as Dictionary
+		if not bool(res.get("knockback_moved", false)):
+			continue
+		var unit := res.get("target") as TacticalUnitInstance
+		var from_cell: Vector2i = res.get("knockback_from", Vector2i(-1, -1)) as Vector2i
+		if unit == null or from_cell.x < 0 or seen.has(unit):
+			continue
+		seen[unit] = true
+		out.append({"unit": unit, "from": from_cell, "to": res.get("knockback_to", unit.cell)})
+	return out
+
+
 func _heal_potion_aim_cells(caster: TacticalUnitInstance) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	if caster == null or caster.def == null or _board == null:
@@ -1877,11 +1900,17 @@ func _run_opponent_turn_async() -> void:
 	for unit in opponents:
 		if not unit.is_alive():
 			continue
-		# AI 一批内先逻辑结算（可含移动+击杀）；表现须先走完再攻/死。
+		# AI 一批内先逻辑结算（可含移动+击杀/击退）；表现须先走完再攻/死/击退。
 		var events := TacticalEnemyAiScript.run_opponent_unit_actions(_board, unit)
 		# 后续攻击事件里已死的目标：移动 refresh 前 hold，禁止提前拆精灵。
 		for victim in _collect_attack_event_kill_victims(events):
 			_board_view.hold_dead_unit_visual(victim)
+		# 已逻辑击退的目标：钉在命中格，禁止对手移动段提前播击退 tween。
+		for kb in _collect_attack_event_knockbacks(events):
+			_board_view.hold_unit_visual_at_cell(
+				kb.get("unit") as TacticalUnitInstance,
+				kb.get("from") as Vector2i
+			)
 		for ev in events:
 			var kind: String = ev.get("kind", "")
 			if kind == "move":

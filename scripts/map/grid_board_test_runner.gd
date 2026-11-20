@@ -67,6 +67,9 @@ func _initialize() -> void:
 	if not await _test_held_dead_survives_sync_until_death():
 		quit(1)
 		return
+	if not await _test_knockback_hold_defers_tween_until_release():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -133,6 +136,7 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 	var spr_alive: Sprite2D = view._unit_sprites[unit] as Sprite2D
 	var cell_world: Vector2 = view._cell_to_world(unit.cell, view.config.cell_size)
 	var world_before: Vector2 = view._unit_world_position(spr_alive)
+	var base_scale: Vector2 = view._unit_base_scales.get(unit, spr_alive.scale) as Vector2
 	unit.hp = 0
 	var death_tw: Tween = view.play_unit_death(unit)
 	if death_tw == null:
@@ -161,6 +165,13 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 		return false
 	if spr_dying.position.length() > 0.05:
 		push_error("death keep visual: dying sprite left cell center pos=%s" % spr_dying.position)
+		return false
+	# 死亡 scale 相对基准缩小，绝不可大于活着时基准（绝对 0.05 会放大）。
+	if spr_dying.scale.x > base_scale.x * 1.001 + 0.0001:
+		push_error(
+			"death keep visual: death enlarged scale base=%s dying=%s"
+			% [base_scale, spr_dying.scale]
+		)
 		return false
 	var world_now: Vector2 = view._unit_world_position(spr_dying)
 	if world_now.distance_to(cell_world) > 0.05:
@@ -244,6 +255,59 @@ func _test_held_dead_survives_sync_until_death() -> bool:
 	await process_frame
 	if view._unit_sprites.has(victim):
 		push_error("held dead: sprite should be gone after death")
+		return false
+	return true
+
+
+## PC-111：击退逻辑已落点时 hold 在命中格，sync 不得提前 tween；release 后才播击退。
+func _test_knockback_hold_defers_tween_until_release() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	cfg.grid_width = 5
+	cfg.grid_height = 4
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		push_error("knockback hold: knight.tres missing")
+		return false
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var from_cell := Vector2i(2, 2)
+	var to_cell := Vector2i(3, 2)
+	var target: TacticalUnitInstance = UnitInstScript.new(
+		def, FactionScript.Id.PLAYER, from_cell
+	)
+	var mover: TacticalUnitInstance = UnitInstScript.new(
+		def, FactionScript.Id.OPPONENT, Vector2i(1, 2)
+	)
+	view.sync_tactical_units([target, mover], Vector2i(-1, -1), [], [])
+	await process_frame
+	# 逻辑已击退到 to，但表现应钉在 from。
+	target.cell = to_cell
+	view.hold_unit_visual_at_cell(target, from_cell)
+	mover.cell = Vector2i(2, 2)
+	view.sync_tactical_units([target, mover], Vector2i(-1, -1), [], [])
+	await process_frame
+	if not view.is_unit_presentation_held(target):
+		push_error("knockback hold: expected presentation hold")
+		return false
+	if view._unit_move_tweens.has(target):
+		push_error("knockback hold: target must not tween during enemy move sync")
+		return false
+	var spr: Sprite2D = view._unit_sprites[target] as Sprite2D
+	var from_tile: Node2D = view._tile_nodes.get(from_cell) as Node2D
+	if from_tile == null or spr.get_parent() != from_tile:
+		push_error("knockback hold: sprite must stay on hit cell tile")
+		return false
+	view.release_held_unit_visual(target, from_cell)
+	view.sync_tactical_units([target, mover], Vector2i(-1, -1), [], [])
+	await process_frame
+	if not view._unit_move_tweens.has(target):
+		push_error("knockback hold: release+sync should start knockback tween")
 		return false
 	return true
 

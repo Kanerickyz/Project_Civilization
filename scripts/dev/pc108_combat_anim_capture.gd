@@ -152,6 +152,7 @@ func _initialize() -> void:
 		push_error("pc108 capture: missing frozen death world")
 		quit(1)
 		return
+	var base_scale: Vector2 = view._unit_base_scales.get(foe, Vector2.ONE) as Vector2
 	await create_timer(0.12, true, false, true).timeout
 	var dying_spr: Sprite2D = view._unit_sprites[foe] as Sprite2D
 	if dying_spr == null or dying_spr.modulate.a >= 0.99 or dying_spr.modulate.a <= 0.05:
@@ -165,6 +166,13 @@ func _initialize() -> void:
 	var tile: Node2D = view._tile_nodes.get(death_cell) as Node2D
 	if tile == null or dying_spr.get_parent() != tile:
 		push_error("pc108 capture: dying sprite left death tile (flew layer)")
+		quit(1)
+		return
+	if dying_spr.scale.x > base_scale.x * 1.001 + 0.0001:
+		push_error(
+			"pc108 capture: death enlarged scale base=%s dying=%s"
+			% [base_scale, dying_spr.scale]
+		)
 		quit(1)
 		return
 	var world_now: Vector2 = view._unit_world_position(dying_spr)
