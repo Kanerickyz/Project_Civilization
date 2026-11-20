@@ -69,6 +69,8 @@ const OVERLAY_COLORS := {
 	## 狼骑下一意图：路径格 / 攻击目标格（低于选中/红攻/绿移）。
 	"ip": Color(0.55, 0.88, 1.0, 0.38),
 	"it": Color(1.0, 0.62, 0.28, 0.52),
+	## 链路预览落点/击退格。
+	"pm": Color(1.0, 0.55, 0.25, 0.55),
 }
 const SKILL_ARROW_VALID := Color(0.98, 0.86, 0.42, 0.95)
 const SKILL_ARROW_INVALID := Color(0.82, 0.38, 0.4, 0.75)
@@ -98,6 +100,9 @@ var _overlay_intent_path: Dictionary = {} # Vector2i -> true
 var _overlay_intent_target: Dictionary = {} # Vector2i -> true
 ## 拖移动卡预览可达（与正式瞄准绿格同色，可并存）。
 var _overlay_preview_move: Dictionary = {} # Vector2i -> true
+## 拖攻击卡预览攻距 / 链路落点标记。
+var _overlay_preview_attack: Dictionary = {} # Vector2i -> true
+var _overlay_preview_mark: Dictionary = {} # Vector2i -> true（击退落点等）
 ## 拖牌悬停当前格；(-1,-1) 表示无。
 var _overlay_drag_hover: Vector2i = Vector2i(-1, -1)
 ## 0=空白/中性，1=可落单位，-1=不可落单位。
@@ -126,7 +131,9 @@ var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
 ## 拖牌/瞄准链路预览：unit -> {hp,max_hp,armor,hp_delta,armor_delta}
 var _action_preview_deltas: Dictionary = {}
-var _action_preview_chain: Control = null
+var _action_preview_ghosts: Array = [] # Sprite2D
+var _action_preview_line: Line2D = null
+var _action_preview_mod_backup: Dictionary = {} # unit -> Color
 var _pointer_hover_cell: Vector2i = Vector2i(-999, -999)
 const HP_SEG_MAX_PIP := 12
 const HP_SEG_W := 7.0
@@ -137,7 +144,16 @@ const HP_EMPTY := Color("2a3340")
 const HP_PREVIEW_LOSS := Color("ff5a5a")
 const HP_PREVIEW_GAIN := Color("7dff9a")
 const ARMOR_FILL := Color("6eb6ff")
-const CHAIN_BG := Color(0.08, 0.1, 0.14, 0.88)
+const PREVIEW_GHOST_ALPHA := 0.48
+const PREVIEW_HL := {
+	"damage": Color(1.0, 0.52, 0.48, 1.0),
+	"heal": Color(0.62, 1.0, 0.72, 1.0),
+	"buff": Color(0.7, 0.88, 1.0, 1.0),
+	"kill": Color(0.28, 0.28, 0.32, 1.0),
+	"caster": Color(1.0, 0.92, 0.55, 1.0),
+	"stealth": Color(0.72, 0.78, 0.95, 0.55),
+}
+
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
 var _unit_idle_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
@@ -1433,13 +1449,15 @@ func _rebuild_armor_segments(row: HBoxContainer, armor: int) -> void:
 		row.add_child(pip)
 
 
-## 拖牌/瞄准伤害链路预览：unit_deltas 键为单位；chain_text 显示整条步骤。
+## 拖牌/瞄准伤害链路预览（视觉）：血条预减、单位染色、击退/位移幽灵、攻线。
 func set_action_preview(preview: Dictionary) -> void:
+	_clear_action_preview_visuals(true)
 	_action_preview_deltas.clear()
 	if preview == null or preview.is_empty() or not bool(preview.get("ok", false)):
-		_clear_action_preview_chain()
+		_overlay_preview_mark.clear()
 		for u in _hp_bars.keys():
 			_update_hp_bar(u as TacticalUnitInstance)
+		_refresh_preview_overlays()
 		return
 	var deltas: Dictionary = preview.get("unit_deltas", {}) as Dictionary
 	for key in deltas.keys():
@@ -1447,10 +1465,11 @@ func set_action_preview(preview: Dictionary) -> void:
 			_action_preview_deltas[key] = deltas[key]
 	for u in _hp_bars.keys():
 		_update_hp_bar(u as TacticalUnitInstance)
-	_show_action_preview_chain(
-		str(preview.get("chain_text", "")),
-		preview.get("hover_cell", Vector2i(-1, -1))
-	)
+	_apply_preview_highlights(preview.get("highlights", {}) as Dictionary)
+	_spawn_preview_ghosts(preview.get("ghosts", []) as Array)
+	_spawn_preview_lines(preview.get("lines", []) as Array)
+	_set_preview_mark_cells(preview.get("mark_cells", []) as Array)
+	_refresh_preview_overlays()
 
 
 ## GUI：强制展示一条预览（截图用）。
@@ -1461,17 +1480,22 @@ func capture_set_action_preview(preview: Dictionary) -> void:
 func clear_action_preview() -> void:
 	if (
 		_action_preview_deltas.is_empty()
-		and _action_preview_chain == null
+		and _action_preview_ghosts.is_empty()
+		and _action_preview_line == null
+		and _action_preview_mod_backup.is_empty()
 		and _overlay_preview_move.is_empty()
+		and _overlay_preview_attack.is_empty()
+		and _overlay_preview_mark.is_empty()
 	):
 		return
 	_action_preview_deltas.clear()
 	_overlay_preview_move.clear()
-	_clear_action_preview_chain()
+	_overlay_preview_attack.clear()
+	_overlay_preview_mark.clear()
+	_clear_action_preview_visuals(true)
 	for u in _hp_bars.keys():
 		_update_hp_bar(u as TacticalUnitInstance)
-	for cell in _overlay_nodes.keys():
-		_apply_overlay(cell as Vector2i)
+	_refresh_preview_overlays()
 
 
 ## 拖移动卡到单位时临时叠绿可达格（不改写正式瞄准 overlay）。
@@ -1487,58 +1511,143 @@ func set_preview_move_cells(cells: Array) -> void:
 		_apply_overlay(cell as Vector2i)
 
 
-func _clear_action_preview_chain() -> void:
-	if _action_preview_chain != null and is_instance_valid(_action_preview_chain):
-		_action_preview_chain.queue_free()
-	_action_preview_chain = null
+func set_preview_attack_cells(cells: Array) -> void:
+	var prev := _overlay_preview_attack.duplicate()
+	_overlay_preview_attack.clear()
+	for c in cells:
+		if c is Vector2i:
+			_overlay_preview_attack[c as Vector2i] = true
+	for cell in prev.keys():
+		_apply_overlay(cell as Vector2i)
+	for cell in _overlay_preview_attack.keys():
+		_apply_overlay(cell as Vector2i)
 
 
-func _show_action_preview_chain(chain_text: String, hover_cell: Variant) -> void:
-	_clear_action_preview_chain()
-	if chain_text.is_empty() or _labels_root == null or config == null:
+func _set_preview_mark_cells(cells: Array) -> void:
+	var prev := _overlay_preview_mark.duplicate()
+	_overlay_preview_mark.clear()
+	for c in cells:
+		if c is Vector2i:
+			_overlay_preview_mark[c as Vector2i] = true
+	for cell in prev.keys():
+		_apply_overlay(cell as Vector2i)
+	for cell in _overlay_preview_mark.keys():
+		_apply_overlay(cell as Vector2i)
+
+
+func _refresh_preview_overlays() -> void:
+	for cell in _overlay_nodes.keys():
+		_apply_overlay(cell as Vector2i)
+
+
+func _clear_action_preview_visuals(restore_modulate: bool) -> void:
+	for g in _action_preview_ghosts:
+		if g != null and is_instance_valid(g):
+			(g as Node).queue_free()
+	_action_preview_ghosts.clear()
+	if _action_preview_line != null and is_instance_valid(_action_preview_line):
+		_action_preview_line.queue_free()
+	_action_preview_line = null
+	if restore_modulate:
+		for u in _action_preview_mod_backup.keys():
+			var unit := u as TacticalUnitInstance
+			if unit == null or not _unit_sprites.has(unit):
+				continue
+			var spr := _unit_sprites[unit] as Sprite2D
+			if spr == null or not is_instance_valid(spr):
+				continue
+			spr.modulate = _action_preview_mod_backup[u] as Color
+		_action_preview_mod_backup.clear()
+
+
+func _apply_preview_highlights(highlights: Dictionary) -> void:
+	for key in highlights.keys():
+		if not (key is TacticalUnitInstance):
+			continue
+		var unit := key as TacticalUnitInstance
+		if not _unit_sprites.has(unit):
+			continue
+		var spr := _unit_sprites[unit] as Sprite2D
+		if spr == null:
+			continue
+		if not _action_preview_mod_backup.has(unit):
+			_action_preview_mod_backup[unit] = spr.modulate
+		var kind := str(highlights[key])
+		var tint: Color = PREVIEW_HL.get(kind, PREVIEW_HL["damage"]) as Color
+		var base: Color = _action_preview_mod_backup[unit] as Color
+		spr.modulate = Color(
+			base.r * tint.r,
+			base.g * tint.g,
+			base.b * tint.b,
+			base.a * tint.a
+		)
+
+
+func _spawn_preview_ghosts(ghosts: Array) -> void:
+	if config == null or _units_root == null:
 		return
-	var panel := PanelContainer.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.name = "ActionPreviewChain"
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = CHAIN_BG
-	sb.set_corner_radius_all(6)
-	sb.content_margin_left = 8
-	sb.content_margin_right = 8
-	sb.content_margin_top = 5
-	sb.content_margin_bottom = 5
-	panel.add_theme_stylebox_override("panel", sb)
-	var lbl := Label.new()
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lbl.custom_minimum_size = Vector2(160, 0)
-	_apply_ui_label_font(lbl, 12)
-	lbl.add_theme_color_override("font_color", Color("f2f6ff"))
-	lbl.add_theme_color_override("font_outline_color", Color("0a1018"))
-	lbl.add_theme_constant_override("outline_size", 2)
-	lbl.text = chain_text
-	panel.add_child(lbl)
-	_labels_root.add_child(panel)
-	_action_preview_chain = panel
-	lbl.reset_size()
-	panel.reset_size()
-	var world := Vector2.ZERO
-	if hover_cell is Vector2i and (hover_cell as Vector2i).x >= 0:
-		world = _cell_to_world(hover_cell as Vector2i, config.cell_size)
-		world += Vector2(0.0, -config.unit_world_height * 1.75)
-	else:
-		world = _target_to_label_anchor()
-	_position_world_on_label(panel, world)
-	_clamp_label_in_viewport(panel)
+	for g in ghosts:
+		if not (g is Dictionary):
+			continue
+		var unit: TacticalUnitInstance = (g as Dictionary).get("unit") as TacticalUnitInstance
+		var cell: Vector2i = (g as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+		if unit == null or unit.def == null or cell.x < 0:
+			continue
+		var tex: Texture2D = (
+			unit.def.texture_red
+			if unit.faction == TacticalFactionScript.Id.OPPONENT
+			else unit.def.texture_blue
+		)
+		if tex == null:
+			tex = unit.def.texture_blue
+		if tex == null:
+			continue
+		var kind := str((g as Dictionary).get("kind", "knockback"))
+		var spr := Sprite2D.new()
+		spr.name = "ActionPreviewGhost"
+		spr.centered = true
+		spr.texture = tex
+		var tint := Color(1.0, 0.55, 0.35, PREVIEW_GHOST_ALPHA)
+		if kind == "move" or kind == "charge":
+			tint = Color(0.55, 0.95, 0.75, PREVIEW_GHOST_ALPHA)
+		spr.modulate = tint
+		spr.z_as_relative = false
+		var metrics := _texture_content_metrics(tex)
+		var content_h: float = metrics.content_h
+		var vis := unit.def.visual_scale if unit.def.visual_scale > 0.0 else 1.0
+		var s := (config.unit_world_height / content_h) * vis if content_h > 0.0 else 1.0
+		spr.scale = Vector2(s, s)
+		spr.offset = Vector2(0.0, metrics.offset_y)
+		spr.position = _cell_to_world(cell, config.cell_size)
+		spr.z_index = UNIT_Z_BASE + int(round(spr.position.y * 100.0)) + 3
+		_units_root.add_child(spr)
+		_action_preview_ghosts.append(spr)
 
 
-func _target_to_label_anchor() -> Vector2:
-	if config == null:
-		return Vector2.ZERO
-	return _cell_to_world(
-		Vector2i(config.grid_width / 2, config.grid_height / 2), config.cell_size
+func _spawn_preview_lines(lines: Array) -> void:
+	if config == null or _units_root == null or lines.is_empty():
+		return
+	# 多条时合并到一根 Line2D 分段不方便；取首条主攻/位移线。
+	var first: Dictionary = lines[0] as Dictionary
+	var from_cell: Vector2i = first.get("from", Vector2i(-1, -1)) as Vector2i
+	var to_cell: Vector2i = first.get("to", Vector2i(-1, -1)) as Vector2i
+	if from_cell.x < 0 or to_cell.x < 0 or from_cell == to_cell:
+		return
+	var kind := str(first.get("kind", "attack"))
+	var line := Line2D.new()
+	line.name = "ActionPreviewLine"
+	line.width = maxf(config.cell_size * 0.14, 0.1)
+	line.default_color = (
+		INTENT_PATH_LINE_COLOR if kind == "move" else INTENT_ATK_LINE_COLOR
 	)
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.z_as_relative = false
+	line.z_index = UNIT_Z_BASE - 16
+	line.add_point(_cell_to_world(from_cell, config.cell_size))
+	line.add_point(_cell_to_world(to_cell, config.cell_size))
+	_units_root.add_child(line)
+	_action_preview_line = line
 
 
 func _update_burn_badge(unit: TacticalUnitInstance) -> void:
@@ -1825,8 +1934,10 @@ func _apply_overlay(cell: Vector2i) -> void:
 			tag = "hx"
 		else:
 			tag = "h"
-	elif _overlay_attack.has(cell):
+	elif _overlay_attack.has(cell) or _overlay_preview_attack.has(cell):
 		tag = "a"
+	elif _overlay_preview_mark.has(cell):
+		tag = "pm"
 	elif _overlay_skill_release.has(cell):
 		tag = "sk"
 	elif _overlay_move.has(cell) or _overlay_preview_move.has(cell):

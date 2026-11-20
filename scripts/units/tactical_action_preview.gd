@@ -33,31 +33,19 @@ static func preview_basic_attack(
 		aoe_burn_stacks,
 		volley
 	)
-	var steps: Array = []
 	var unit_deltas: Dictionary = {}
+	var visuals := {}
 	if bool(atk.get("ok", false)):
-		_collect_attack_steps(atk, steps)
 		if include_attack_card_passive:
 			var card_fx: Array = []
-			var card_logs := TacticalAbilitySystemScript.process_player_attack_card_played(
-				board, card_fx
-			)
-			for lg in card_logs:
-				steps.append({"text": str(lg), "kind": "trigger"})
-			_append_fx_steps(card_fx, steps)
+			TacticalAbilitySystemScript.process_player_attack_card_played(board, card_fx)
 		unit_deltas = _unit_deltas_from_snap(board, snap)
+		visuals = _visuals_from_attack(atk, attacker, snap, unit_deltas)
 	_restore(board, snap)
 	board.end_preview_mute()
 	if not bool(atk.get("ok", false)):
 		return _empty_preview(str(atk.get("log", "无法攻击")))
-	return {
-		"ok": true,
-		"log": str(atk.get("log", "")),
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": unit_deltas,
-		"hover_cell": target_cell,
-	}
+	return _pack_preview(true, str(atk.get("log", "")), unit_deltas, target_cell, visuals)
 
 
 static func preview_charge(
@@ -68,24 +56,16 @@ static func preview_charge(
 	var snap := _snapshot(board)
 	board.begin_preview_mute()
 	var res := TacticalCombatScript.try_knight_charge(board, knight, dir_cell)
-	var steps: Array = []
 	var unit_deltas: Dictionary = {}
+	var visuals := {}
 	if bool(res.get("ok", false)):
-		_collect_charge_steps(res, steps)
-		_append_fx_steps(res.get("passive_fx", []) as Array, steps)
 		unit_deltas = _unit_deltas_from_snap(board, snap)
+		visuals = _visuals_from_charge(res, knight, snap, unit_deltas)
 	_restore(board, snap)
 	board.end_preview_mute()
 	if not bool(res.get("ok", false)):
 		return _empty_preview(str(res.get("log", "无法冲撞")))
-	return {
-		"ok": true,
-		"log": str(res.get("log", "")),
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": unit_deltas,
-		"hover_cell": dir_cell,
-	}
+	return _pack_preview(true, str(res.get("log", "")), unit_deltas, dir_cell, visuals)
 
 
 static func preview_heal_potion(
@@ -96,40 +76,20 @@ static func preview_heal_potion(
 	var snap := _snapshot(board)
 	board.begin_preview_mute()
 	var res := board.apply_heal_potion(caster, cell, 2, 1)
-	var steps: Array = []
 	var unit_deltas: Dictionary = {}
 	if bool(res.get("ok", false)):
-		for h in res.get("healed", []) as Array:
-			if not (h is Dictionary):
-				continue
-			var u: TacticalUnitInstance = (h as Dictionary).get("unit") as TacticalUnitInstance
-			var amt := int((h as Dictionary).get("amount", 0))
-			if u == null or amt <= 0:
-				continue
-			steps.append(
-				{
-					"text": "+%d血" % amt,
-					"kind": "heal",
-					"cell": u.cell,
-					"unit": u,
-				}
-			)
-		_append_fx_steps(res.get("passive_fx", []) as Array, steps)
 		unit_deltas = _unit_deltas_from_snap(board, snap)
 	_restore(board, snap)
 	board.end_preview_mute()
 	if not bool(res.get("ok", false)):
 		return _empty_preview(str(res.get("log", "无法恢复")))
-	if steps.is_empty():
-		steps.append({"text": "无友方可回血", "kind": "info"})
-	return {
-		"ok": true,
-		"log": str(res.get("log", "")),
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": unit_deltas,
-		"hover_cell": cell,
+	var visuals := {
+		"highlights": _highlights_from_deltas(unit_deltas, "heal"),
+		"ghosts": [],
+		"lines": [],
+		"mark_cells": [cell],
 	}
+	return _pack_preview(true, str(res.get("log", "")), unit_deltas, cell, visuals)
 
 
 static func preview_inspire(board: TacticalBoard, drummer: TacticalUnitInstance) -> Dictionary:
@@ -138,25 +98,32 @@ static func preview_inspire(board: TacticalBoard, drummer: TacticalUnitInstance)
 	var snap := _snapshot(board)
 	board.begin_preview_mute()
 	var res := board.apply_inspire_frenzy(drummer, 1)
-	var steps: Array = []
 	var unit_deltas: Dictionary = {}
+	var buff_units: Array = []
 	if bool(res.get("ok", false)):
-		_append_fx_steps(res.get("passive_fx", []) as Array, steps)
-		if steps.is_empty():
-			steps.append({"text": "周围无友方", "kind": "info"})
 		unit_deltas = _unit_deltas_from_snap(board, snap)
+		for fx in res.get("passive_fx", []) as Array:
+			if not (fx is Dictionary):
+				continue
+			var fx_cell: Vector2i = (fx as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+			var u := board.unit_at(fx_cell)
+			if u != null and not buff_units.has(u):
+				buff_units.append(u)
 	_restore(board, snap)
 	board.end_preview_mute()
 	if not bool(res.get("ok", false)):
 		return _empty_preview(str(res.get("log", "无法鼓舞")))
-	return {
-		"ok": true,
-		"log": str(res.get("log", "")),
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": unit_deltas,
-		"hover_cell": drummer.cell,
-	}
+	var highlights: Dictionary = {}
+	for u in buff_units:
+		highlights[u] = "buff"
+	highlights[drummer] = "caster"
+	return _pack_preview(
+		true,
+		str(res.get("log", "")),
+		unit_deltas,
+		drummer.cell,
+		{"highlights": highlights, "ghosts": [], "lines": [], "mark_cells": []}
+	)
 
 
 static func preview_armor(target: TacticalUnitInstance, amount: int) -> Dictionary:
@@ -164,9 +131,6 @@ static func preview_armor(target: TacticalUnitInstance, amount: int) -> Dictiona
 		return _empty_preview("无效护甲预览")
 	var grant := maxi(1, amount)
 	var after_armor := target.armor + grant
-	var steps: Array = [
-		{"text": "+%d甲" % grant, "kind": "buff", "cell": target.cell, "unit": target}
-	]
 	var deltas := {
 		target: {
 			"hp": target.hp,
@@ -176,38 +140,37 @@ static func preview_armor(target: TacticalUnitInstance, amount: int) -> Dictiona
 			"armor_delta": grant,
 		}
 	}
-	return {
-		"ok": true,
-		"log": "%s +%d 护甲" % [target.def.display_name, grant],
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": deltas,
-		"hover_cell": target.cell,
-	}
+	return _pack_preview(
+		true,
+		"%s +%d 护甲" % [target.def.display_name, grant],
+		deltas,
+		target.cell,
+		{
+			"highlights": {target: "buff"},
+			"ghosts": [],
+			"lines": [],
+			"mark_cells": [],
+		}
+	)
 
 
 static func preview_move_authorize(unit: TacticalUnitInstance) -> Dictionary:
 	if unit == null or not unit.is_alive() or unit.def == null:
 		return _empty_preview("无效移动预览")
-	var steps: Array = [
+	return _pack_preview(
+		true,
+		"%s 获移动授权" % unit.def.display_name,
+		{},
+		unit.cell,
 		{
-			"text": "移力→%d" % unit.def.move_range,
-			"kind": "move",
-			"cell": unit.cell,
-			"unit": unit,
-		},
-		{"text": "点绿格移动", "kind": "info"},
-	]
-	return {
-		"ok": true,
-		"log": "%s 获移动授权" % unit.def.display_name,
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": {},
-		"hover_cell": unit.cell,
-		"show_reachable": true,
-		"move_unit": unit,
-	}
+			"highlights": {unit: "caster"},
+			"ghosts": [],
+			"lines": [],
+			"mark_cells": [],
+			"show_reachable": true,
+			"move_unit": unit,
+		}
+	)
 
 
 static func preview_move_step(
@@ -218,173 +181,229 @@ static func preview_move_step(
 	var reachable := board.reachable_move_cells(unit)
 	if not (dest in reachable):
 		return _empty_preview("不可达")
-	var steps: Array = [
+	return _pack_preview(
+		true,
+		"%s → (%d,%d)" % [unit.def.display_name, dest.x, dest.y],
+		{},
+		dest,
 		{
-			"text": "移至 (%d,%d)" % [dest.x, dest.y],
-			"kind": "move",
-			"cell": dest,
-			"unit": unit,
+			"highlights": {unit: "caster"},
+			"ghosts": [{"unit": unit, "cell": dest, "kind": "move"}],
+			"lines": [{"from": unit.cell, "to": dest, "kind": "move"}],
+			"mark_cells": [dest],
 		}
-	]
-	return {
-		"ok": true,
-		"log": "%s → (%d,%d)" % [unit.def.display_name, dest.x, dest.y],
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": {},
-		"hover_cell": dest,
-	}
+	)
 
 
 static func preview_stealth(target: TacticalUnitInstance) -> Dictionary:
 	if target == null or not target.is_alive():
 		return _empty_preview("无效隐身预览")
-	var steps: Array = [
-		{"text": "隐身", "kind": "buff", "cell": target.cell, "unit": target}
-	]
-	return {
-		"ok": true,
-		"log": "%s 隐身" % target.def.display_name,
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": {},
-		"hover_cell": target.cell,
-	}
+	return _pack_preview(
+		true,
+		"%s 隐身" % target.def.display_name,
+		{},
+		target.cell,
+		{
+			"highlights": {target: "stealth"},
+			"ghosts": [],
+			"lines": [],
+			"mark_cells": [],
+		}
+	)
 
 
-static func preview_skill_draw() -> Dictionary:
-	var steps: Array = [
-		{"text": "弃光手牌", "kind": "info"},
-		{"text": "再抽5", "kind": "info"},
-	]
-	return {
-		"ok": true,
-		"log": "鸣鼓换手",
-		"steps": steps,
-		"chain_text": _join_steps(steps),
-		"unit_deltas": {},
-		"hover_cell": Vector2i(-1, -1),
-	}
+static func preview_skill_draw(drummer: TacticalUnitInstance = null) -> Dictionary:
+	var highlights: Dictionary = {}
+	var hover := Vector2i(-1, -1)
+	if drummer != null and drummer.is_alive():
+		highlights[drummer] = "caster"
+		hover = drummer.cell
+	return _pack_preview(
+		true,
+		"鸣鼓换手",
+		{},
+		hover,
+		{"highlights": highlights, "ghosts": [], "lines": [], "mark_cells": []}
+	)
+
+
+static func preview_attack_authorize(attacker: TacticalUnitInstance) -> Dictionary:
+	if attacker == null or not attacker.is_alive():
+		return _empty_preview("无效攻击授权")
+	return _pack_preview(
+		true,
+		"攻击授权",
+		{},
+		attacker.cell,
+		{
+			"highlights": {attacker: "caster"},
+			"ghosts": [],
+			"lines": [],
+			"mark_cells": [],
+			"show_attack_range": true,
+			"attack_unit": attacker,
+		}
+	)
 
 
 static func _empty_preview(log: String) -> Dictionary:
+	return _pack_preview(false, log, {}, Vector2i(-1, -1), {})
+
+
+static func _pack_preview(
+	ok: bool,
+	log: String,
+	unit_deltas: Dictionary,
+	hover_cell: Variant,
+	visuals: Dictionary
+) -> Dictionary:
 	return {
-		"ok": false,
+		"ok": ok,
 		"log": log,
-		"steps": [],
-		"chain_text": "",
-		"unit_deltas": {},
-		"hover_cell": Vector2i(-1, -1),
+		"unit_deltas": unit_deltas,
+		"hover_cell": hover_cell,
+		"highlights": visuals.get("highlights", {}),
+		"ghosts": visuals.get("ghosts", []),
+		"lines": visuals.get("lines", []),
+		"mark_cells": visuals.get("mark_cells", []),
+		"show_reachable": bool(visuals.get("show_reachable", false)),
+		"move_unit": visuals.get("move_unit", null),
+		"show_attack_range": bool(visuals.get("show_attack_range", false)),
+		"attack_unit": visuals.get("attack_unit", null),
 	}
 
 
-static func _join_steps(steps: Array) -> String:
-	var parts: PackedStringArray = []
-	var seen: Dictionary = {}
-	for s in steps:
-		if not (s is Dictionary):
+static func _highlights_from_deltas(unit_deltas: Dictionary, default_kind: String) -> Dictionary:
+	var out: Dictionary = {}
+	for u in unit_deltas.keys():
+		if not (u is TacticalUnitInstance):
 			continue
-		var t := str((s as Dictionary).get("text", "")).strip_edges()
-		if t.is_empty() or seen.has(t):
-			continue
-		seen[t] = true
-		parts.append(t)
-	return " → ".join(parts)
-
-
-static func _append_fx_steps(fx: Array, steps: Array) -> void:
-	for ev in fx:
-		if not (ev is Dictionary):
-			continue
-		var text := str((ev as Dictionary).get("text", "")).strip_edges()
-		if text.is_empty():
-			continue
-		var kind := "trigger"
-		var sync := str((ev as Dictionary).get("sync", ""))
-		var fk := str((ev as Dictionary).get("kind", ""))
-		if text.begins_with("+") and text.contains("血"):
-			kind = "heal"
-		elif text.begins_with("-") or text.begins_with("−"):
+		var d: Dictionary = unit_deltas[u] as Dictionary
+		var hp_d := int(d.get("hp_delta", 0))
+		var ar_d := int(d.get("armor_delta", 0))
+		var kind := default_kind
+		if int(d.get("hp", 1)) <= 0:
+			kind = "kill"
+		elif hp_d < 0 or ar_d < 0:
 			kind = "damage"
-		elif sync.begins_with("buff") or text.contains("攻") or text.contains("狂") or text.contains("甲"):
+		elif hp_d > 0:
+			kind = "heal"
+		elif ar_d > 0:
 			kind = "buff"
-		elif fk == "skill_prompt":
-			kind = "trigger"
-		steps.append(
-			{
-				"text": text,
-				"kind": kind,
-				"cell": (ev as Dictionary).get("cell", Vector2i(-1, -1)),
-			}
-		)
+		out[u] = kind
+	return out
 
 
-static func _collect_attack_steps(atk: Dictionary, steps: Array) -> void:
-	var dmg := int(atk.get("damage", 0))
+static func _cell_before(snap: Dictionary, unit: TacticalUnitInstance) -> Vector2i:
+	for row_v in snap.get("units", []) as Array:
+		if not (row_v is Dictionary):
+			continue
+		var row: Dictionary = row_v
+		if row.get("unit") == unit:
+			return row.get("cell", unit.cell) as Vector2i
+	return unit.cell if unit != null else Vector2i(-1, -1)
+
+
+static func _visuals_from_attack(
+	atk: Dictionary,
+	attacker: TacticalUnitInstance,
+	snap: Dictionary,
+	unit_deltas: Dictionary
+) -> Dictionary:
+	var highlights := _highlights_from_deltas(unit_deltas, "damage")
+	if attacker != null:
+		highlights[attacker] = "caster"
+	var ghosts: Array = []
+	var lines: Array = []
+	var marks: Array = []
 	var target: TacticalUnitInstance = atk.get("target") as TacticalUnitInstance
-	if dmg > 0 and target != null:
-		var armor_note := ""
-		steps.append(
-			{
-				"text": "-%d" % dmg,
-				"kind": "damage",
-				"cell": target.cell,
-				"unit": target,
-				"extra": armor_note,
-			}
-		)
-	if bool(atk.get("knockback_blocked", false)):
-		steps.append({"text": "击退受阻×1.2", "kind": "info"})
-	elif bool(atk.get("knockback_moved", false)):
+	var hit_cell: Vector2i = atk.get("knockback_from", Vector2i(-1, -1)) as Vector2i
+	if hit_cell.x < 0 and target != null:
+		hit_cell = _cell_before(snap, target)
+	var atk_from := _cell_before(snap, attacker)
+	if hit_cell.x >= 0:
+		lines.append({"from": atk_from, "to": hit_cell, "kind": "attack"})
+		marks.append(hit_cell)
+	if bool(atk.get("knockback_moved", false)) and target != null:
 		var kto: Vector2i = atk.get("knockback_to", Vector2i(-1, -1)) as Vector2i
-		steps.append({"text": "击退(%d,%d)" % [kto.x, kto.y], "kind": "info"})
-	if bool(atk.get("killed", false)):
-		steps.append({"text": "击杀", "kind": "trigger"})
+		if kto.x >= 0:
+			ghosts.append({"unit": target, "cell": kto, "kind": "knockback"})
+			marks.append(kto)
+	elif bool(atk.get("knockback_blocked", false)):
+		var blocked: Vector2i = atk.get("knockback_to", Vector2i(-1, -1)) as Vector2i
+		if blocked.x >= 0:
+			marks.append(blocked)
 	var col: TacticalUnitInstance = atk.get("collision_target") as TacticalUnitInstance
-	var col_dmg := int(atk.get("collision_damage", 0))
-	if col != null and col_dmg > 0:
-		steps.append(
-			{"text": "撞-%d" % col_dmg, "kind": "damage", "cell": col.cell, "unit": col}
-		)
-		if bool(atk.get("collision_killed", false)):
-			steps.append({"text": "撞杀", "kind": "trigger"})
+	if col != null:
+		highlights[col] = "damage" if not bool(atk.get("collision_killed", false)) else "kill"
 	for hit in atk.get("volley_hits", []) as Array:
 		if not (hit is Dictionary):
 			continue
 		var vu: TacticalUnitInstance = (hit as Dictionary).get("unit") as TacticalUnitInstance
-		var vdmg := int((hit as Dictionary).get("damage", 0))
-		if vu == null or vdmg <= 0:
+		var vcell: Vector2i = (hit as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+		if vu == null:
 			continue
-		steps.append(
-			{"text": "齐发-%d" % vdmg, "kind": "damage", "cell": vu.cell, "unit": vu}
-		)
 		if bool((hit as Dictionary).get("killed", false)):
-			steps.append({"text": "齐发击杀", "kind": "trigger"})
-	if int(atk.get("burn_applied", 0)) > 0:
-		steps.append({"text": "燃爆+%d" % int(atk.get("burn_applied", 0)), "kind": "buff"})
-	_append_fx_steps(atk.get("passive_fx", []) as Array, steps)
+			highlights[vu] = "kill"
+		elif not highlights.has(vu):
+			highlights[vu] = "damage"
+		if vcell.x >= 0:
+			marks.append(vcell)
+	if bool(atk.get("killed", false)) and target != null:
+		highlights[target] = "kill"
+	return {
+		"highlights": highlights,
+		"ghosts": ghosts,
+		"lines": lines,
+		"mark_cells": marks,
+	}
 
 
-static func _collect_charge_steps(res: Dictionary, steps: Array) -> void:
+static func _visuals_from_charge(
+	res: Dictionary,
+	knight: TacticalUnitInstance,
+	snap: Dictionary,
+	unit_deltas: Dictionary
+) -> Dictionary:
+	var highlights := _highlights_from_deltas(unit_deltas, "damage")
+	if knight != null:
+		highlights[knight] = "caster"
+	var ghosts: Array = []
+	var lines: Array = []
+	var marks: Array = []
+	var from_cell: Vector2i = res.get("from_cell", _cell_before(snap, knight)) as Vector2i
+	var to_cell: Vector2i = res.get("to_cell", from_cell) as Vector2i
+	if to_cell != from_cell:
+		ghosts.append({"unit": knight, "cell": to_cell, "kind": "charge"})
+		lines.append({"from": from_cell, "to": to_cell, "kind": "move"})
+		marks.append(to_cell)
 	for hit in res.get("hits", []) as Array:
 		if not (hit is Dictionary):
 			continue
 		var vu: TacticalUnitInstance = (hit as Dictionary).get("unit") as TacticalUnitInstance
-		var vdmg := int((hit as Dictionary).get("damage", 0))
-		if vu == null or vdmg <= 0:
+		var vcell: Vector2i = (hit as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+		if vu == null:
 			continue
-		steps.append(
-			{"text": "撞-%d" % vdmg, "kind": "damage", "cell": vu.cell, "unit": vu}
-		)
 		if bool((hit as Dictionary).get("killed", false)):
-			steps.append({"text": "击杀", "kind": "trigger"})
-		elif bool((hit as Dictionary).get("knock_moved", false)):
-			steps.append({"text": "撞开", "kind": "info"})
-	var self_dmg := int(res.get("self_damage", 0))
-	if self_dmg > 0:
-		steps.append({"text": "撞墙自伤-%d" % self_dmg, "kind": "damage"})
-		if bool(res.get("self_killed", false)):
-			steps.append({"text": "自灭", "kind": "trigger"})
+			highlights[vu] = "kill"
+		else:
+			highlights[vu] = "damage"
+		if vcell.x >= 0:
+			marks.append(vcell)
+		if bool((hit as Dictionary).get("knock_moved", false)):
+			var kto: Vector2i = (hit as Dictionary).get("knock_to", Vector2i(-1, -1)) as Vector2i
+			if kto.x >= 0:
+				ghosts.append({"unit": vu, "cell": kto, "kind": "knockback"})
+	if bool(res.get("self_killed", false)) and knight != null:
+		highlights[knight] = "kill"
+	elif int(res.get("self_damage", 0)) > 0 and knight != null:
+		highlights[knight] = "damage"
+	return {
+		"highlights": highlights,
+		"ghosts": ghosts,
+		"lines": lines,
+		"mark_cells": marks,
+	}
 
 
 static func _snapshot(board: TacticalBoard) -> Dictionary:
