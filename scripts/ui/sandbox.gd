@@ -508,8 +508,7 @@ func _refresh_all() -> void:
 			pass
 	elif _selected_unit != null and _selected_unit.is_alive():
 		sel_cell = _selected_unit.cell
-		# 敌方狼骑兵：点选即展示当前可行动邻域（绿=移动可达≤MOVE_STEP_CAP，红=攻击射程）
-		# + 下一回合意图虚影（路径/目标/回血加攻提示）。
+		# 敌方状态机单位：点选即展示可行动邻域 + 下一回合意图虚影。
 		if TacticalEnemyAiScript.uses_behavior_sm(_selected_unit):
 			move_cells = _board.preview_reachable_move_cells(
 				_selected_unit, TacticalEnemyAiScript.MOVE_STEP_CAP
@@ -1626,6 +1625,14 @@ func _run_opponent_turn_async() -> void:
 				)
 				_refresh_all()
 				await get_tree().create_timer(0.28).timeout
+			elif kind == "summon":
+				var summoner := ev["unit"] as TacticalUnitInstance
+				_last_log = str(ev.get("log", "对手召唤"))
+				_board_view.play_float_text(
+					summoner.cell, "召唤%d" % int(ev.get("amount", 0)), Color("d4a0ff")
+				)
+				_refresh_all()
+				await get_tree().create_timer(0.35).timeout
 			elif kind == "idle":
 				_last_log = str(ev.get("log", "对手待机"))
 				_refresh_all()

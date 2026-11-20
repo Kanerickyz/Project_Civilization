@@ -18,7 +18,8 @@
 | [Features/ATTACK_KNOCKBACK.md](./Features/ATTACK_KNOCKBACK.md) | **近战击退** · 邻格/射程1 · 受阻×1.2 · 碰撞+1 · 远程不推 |
 | [Features/KNIGHT_CHARGE.md](./Features/KNIGHT_CHARGE.md) | **盾卫冲撞** · 方向最多 3 格 · 路径伤+撞开 · 撞墙自伤 3 |
 | [Features/COMBAT.md](./Features/COMBAT.md) | **普攻 / 胜负 / 对手 AI** |
-| [Features/WOLF_CAVALRY_INTENT.md](./Features/WOLF_CAVALRY_INTENT.md) | **狼骑兵意图状态机** · 攻/移/血|加 · 意图角标 |
+| [Features/WOLF_CAVALRY_INTENT.md](./Features/WOLF_CAVALRY_INTENT.md) | **狼骑兵意图状态机** · 移动攻击/血|加 · 意图角标 |
+| [Features/ENEMY_CONFIGS.md](./Features/ENEMY_CONFIGS.md) | **敌人配置池** · 配置 A 狼骑 / B 骷髅将军 · 开局随机 |
 | [Features/CARD_ACTIONS.md](./Features/CARD_ACTIONS.md) | **卡牌行动层** · 移/攻卡 · STS 抽弃 |
 | [Features/BURN_STATUS.md](./Features/BURN_STATUS.md) | **燃烧状态** · 爆爆燃爆 / 死亡点燃 |
 | [Features/DEPLOYMENT.md](./Features/DEPLOYMENT.md) | **开战前部署** · 左半盘站位 · 敌方开局生成 · 确认开战 |

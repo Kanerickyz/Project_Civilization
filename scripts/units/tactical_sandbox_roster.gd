@@ -17,35 +17,31 @@ const PLAYER_UNIT_PATHS: Array[String] = [
 	"res://resources/units/healer.tres",
 ]
 
-## 敌方六狼骑兵（autochess id `rider` / 剪纸 unit_rider；各 max_hp=10）。
-const OPPONENT_UNIT_PATH := "res://resources/units/rider.tres"
-const ENEMY_SPAWN_COUNT := 6
+## 敌人配置池：关卡从中随机抽一套。Headless/demo 固定配置 A。
+const ENEMY_CONFIG_POOL_PATHS: Array[String] = [
+	"res://resources/enemies/enemy_config_a.tres",
+	"res://resources/enemies/enemy_config_b.tres",
+]
+const DEMO_ENEMY_CONFIG_PATH := "res://resources/enemies/enemy_config_a.tres"
 
 
-## Headless / runner：固定站位 + 立刻生成敌方（便于断言）。
+## Headless / runner：固定站位 + 配置 A（六狼骑兵，便于断言）。
 static func build_demo_board(width: int, height: int) -> TacticalBoard:
 	var board: TacticalBoard = TacticalBoardScript.new()
 	board.setup(width, height)
 	var player_defs: Array[TacticalUnitDef] = _load_defs(PLAYER_UNIT_PATHS)
-	var rider_def := _load_one_def(OPPONENT_UNIT_PATH)
 	var player_cells := _demo_side_cells(width, height, true, player_defs.size())
 	for i in player_defs.size():
 		var p_cell: Vector2i = player_cells[i]
 		board.add_unit(
 			TacticalUnitInstanceScript.new(player_defs[i], TacticalFactionScript.Id.PLAYER, p_cell)
 		)
-	if rider_def != null:
-		var opp_cells := _demo_side_cells(width, height, false, ENEMY_SPAWN_COUNT)
-		for i in opp_cells.size():
-			board.add_unit(
-				TacticalUnitInstanceScript.new(
-					rider_def, TacticalFactionScript.Id.OPPONENT, opp_cells[i]
-				)
-			)
+	var config := _load_enemy_config(DEMO_ENEMY_CONFIG_PATH)
+	_place_enemies_from_config_demo(board, width, height, config)
 	return board
 
 
-## 对战开局：成簇地形 → 左半随机友方 + 右半敌方狼骑兵（部署阶段已在场）。
+## 对战开局：成簇地形 → 左半随机友方 + 右半从敌人配置池随机一套。
 static func build_board_for_config(config: BoardConfig, seed_value: int = -1) -> TacticalBoard:
 	var board: TacticalBoard = TacticalBoardScript.new()
 	board.setup(config.grid_width, config.grid_height)
@@ -61,9 +57,26 @@ static func build_board_for_config(config: BoardConfig, seed_value: int = -1) ->
 	else:
 		rng.randomize()
 	_place_players_random(board, rng)
-	_place_enemies_random(board, rng, ENEMY_SPAWN_COUNT)
+	var enemy_cfg := pick_enemy_config(rng)
+	_place_enemies_from_config(board, rng, enemy_cfg)
 	_relocate_units_off_impassable(board)
 	return board
+
+
+## 从配置池随机抽一套；池空时回退配置 A。
+static func pick_enemy_config(rng: RandomNumberGenerator = null) -> TacticalEnemyConfig:
+	var local_rng := rng
+	if local_rng == null:
+		local_rng = RandomNumberGenerator.new()
+		local_rng.randomize()
+	var pool: Array[TacticalEnemyConfig] = []
+	for path in ENEMY_CONFIG_POOL_PATHS:
+		var cfg := _load_enemy_config(path)
+		if cfg != null:
+			pool.append(cfg)
+	if pool.is_empty():
+		return _load_enemy_config(DEMO_ENEMY_CONFIG_PATH)
+	return pool[local_rng.randi_range(0, pool.size() - 1)]
 
 
 ## 左半 / 右半演示站位：靠各自外缘列，中间留空，减少测试叠格/误邻。
@@ -116,23 +129,52 @@ static func _place_players_random(board: TacticalBoard, rng: RandomNumberGenerat
 		)
 
 
-static func _place_enemies_random(
-	board: TacticalBoard, rng: RandomNumberGenerator, count: int
+static func _place_enemies_from_config(
+	board: TacticalBoard, rng: RandomNumberGenerator, config: TacticalEnemyConfig
 ) -> void:
-	var rider_def := _load_one_def(OPPONENT_UNIT_PATH)
-	if rider_def == null:
+	if config == null:
 		return
 	var used: Dictionary = {}
 	for u in board.living_units():
 		used[u.cell] = true
-	for _i in range(count):
-		var cell := _pick_random_passable_empty(board, used, rng, false)
-		if cell.x < 0:
-			break
-		used[cell] = true
-		board.add_unit(
-			TacticalUnitInstanceScript.new(rider_def, TacticalFactionScript.Id.OPPONENT, cell)
-		)
+	for entry in config.spawn_entries:
+		if entry == null or entry.unit_def == null or entry.count <= 0:
+			continue
+		for _i in range(entry.count):
+			var cell := _pick_random_passable_empty(board, used, rng, false)
+			if cell.x < 0:
+				break
+			used[cell] = true
+			board.add_unit(
+				TacticalUnitInstanceScript.new(
+					entry.unit_def, TacticalFactionScript.Id.OPPONENT, cell
+				)
+			)
+
+
+static func _place_enemies_from_config_demo(
+	board: TacticalBoard, width: int, height: int, config: TacticalEnemyConfig
+) -> void:
+	if config == null:
+		return
+	var total := 0
+	for entry in config.spawn_entries:
+		if entry != null and entry.count > 0:
+			total += entry.count
+	var cells := _demo_side_cells(width, height, false, total)
+	var idx := 0
+	for entry in config.spawn_entries:
+		if entry == null or entry.unit_def == null or entry.count <= 0:
+			continue
+		for _i in range(entry.count):
+			if idx >= cells.size():
+				return
+			board.add_unit(
+				TacticalUnitInstanceScript.new(
+					entry.unit_def, TacticalFactionScript.Id.OPPONENT, cells[idx]
+				)
+			)
+			idx += 1
 
 
 ## prefer_left=true → 左半；false → 右半；同侧无格时放开半盘。
@@ -239,4 +281,12 @@ static func _load_one_def(path: String) -> TacticalUnitDef:
 	if loaded is TacticalUnitDef:
 		return loaded as TacticalUnitDef
 	push_warning("TacticalSandboxRoster: missing %s" % path)
+	return null
+
+
+static func _load_enemy_config(path: String) -> TacticalEnemyConfig:
+	var loaded := load(path)
+	if loaded is TacticalEnemyConfig:
+		return loaded as TacticalEnemyConfig
+	push_warning("TacticalSandboxRoster: missing enemy config %s" % path)
 	return null
