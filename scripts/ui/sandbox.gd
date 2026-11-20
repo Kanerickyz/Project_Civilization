@@ -176,9 +176,7 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 		if not u.is_alive():
 			_purge_dead_unit_cards(u)
 	if tick_events.size() > 0:
-		_refresh_all()
-		# 给飘字一拍可见窗口，再让本方单位执行意图/出牌。
-		await get_tree().create_timer(0.38).timeout
+		# 先冻结死亡位并播淡出/剪影，再 refresh（sync 会保留 dying 节点）。
 		for dead in killed_now:
 			_board_view.play_unit_death(dead)
 			if _selected_unit == dead:
@@ -186,10 +184,12 @@ func _apply_side_turn_start_triggers(faction: TacticalFaction.Id) -> void:
 			if _focus_unit == dead:
 				_focus_unit = null
 				_pending_kind = PendingKind.NONE
-		# 同 tick 多死：一条红带 + 多剪影各锚死亡位。
 		_play_kill_impacts(killed_now)
+		_refresh_all()
+		# 给飘字 + 死亡淡出一拍可见窗口，再让本方单位执行意图/出牌。
+		await get_tree().create_timer(0.38).timeout
+		await _await_presentation_idle_async()
 		if killed_now.size() > 0:
-			await get_tree().create_timer(0.22).timeout
 			if _check_victory():
 				return
 	var logs := TacticalAbilitySystemScript.process_side_turn_start(_board, faction)
@@ -1402,6 +1402,7 @@ func _run_player_charge_async(target_cell: Vector2i) -> void:
 	await _play_skill_fx_async(res.get("passive_fx", []) as Array)
 	_pending_kind = PendingKind.NONE
 	_check_victory()
+	await _await_presentation_idle_async()
 	_input_locked = false
 	_refresh_all()
 	_maybe_auto_end_player_turn_if_hand_empty()
@@ -1472,6 +1473,8 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		_pending_kind = PendingKind.ATTACK
 		_focus_unit = attacker
 	_check_victory()
+	# 等死亡淡出/剪影/飘字播完再 unlock+refresh，避免尸体被 sync 提前拆掉。
+	await _await_presentation_idle_async()
 	_input_locked = false
 	_refresh_all()
 	# 攻击/友方死亡抽牌等补牌结算完后再判空手。
@@ -1861,8 +1864,7 @@ func _run_opponent_turn_async() -> void:
 				_last_log = res.get("log", "对手攻击")
 				if target != null:
 					await _feedback_from_attack(target, res, cell)
-					if res.get("killed", false):
-						await get_tree().create_timer(0.22).timeout
+				await _await_presentation_idle_async()
 				_refresh_all()
 				await get_tree().create_timer(0.28).timeout
 			elif kind == "heal":

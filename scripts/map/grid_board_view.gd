@@ -120,6 +120,14 @@ var _intent_preview_unit: TacticalUnitInstance = null
 var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
+## 死亡淡出期间保留精灵；sync 不得拆掉，剪影锚冻结在死亡世界坐标。
+var _dying_units: Dictionary = {} # TacticalUnitInstance -> true
+var _unit_death_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+var _frozen_death_world: Dictionary = {} # TacticalUnitInstance -> Vector2
+## 受击/冲刺 Tween；死亡时须杀掉，避免 finished 里 snap 把尸体挪格。
+var _unit_hit_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+var _unit_attack_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+const UNIT_DEATH_SEC := 0.32
 var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Control（数字 + 分段血条）
 var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 燃N）
 var _frenzy_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 狂N）
@@ -425,6 +433,17 @@ func _rebuild_board() -> void:
 	var moving_units: Array = _unit_move_tweens.keys()
 	for key in moving_units:
 		_kill_unit_move_tween(key as TacticalUnitInstance)
+	var dying_keys: Array = _unit_death_tweens.keys()
+	for key in dying_keys:
+		_kill_unit_death_tween(key as TacticalUnitInstance)
+	var hit_keys: Array = _unit_hit_tweens.keys()
+	for key in hit_keys:
+		_kill_unit_hit_tween(key as TacticalUnitInstance)
+	var atk_keys: Array = _unit_attack_tweens.keys()
+	for key in atk_keys:
+		_kill_unit_attack_tween(key as TacticalUnitInstance)
+	_dying_units.clear()
+	_frozen_death_world.clear()
 	_drag_select_unit = null
 	_drag_select_valid = false
 	_overlay_drag_hover = Vector2i(-1, -1)
@@ -438,6 +457,9 @@ func _rebuild_board() -> void:
 		_kill_unit_passive_tween(key as TacticalUnitInstance)
 		(_unit_sprites[key] as Node).queue_free()
 	_unit_passive_tweens.clear()
+	_unit_death_tweens.clear()
+	_unit_hit_tweens.clear()
+	_unit_attack_tweens.clear()
 	for child in _tiles_root.get_children():
 		child.queue_free()
 	for child in _units_root.get_children():
@@ -549,8 +571,12 @@ func sync_tactical_units(
 			_ensure_unit_sprite(u as TacticalUnitInstance)
 			_sync_unit_position(u as TacticalUnitInstance)
 	for key in _unit_sprites.keys():
-		if not alive.has(key):
-			_remove_unit_visual(key)
+		if alive.has(key):
+			continue
+		# 死亡淡出未完：保留节点，避免 sync 瞬删导致剪影错位/瞬移消失。
+		if _dying_units.has(key) or _unit_death_tweens.has(key):
+			continue
+		_remove_unit_visual(key)
 	_sync_intent_preview(intent_preview, intent_unit)
 	for cell in _overlay_nodes.keys():
 		_apply_overlay(cell)
@@ -558,6 +584,9 @@ func sync_tactical_units(
 
 func _sync_unit_position(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites[unit] as Sprite2D
+	# 死亡淡出：位置已冻结，禁止 remount/瞬移。
+	if _dying_units.has(unit) or _unit_death_tweens.has(unit):
+		return
 	# 逻辑格已变且正在播移动 Tween 时，勿再 sync（否则会 kill tween 并瞬移到终点）。
 	if _unit_move_tweens.has(unit):
 		_update_hp_bar(unit)
@@ -712,7 +741,10 @@ func _kill_unit_move_tween(unit: TacticalUnitInstance) -> void:
 func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> Tween:
 	if config == null or not _unit_sprites.has(attacker):
 		return null
+	if _dying_units.has(attacker):
+		return null
 	_pause_unit_idle(attacker)
+	_kill_unit_attack_tween(attacker)
 	var spr := _unit_sprites[attacker] as Sprite2D
 	var home := _unit_combat_home(attacker, spr)
 	spr.position = home
@@ -721,16 +753,30 @@ func play_unit_attack(attacker: TacticalUnitInstance, target_cell: Vector2i) -> 
 	if delta.length_squared() > 0.0001:
 		lunge = home + delta.normalized() * minf(delta.length() * 0.42, unit_attack_lunge_cap())
 	var tw := create_tween()
+	_unit_attack_tweens[attacker] = tw
 	tw.tween_property(spr, "position", lunge, 0.09).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	# 不用 TRANS_BACK：回弹会短暂越过格心。
 	tw.tween_property(spr, "position", home, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(func() -> void:
+		if _unit_attack_tweens.get(attacker) == tw:
+			_unit_attack_tweens.erase(attacker)
 		if not is_instance_valid(spr) or not _unit_sprites.has(attacker):
+			return
+		if _dying_units.has(attacker):
 			return
 		_snap_unit_to_cell_center(attacker)
 		_ensure_unit_idle(attacker)
 	)
 	return tw
+
+
+func _kill_unit_attack_tween(unit: TacticalUnitInstance) -> void:
+	if not _unit_attack_tweens.has(unit):
+		return
+	var tw: Tween = _unit_attack_tweens[unit] as Tween
+	_unit_attack_tweens.erase(unit)
+	if tw != null and is_instance_valid(tw):
+		tw.kill()
 
 
 func attack_tween_duration_sec() -> float:
@@ -745,6 +791,11 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 	_kill_unit_idle(unit)
 	_kill_unit_select_tween(unit)
 	_kill_unit_passive_tween(unit)
+	_kill_unit_hit_tween(unit)
+	_kill_unit_attack_tween(unit)
+	_kill_unit_death_tween(unit)
+	_dying_units.erase(unit)
+	_frozen_death_world.erase(unit)
 	_unit_base_offsets.erase(unit)
 	_unit_base_scales.erase(unit)
 	if _unit_sprites.has(unit):
@@ -868,7 +919,7 @@ func _pump_float_queue(cell: Vector2i) -> void:
 	)
 
 
-## 战斗表现是否仍在播：飘字队列/在飞飘字、被动抖动、位移 Tween。
+## 战斗表现是否仍在播：飘字队列/在飞飘字、被动抖动、位移/死亡/受击/冲刺 Tween。
 ## 勿把常驻血攻 Label（同挂 _labels_root）当成在播，否则结束行动会空等超时。
 func is_combat_presentation_busy() -> bool:
 	if not _float_queues.is_empty():
@@ -884,7 +935,21 @@ func is_combat_presentation_busy() -> bool:
 		return true
 	if not _unit_move_tweens.is_empty():
 		return true
+	if not _unit_death_tweens.is_empty() or not _dying_units.is_empty():
+		return true
+	if not _unit_hit_tweens.is_empty():
+		return true
+	if not _unit_attack_tweens.is_empty():
+		return true
 	return false
+
+
+func unit_death_duration_sec() -> float:
+	return UNIT_DEATH_SEC
+
+
+func is_unit_dying(unit: TacticalUnitInstance) -> bool:
+	return unit != null and (_dying_units.has(unit) or _unit_death_tweens.has(unit))
 
 
 func _spawn_float_label(item: Dictionary) -> void:
@@ -1002,6 +1067,8 @@ func _kill_unit_passive_tween(unit: TacticalUnitInstance) -> void:
 func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	if config == null or not _unit_sprites.has(unit):
 		return null
+	if _dying_units.has(unit):
+		return null
 	_pause_unit_idle(unit)
 	# 受击用 position + 纯白 flash shader；先停选中/被动 scale，避免叠脉冲。
 	if _drag_select_unit == unit:
@@ -1009,6 +1076,7 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	else:
 		_kill_unit_select_tween(unit)
 	_kill_unit_passive_tween(unit)
+	_kill_unit_hit_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	var home := _unit_combat_home(unit, spr)
 	spr.position = home
@@ -1022,6 +1090,7 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 	# 瞬间完全纯白 → 短停 → 淡回；结束后卸 material，恢复默认 Sprite2D 亮度。
 	mat.set_shader_parameter("flash_amount", 1.0)
 	var tw := create_tween()
+	_unit_hit_tweens[unit] = tw
 	tw.tween_property(spr, "position", home + Vector2(shake, 0.0), 0.05).set_trans(Tween.TRANS_SINE)
 	tw.parallel().tween_interval(UNIT_HIT_FLASH_HOLD_SEC)
 	tw.tween_property(spr, "position", home, 0.12).set_trans(Tween.TRANS_SINE)
@@ -1029,7 +1098,12 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 		_apply_hit_flash_amount.bind(mat), 1.0, 0.0, UNIT_HIT_FLASH_FADE_SEC
 	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(func() -> void:
+		if _unit_hit_tweens.get(unit) == tw:
+			_unit_hit_tweens.erase(unit)
 		if not is_instance_valid(spr) or not _unit_sprites.has(unit):
+			return
+		# 已进入死亡淡出：勿 snap remount，否则尸体错位。
+		if _dying_units.has(unit):
 			return
 		spr.modulate = rest
 		_end_unit_flash(spr)
@@ -1038,6 +1112,15 @@ func play_unit_hit(unit: TacticalUnitInstance) -> Tween:
 			_ensure_unit_idle(unit)
 	)
 	return tw
+
+
+func _kill_unit_hit_tween(unit: TacticalUnitInstance) -> void:
+	if not _unit_hit_tweens.has(unit):
+		return
+	var tw: Tween = _unit_hit_tweens[unit] as Tween
+	_unit_hit_tweens.erase(unit)
+	if tw != null and is_instance_valid(tw):
+		tw.kill()
 
 
 func _begin_unit_flash(spr: Sprite2D) -> ShaderMaterial:
@@ -1074,23 +1157,79 @@ func unit_hit_flash_amount(unit: TacticalUnitInstance) -> float:
 	return float(mat.get_shader_parameter("flash_amount"))
 
 
-func play_unit_death(unit: TacticalUnitInstance) -> void:
-	if not _unit_sprites.has(unit):
-		return
+## 死亡表现：先冻结世界坐标，再淡出；sync 保留节点至 tween 结束再拆。
+## 返回 Tween 供调用方 await；已在死亡中则返回现有 tween。
+func play_unit_death(unit: TacticalUnitInstance) -> Tween:
+	if unit == null or not _unit_sprites.has(unit):
+		return null
+	if _unit_death_tweens.has(unit):
+		return _unit_death_tweens[unit] as Tween
 	_kill_unit_idle(unit)
+	_kill_unit_move_tween(unit)
+	_kill_unit_hit_tween(unit)
+	_kill_unit_attack_tween(unit)
+	_kill_unit_passive_tween(unit)
 	if _drag_select_unit == unit:
 		_clear_drag_select_unit()
 	else:
 		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	_end_unit_flash(spr)
+	# 浮到 units_root 并冻结世界坐标：后续 sync/格子变化不得带动尸体。
+	_float_unit_for_world_tween(spr)
+	_frozen_death_world[unit] = spr.position
+	_dying_units[unit] = true
+	_last_unit_cells[unit] = unit.cell
+	# 死亡时收起血条/角标，避免悬空读数。
+	if _hp_bars.has(unit):
+		var hp_root: Control = _hp_bars[unit] as Control
+		if hp_root != null and is_instance_valid(hp_root):
+			hp_root.visible = false
+	if _burn_badges.has(unit):
+		var burn_root: Control = _burn_badges[unit] as Control
+		if burn_root != null and is_instance_valid(burn_root):
+			burn_root.visible = false
+	if _frenzy_badges.has(unit):
+		var frenzy_root: Control = _frenzy_badges[unit] as Control
+		if frenzy_root != null and is_instance_valid(frenzy_root):
+			frenzy_root.visible = false
+	if _intent_icons.has(unit):
+		var intent_root: Control = _intent_icons[unit] as Control
+		if intent_root != null and is_instance_valid(intent_root):
+			intent_root.visible = false
+	if _unit_blobs.has(unit):
+		var blob: CanvasItem = _unit_blobs[unit] as CanvasItem
+		if blob != null and is_instance_valid(blob):
+			blob.visible = false
 	var tw := create_tween()
+	_unit_death_tweens[unit] = tw
 	tw.set_parallel(true)
-	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), 0.32)
-	tw.tween_property(spr, "modulate:a", 0.0, 0.32)
+	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), UNIT_DEATH_SEC)
+	tw.tween_property(spr, "modulate:a", 0.0, UNIT_DEATH_SEC)
+	tw.finished.connect(
+		func() -> void:
+			if _unit_death_tweens.get(unit) == tw:
+				_unit_death_tweens.erase(unit)
+			_dying_units.erase(unit)
+			_frozen_death_world.erase(unit)
+			if _unit_sprites.has(unit):
+				_remove_unit_visual(unit)
+	)
+	return tw
+
+
+func _kill_unit_death_tween(unit: TacticalUnitInstance) -> void:
+	if not _unit_death_tweens.has(unit):
+		return
+	var tw: Tween = _unit_death_tweens[unit] as Tween
+	_unit_death_tweens.erase(unit)
+	if tw != null and is_instance_valid(tw):
+		tw.kill()
 
 
 func _unit_combat_home(unit: TacticalUnitInstance, spr: Sprite2D) -> Vector2:
+	if _dying_units.has(unit) and _frozen_death_world.has(unit):
+		return _frozen_death_world[unit] as Vector2
 	if spr.get_parent() == _units_root:
 		return _cell_to_world(unit.cell, config.cell_size)
 	_mount_unit_on_tile(unit)
@@ -1099,6 +1238,8 @@ func _unit_combat_home(unit: TacticalUnitInstance, spr: Sprite2D) -> Vector2:
 
 func _snap_unit_to_cell_center(unit: TacticalUnitInstance) -> void:
 	if not _unit_sprites.has(unit):
+		return
+	if _dying_units.has(unit):
 		return
 	var spr := _unit_sprites[unit] as Sprite2D
 	_mount_unit_on_tile(unit)
@@ -3013,8 +3154,16 @@ func unit_texture_screen_size(tex: Texture2D, visual_scale: float = 1.0) -> Vect
 
 
 ## 单位标记中心（全局屏幕坐标），供击杀剪影锚点。
+## 死亡淡出中优先用冻结世界坐标，避免受击 snap / sync 导致剪影错位。
 func unit_screen_position(unit: TacticalUnitInstance) -> Vector2:
-	if unit == null or not _unit_sprites.has(unit) or _camera == null:
+	if unit == null or _camera == null:
+		return get_global_rect().get_center()
+	if _frozen_death_world.has(unit):
+		return _world_to_screen(_frozen_death_world[unit] as Vector2)
+	if not _unit_sprites.has(unit):
+		# 精灵已拆但逻辑格仍在：回退格心，总好过屏心。
+		if config != null:
+			return _world_to_screen(_cell_to_world(unit.cell, config.cell_size))
 		return get_global_rect().get_center()
 	var spr := _unit_sprites[unit] as Sprite2D
 	return _world_to_screen(_unit_world_position(spr))

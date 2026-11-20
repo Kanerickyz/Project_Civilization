@@ -61,6 +61,9 @@ func _initialize() -> void:
 	if not await _test_presentation_busy_ignores_hp_labels():
 		quit(1)
 		return
+	if not await _test_death_keeps_visual_until_tween_ends():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -95,6 +98,67 @@ func _test_presentation_busy_ignores_hp_labels() -> bool:
 	await process_frame
 	if not view.is_combat_presentation_busy():
 		push_error("presentation busy: in-flight float label should count as busy")
+		return false
+	return true
+
+
+## PC-108：死亡淡出期间 sync 不得拆精灵；busy 含死亡；世界坐标冻结。
+func _test_death_keeps_visual_until_tween_ends() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	cfg.grid_width = 4
+	cfg.grid_height = 4
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/rider.tres") as TacticalUnitDef
+	if def == null:
+		def = load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		push_error("death keep visual: unit def missing")
+		return false
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var unit: TacticalUnitInstance = UnitInstScript.new(def, FactionScript.Id.OPPONENT, Vector2i(2, 2))
+	view.sync_tactical_units([unit], Vector2i(-1, -1), [], [])
+	await process_frame
+	if not view._unit_sprites.has(unit):
+		push_error("death keep visual: expected sprite after sync")
+		return false
+	var world_before: Vector2 = view._unit_world_position(view._unit_sprites[unit] as Sprite2D)
+	unit.hp = 0
+	var death_tw: Tween = view.play_unit_death(unit)
+	if death_tw == null:
+		push_error("death keep visual: play_unit_death should return tween")
+		return false
+	if not view.is_combat_presentation_busy():
+		push_error("death keep visual: death tween must count as busy")
+		return false
+	# 逻辑已死：sync 空列表不得立刻拆掉 dying 精灵。
+	view.sync_tactical_units([], Vector2i(-1, -1), [], [])
+	await process_frame
+	if not view._unit_sprites.has(unit):
+		push_error("death keep visual: sync must keep dying sprite")
+		return false
+	if not view.is_unit_dying(unit):
+		push_error("death keep visual: expected is_unit_dying during fade")
+		return false
+	var frozen: Vector2 = view._frozen_death_world.get(unit, Vector2.INF) as Vector2
+	if not frozen.is_finite() or frozen.distance_to(world_before) > 0.05:
+		push_error(
+			"death keep visual: frozen death world mismatch before=%s frozen=%s"
+			% [world_before, frozen]
+		)
+		return false
+	await death_tw.finished
+	await process_frame
+	if view._unit_sprites.has(unit):
+		push_error("death keep visual: sprite should be removed after death tween")
+		return false
+	if view.is_combat_presentation_busy():
+		push_error("death keep visual: busy should clear after death")
 		return false
 	return true
 
