@@ -145,7 +145,7 @@ var _action_preview_ghosts: Array = [] # Sprite2D
 var _action_preview_line: Line2D = null
 var _action_preview_mod_backup: Dictionary = {} # unit -> Color
 var _pointer_hover_cell: Vector2i = Vector2i(-999, -999)
-const HP_SEG_MAX_PIP := 12
+const HP_SEG_PER_ROW := 6
 const HP_SEG_W := 7.0
 const HP_SEG_H := 6.0
 const HP_SEG_GAP := 1.0
@@ -1441,16 +1441,17 @@ func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
 		root = Control.new()
 		root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		root.name = "HpBar"
-		var segs := HBoxContainer.new()
+		# VBox 盛多行；每行 HBox 最多 HP_SEG_PER_ROW 段。
+		var segs := VBoxContainer.new()
 		segs.name = "Segments"
 		segs.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		segs.add_theme_constant_override("separation", int(HP_SEG_GAP))
 		root.add_child(segs)
-		var armor_row := HBoxContainer.new()
-		armor_row.name = "ArmorSegments"
-		armor_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		armor_row.add_theme_constant_override("separation", int(HP_SEG_GAP))
-		root.add_child(armor_row)
+		var armor_box := VBoxContainer.new()
+		armor_box.name = "ArmorSegments"
+		armor_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		armor_box.add_theme_constant_override("separation", int(HP_SEG_GAP))
+		root.add_child(armor_box)
 		_labels_root.add_child(root)
 		_hp_bars[unit] = root
 	# 旧版头顶曾有 HP/攻 数字 Label；统一隐藏，只留分段条。
@@ -1504,8 +1505,8 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	if not _hp_bars.has(unit) or not _unit_sprites.has(unit):
 		return
 	var root := _hp_bars[unit] as Control
-	var segs := root.get_node("Segments") as HBoxContainer
-	var armor_row := root.get_node("ArmorSegments") as HBoxContainer
+	var segs := root.get_node("Segments") as VBoxContainer
+	var armor_box := root.get_node("ArmorSegments") as VBoxContainer
 	var legacy_text := root.get_node_or_null("Text") as Label
 	if legacy_text != null:
 		legacy_text.visible = false
@@ -1524,39 +1525,59 @@ func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	# 头顶只留分段血条（+甲段）；生命/攻数字不显示，预览靠段色变化。
 	var show_armor := preview_armor if has_preview else armor_now
 	_rebuild_hp_segments(segs, cur_hp, max_hp, preview_hp if has_preview else -1)
-	_rebuild_armor_segments(armor_row, show_armor)
-	var seg_w := segs.get_combined_minimum_size().x
-	var armor_w := armor_row.get_combined_minimum_size().x if armor_row.visible else 0.0
-	var width := maxf(seg_w, armor_w)
-	var height := HP_SEG_H
-	if armor_row.visible:
-		height += HP_SEG_H + 1.0
-	root.size = Vector2(maxf(width, 1.0), height)
-	segs.position = Vector2((width - seg_w) * 0.5, 0.0)
-	if armor_row.visible:
-		armor_row.position = Vector2((width - armor_w) * 0.5, HP_SEG_H + 1.0)
+	_rebuild_armor_segments(armor_box, show_armor)
+	# Container 需显式 size 才会排布子行；否则多行叠在同一 Y。
+	var seg_size := segs.get_combined_minimum_size()
+	var armor_size := (
+		armor_box.get_combined_minimum_size() if armor_box.visible else Vector2.ZERO
+	)
+	segs.size = seg_size
+	if armor_box.visible:
+		armor_box.size = armor_size
+	var width := maxf(seg_size.x, armor_size.x)
+	var height := seg_size.y
+	if armor_box.visible:
+		height += HP_SEG_GAP + armor_size.y
+	root.size = Vector2(maxf(width, 1.0), maxf(height, 1.0))
+	segs.position = Vector2((width - seg_size.x) * 0.5, 0.0)
+	if armor_box.visible:
+		armor_box.position = Vector2((width - armor_size.x) * 0.5, seg_size.y + HP_SEG_GAP)
 	var head_off := Vector2(0.0, -config.unit_world_height * 1.12)
 	_position_world_on_label(root, _unit_world_position(spr) + head_off)
+	# 居中锚改为底边锚：多行向上长，不压角色头。
+	root.position.y -= root.size.y * 0.5
+
+
+func _clear_container_children(box: Container) -> void:
+	while box.get_child_count() > 0:
+		var ch := box.get_child(0)
+		box.remove_child(ch)
+		ch.queue_free()
+
+
+func _make_seg_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", int(HP_SEG_GAP))
+	return row
 
 
 func _rebuild_hp_segments(
-	row: HBoxContainer, cur_hp: int, max_hp: int, preview_hp: int = -1
+	box: VBoxContainer, cur_hp: int, max_hp: int, preview_hp: int = -1
 ) -> void:
-	while row.get_child_count() > 0:
-		var ch := row.get_child(0)
-		row.remove_child(ch)
-		ch.queue_free()
-	var pip_count := mini(maxi(1, max_hp), HP_SEG_MAX_PIP)
-	var scale := float(max_hp) / float(pip_count)
+	_clear_container_children(box)
+	# 1 HP = 1 段；一行最多 HP_SEG_PER_ROW，多的换行（不再聚合成少段）。
+	var pip_count := maxi(1, max_hp)
+	var row: HBoxContainer = null
 	for i in range(pip_count):
+		if i % HP_SEG_PER_ROW == 0:
+			row = _make_seg_row()
+			box.add_child(row)
 		var pip := ColorRect.new()
 		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		pip.custom_minimum_size = Vector2(HP_SEG_W, HP_SEG_H)
-		# 每段覆盖的血量区间（向上取整边界）。
-		var lo := int(floor(float(i) * scale))
-		var hi := int(ceil(float(i + 1) * scale))
-		var filled_now := cur_hp > lo
-		var filled_preview := preview_hp < 0 or preview_hp > lo
+		var filled_now := cur_hp > i
+		var filled_preview := preview_hp < 0 or preview_hp > i
 		if preview_hp >= 0 and filled_now and not filled_preview:
 			pip.color = HP_PREVIEW_LOSS
 		elif preview_hp >= 0 and not filled_now and filled_preview:
@@ -1565,23 +1586,20 @@ func _rebuild_hp_segments(
 			pip.color = HP_FILL
 		else:
 			pip.color = HP_EMPTY
-		# 高血上限时用透明度暗示聚合段。
-		if max_hp > HP_SEG_MAX_PIP and hi - lo > 1:
-			pip.modulate.a = 0.92
 		row.add_child(pip)
 
 
-func _rebuild_armor_segments(row: HBoxContainer, armor: int) -> void:
-	while row.get_child_count() > 0:
-		var ch := row.get_child(0)
-		row.remove_child(ch)
-		ch.queue_free()
+func _rebuild_armor_segments(box: VBoxContainer, armor: int) -> void:
+	_clear_container_children(box)
 	if armor <= 0:
-		row.visible = false
+		box.visible = false
 		return
-	row.visible = true
-	var n := mini(armor, HP_SEG_MAX_PIP)
-	for _i in range(n):
+	box.visible = true
+	var row: HBoxContainer = null
+	for i in range(armor):
+		if i % HP_SEG_PER_ROW == 0:
+			row = _make_seg_row()
+			box.add_child(row)
 		var pip := ColorRect.new()
 		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		pip.custom_minimum_size = Vector2(HP_SEG_W, HP_SEG_H)
