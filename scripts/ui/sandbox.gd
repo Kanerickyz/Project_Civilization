@@ -854,6 +854,7 @@ func _try_complete_aim_at_drop_cell(cell_v: Variant) -> void:
 		var stealth_res: Dictionary = _board.apply_grant_stealth(_focus_unit, stealth_target)
 		_pending_kind = PendingKind.NONE
 		_last_log = str(stealth_res.get("log", "隐身"))
+		_play_passive_fx(stealth_res.get("passive_fx", []) as Array)
 		_refresh_all()
 		_maybe_auto_end_player_turn_if_hand_empty()
 		return
@@ -913,10 +914,15 @@ func _apply_unit_targeted_card(card: TacticalActionCard, target: TacticalUnitIns
 			grant,
 			target.armor,
 		]
+		if _board_view != null:
+			_board_view.play_passive_float_text(
+				target.cell, "+%d甲" % grant, Color("9ec8ff")
+			)
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_INSPIRE:
 		var inspire: Dictionary = _board.apply_inspire_frenzy(target, 1)
 		_pending_kind = PendingKind.NONE
 		_last_log = str(inspire.get("log", "鼓舞"))
+		_play_passive_fx(inspire.get("passive_fx", []) as Array)
 	elif card.kind == TacticalActionCardScript.Kind.SKILL_STEALTH:
 		_pending_kind = PendingKind.STEALTH
 		_last_log = "隐身：%s · 点任意存活单位" % target.def.display_name
@@ -1066,6 +1072,7 @@ func _on_cell_clicked(cell: Vector2i) -> void:
 		var stealth_res: Dictionary = _board.apply_grant_stealth(_focus_unit, clicked)
 		_pending_kind = PendingKind.NONE
 		_last_log = str(stealth_res.get("log", "隐身"))
+		_play_passive_fx(stealth_res.get("passive_fx", []) as Array)
 		_refresh_all()
 		_maybe_auto_end_player_turn_if_hand_empty()
 		return
