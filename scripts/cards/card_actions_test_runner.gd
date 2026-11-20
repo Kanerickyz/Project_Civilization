@@ -1152,6 +1152,18 @@ func _test_inspire_adds_frenzy_nearby() -> bool:
 	if drum.frenzy_stacks != 0:
 		push_error("CardActions: inspire must not buff drummer self")
 		return false
+	var fx: Array = res.get("passive_fx", []) as Array
+	var saw_frenzy_fx := false
+	for ev in fx:
+		if not (ev is Dictionary):
+			continue
+		var d: Dictionary = ev as Dictionary
+		if str(d.get("text", "")) == "+1狂" and str(d.get("sync", "")) == "status_frenzy":
+			saw_frenzy_fx = true
+			break
+	if not saw_frenzy_fx:
+		push_error("CardActions: inspire should emit +1狂 status float fx")
+		return false
 	# 伤害倍率：1 层 → ceil(base * 1.2)
 	var power := ally.attack_power()
 	var want := ceili(float(power) * 1.2)

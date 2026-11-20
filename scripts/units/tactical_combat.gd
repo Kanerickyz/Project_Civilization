@@ -380,10 +380,14 @@ static func try_basic_attack(
 	# 技能燃爆：对目标格及周围施加燃烧（排除攻击者）。目标已死仍对周围生效。
 	# 击退后仍按原目标格做燃爆 AoE。
 	if result["ok"] and aoe_burn_stacks > 0:
-		var burned := board.apply_burn_aoe(from_cell, aoe_burn_stacks, 1, attacker)
+		var burn_fx: Array = []
+		var burned := board.apply_burn_aoe(from_cell, aoe_burn_stacks, 1, attacker, burn_fx)
 		result["burn_applied"] = burned
 		if burned > 0:
 			result["log"] += " · 燃爆：%d 名单位 +%d 燃烧" % [burned, aoe_burn_stacks]
+			var dest: Array = result.get("passive_fx", []) as Array
+			dest.append_array(burn_fx)
+			result["passive_fx"] = dest
 	return result
 
 

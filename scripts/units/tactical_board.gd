@@ -294,7 +294,7 @@ func apply_heal_potion(
 
 ## 鼓手「鼓舞」：周围 radius 格内其他友方各 +1 狂暴（不含自身）。
 func apply_inspire_frenzy(drummer: TacticalUnitInstance, radius: int = 1) -> Dictionary:
-	var result := {"ok": false, "buffed": 0, "log": ""}
+	var result := {"ok": false, "buffed": 0, "log": "", "passive_fx": []}
 	if drummer == null or not drummer.is_alive() or drummer.def == null:
 		result["log"] = "无效鼓舞"
 		return result
@@ -303,12 +303,23 @@ func apply_inspire_frenzy(drummer: TacticalUnitInstance, radius: int = 1) -> Dic
 		return result
 	var allies := allies_in_radius(drummer.cell, drummer.faction, radius, drummer.cell)
 	var buffed := 0
+	var passive_fx: Array = []
 	for ally in allies:
 		if ally == drummer:
 			continue
-		if ally.add_frenzy_stacks(1) > 0:
+		var gained := ally.add_frenzy_stacks(1)
+		if gained > 0:
 			buffed += 1
+			passive_fx.append(
+				{
+					"cell": ally.cell,
+					"text": "+%d狂" % gained,
+					"color": Color("e84b6a"),
+					"sync": "status_frenzy",
+				}
+			)
 	result["buffed"] = buffed
+	result["passive_fx"] = passive_fx
 	result["ok"] = true
 	if buffed == 0:
 		result["log"] = "%s 鼓舞：周围无友方可叠狂暴" % drummer.def.display_name
@@ -330,9 +341,14 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 	if target == null or not target.is_alive() or amount <= 0:
 		result["log"] = "无效伤害"
 		return result
+	var hurt_logs: Array[String] = []
+	var passive_fx: Array = []
 	# 受伤取消隐身（含仅打在护甲上）。
 	if target.break_stealth():
 		result["broke_stealth"] = true
+		passive_fx.append(
+			{"cell": target.cell, "text": "破隐", "color": Color("c8b4ff")}
+		)
 	var armor_absorbed := 0
 	var hp_damage := 0
 	# 有护甲时整段伤害打在护甲上：护甲归零后溢出不穿血。
@@ -348,8 +364,6 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 		target.hp -= amount
 	result["armor_absorbed"] = armor_absorbed
 	result["hp_damage"] = hp_damage
-	var hurt_logs: Array[String] = []
-	var passive_fx: Array = []
 	if armor_absorbed > 0:
 		hurt_logs.append("护甲吸收 %d" % armor_absorbed)
 	# 「受伤」被动仅在实际扣血时触发。
@@ -383,11 +397,13 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 
 ## 对 origin 切比雪夫 ≤ radius 的存活单位施加燃烧（可排除 exclude）。返回受影响人数。
 ## 同时标记范围内全部格子为点燃（视觉；空格不叠玩法层数）。湖格与其上单位免疫。
+## 可选 fx_out：追加 {cell, text, color, sync} 状态飘字（如 +3燃）。
 func apply_burn_aoe(
 	origin: Vector2i,
 	stacks: int,
 	radius: int = 1,
-	exclude: TacticalUnitInstance = null
+	exclude: TacticalUnitInstance = null,
+	fx_out: Variant = null
 ) -> int:
 	if stacks <= 0:
 		return 0
@@ -401,6 +417,15 @@ func apply_burn_aoe(
 			continue
 		u.add_burn_stacks(stacks)
 		n += 1
+		if fx_out is Array:
+			(fx_out as Array).append(
+				{
+					"cell": u.cell,
+					"text": "+%d燃" % stacks,
+					"color": Color("ff7a2e"),
+					"sync": "status_burn",
+				}
+			)
 	_mark_ignited_aoe(origin, radius)
 	changed.emit()
 	return n
@@ -594,7 +619,7 @@ func try_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 
 ## 令目标隐身（刺客主动）；加隐身状态本身不先破隐。
 func apply_grant_stealth(caster: TacticalUnitInstance, target: TacticalUnitInstance) -> Dictionary:
-	var result := {"ok": false, "log": ""}
+	var result := {"ok": false, "log": "", "passive_fx": []}
 	if caster == null or not caster.is_alive() or caster.def == null or caster.def.id != "assassin":
 		result["log"] = "隐身只能由刺客触发"
 		return result
@@ -604,6 +629,9 @@ func apply_grant_stealth(caster: TacticalUnitInstance, target: TacticalUnitInsta
 	target.grant_stealth()
 	result["ok"] = true
 	result["log"] = "%s 令 %s 隐身" % [caster.def.display_name, target.def.display_name]
+	result["passive_fx"] = [
+		{"cell": target.cell, "text": "隐身", "color": Color("c8b4ff")},
+	]
 	changed.emit()
 	return result
 

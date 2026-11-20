@@ -185,7 +185,7 @@ static func _try_trigger(
 		TacticalActiveAbility.TriggerKind.ON_SELF_MOVE_END:
 			return _apply_ally_buff(board, unit, ab, "鼓阵", fx_out)
 		TacticalActiveAbility.TriggerKind.ON_SELF_DEATH:
-			return _apply_death_aoe_burn(board, unit, ab)
+			return _apply_death_aoe_burn(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_PLAYER_ATTACK_CARD:
 			return _apply_player_attack_card(board, unit, ab, fx_out)
 		TacticalActiveAbility.TriggerKind.ON_ALLY_DEATH:
@@ -609,11 +609,14 @@ static func _apply_ally_buff(
 static func _apply_death_aoe_burn(
 	board: TacticalBoard,
 	unit: TacticalUnitInstance,
-	ab: TacticalActiveAbility
+	ab: TacticalActiveAbility,
+	fx_out: Variant = null
 ) -> Array[String]:
 	if ab.aoe_burn_stacks <= 0:
 		return []
-	var n := board.apply_burn_aoe(unit.cell, ab.aoe_burn_stacks, ab.aoe_burn_radius, null)
+	var n := board.apply_burn_aoe(
+		unit.cell, ab.aoe_burn_stacks, ab.aoe_burn_radius, null, fx_out
+	)
 	if n <= 0:
 		return [
 			"%s 爆燃：周围无单位可点燃" % unit.def.display_name,
