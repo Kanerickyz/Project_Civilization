@@ -20,14 +20,13 @@ var frenzy_stacks: int = 0
 var armor: int = 0
 ## 己方阵亡清牌是否已执行（幂等：段开始燃烧扫尸体不可重复减攻）。
 var death_cards_culled: bool = false
-## 敌方狼骑兵下一回合意图（TacticalEnemyAi.Intent；开战各自随机初相）。
+## 敌方状态机单位下一回合意图（TacticalEnemyAi.Intent；开战各自随机初相）。
 var next_intent: int = 0
 ## 隐身：敌方不可选为目标；攻击/受伤/加状态取消。
 var stealthed: bool = false
 
 const FRENZY_MAX_STACKS := 15
 const FRENZY_DAMAGE_MULT := 1.2
-const _RIDER_ID := "rider"
 
 
 func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector2i) -> void:
@@ -37,13 +36,13 @@ func _init(p_def: TacticalUnitDef, p_faction: TacticalFaction.Id, p_cell: Vector
 	hp = p_def.max_hp
 	remaining_move_budget = p_def.action_move_budget()
 	stealthed = p_def != null and p_def.starts_stealthed
-	# 敌方狼骑兵开战各自独立随机初相；其它单位不读此字段。
+	# 敌方状态机单位开战各自独立随机初相；其它单位不读此字段。
 	if (
 		p_faction == TacticalFaction.Id.OPPONENT
 		and p_def != null
-		and p_def.id == _RIDER_ID
+		and TacticalEnemyAi.is_sm_unit_id(p_def.id)
 	):
-		next_intent = TacticalEnemyAi.roll_initial_intent()
+		next_intent = TacticalEnemyAi.roll_initial_intent(null, p_def.id)
 	else:
 		next_intent = 0
 

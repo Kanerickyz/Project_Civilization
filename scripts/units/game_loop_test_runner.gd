@@ -189,9 +189,9 @@ func _test_wolf_intent_preview_readonly() -> bool:
 	rider.attacked_this_side_turn = true
 	rider.remaining_move_budget = 0
 	player.cell = Vector2i(2, 3)
-	# 邻格可打：攻击意图应预览到玩家格，且不因本段已攻击标志而失效。
+	# 邻格可打：移动攻击意图应预览到玩家格，且不因本段已攻击标志而失效。
 	rider.cell = Vector2i(3, 3)
-	rider.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	rider.next_intent = TacticalEnemyAiScript.Intent.MOVE_ATTACK
 	var atk_prev := TacticalEnemyAiScript.preview_next_action(board, rider)
 	if String(atk_prev.get("kind", "")) != "attack":
 		push_error("GameLoop: intent preview should attack when adjacent")
@@ -199,9 +199,9 @@ func _test_wolf_intent_preview_readonly() -> bool:
 	if atk_prev.get("to", Vector2i(-1, -1)) != player.cell:
 		push_error("GameLoop: intent preview attack target mismatch")
 		return false
-	# 远离：移动意图应给出落点与路径，且不改写状态。
+	# 远离：移动攻击应给出落点与路径，且不改写状态。
 	rider.cell = Vector2i(7, 3)
-	rider.next_intent = TacticalEnemyAiScript.Intent.MOVE
+	rider.next_intent = TacticalEnemyAiScript.Intent.MOVE_ATTACK
 	var move_prev := TacticalEnemyAiScript.preview_next_action(board, rider)
 	if String(move_prev.get("kind", "")) != "move":
 		push_error("GameLoop: intent preview should move when out of range")
@@ -303,42 +303,43 @@ func _test_wolf_intent_attack_then_advance() -> bool:
 			foe = u
 	if player == null or foe == null:
 		return false
-	# 开战初相已随机；本用例固定攻击以验推进。
-	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	# 开战初相已随机；本用例固定移动攻击以验推进到支援相。
+	foe.next_intent = TacticalEnemyAiScript.Intent.MOVE_ATTACK
 	player.cell = foe.cell + Vector2i(1, 0)
 	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
 	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
 	if events.is_empty() or events[0].get("kind", "") != "attack":
-		push_error("GameLoop: rider should execute attack intent")
+		push_error("GameLoop: rider should execute move-attack intent")
 		return false
-	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
-		push_error("GameLoop: after attack intent should advance to move")
+	var support_ok := (
+		foe.next_intent == TacticalEnemyAiScript.Intent.HEAL
+		or foe.next_intent == TacticalEnemyAiScript.Intent.BUFF_ATK
+	)
+	if not support_ok:
+		push_error("GameLoop: after move-attack intent should advance to support")
 		return false
 	return true
 
 
-## 开战初相：三相独立随机；固定种子应覆盖攻击/移动/支援，且不同种子可不同。
+## 开战初相：移动攻击 / 支援独立随机；固定种子应覆盖两相。
 func _test_wolf_initial_intent_random() -> bool:
-	var seen_attack := false
-	var seen_move := false
+	var seen_move_attack := false
 	var seen_support := false
 	for seed_i in range(64):
 		var rng := RandomNumberGenerator.new()
 		rng.seed = seed_i
 		var intent := TacticalEnemyAiScript.roll_initial_intent(rng)
 		match intent:
-			TacticalEnemyAiScript.Intent.ATTACK:
-				seen_attack = true
-			TacticalEnemyAiScript.Intent.MOVE:
-				seen_move = true
+			TacticalEnemyAiScript.Intent.MOVE_ATTACK:
+				seen_move_attack = true
 			TacticalEnemyAiScript.Intent.HEAL, TacticalEnemyAiScript.Intent.BUFF_ATK:
 				seen_support = true
 			_:
 				push_error("GameLoop: invalid initial intent %d" % intent)
 				return false
-	if not (seen_attack and seen_move and seen_support):
+	if not (seen_move_attack and seen_support):
 		push_error(
-			"GameLoop: initial intent roll must cover attack/move/support over seeds"
+			"GameLoop: initial intent roll must cover move-attack/support over seeds"
 		)
 		return false
 
@@ -352,8 +353,7 @@ func _test_wolf_initial_intent_random() -> bool:
 		return false
 	for r in riders:
 		var ok_intent := (
-			r.next_intent == TacticalEnemyAiScript.Intent.ATTACK
-			or r.next_intent == TacticalEnemyAiScript.Intent.MOVE
+			r.next_intent == TacticalEnemyAiScript.Intent.MOVE_ATTACK
 			or r.next_intent == TacticalEnemyAiScript.Intent.HEAL
 			or r.next_intent == TacticalEnemyAiScript.Intent.BUFF_ATK
 		)
@@ -385,17 +385,21 @@ func _test_wolf_intent_heal_skip_when_full() -> bool:
 			foe = u
 	if player == null or foe == null:
 		return false
-	# 满血回血意图应跳过；邻格可攻时落到攻击并推进。
+	# 满血回血意图应跳过；邻格可攻时落到移动攻击并推进到支援。
 	foe.hp = foe.effective_max_hp()
 	foe.next_intent = TacticalEnemyAiScript.Intent.HEAL
 	player.cell = foe.cell + Vector2i(1, 0)
 	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
 	var events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
 	if events.is_empty() or events[0].get("kind", "") != "attack":
-		push_error("GameLoop: full-hp heal should skip into attack")
+		push_error("GameLoop: full-hp heal should skip into move-attack")
 		return false
-	if foe.next_intent != TacticalEnemyAiScript.Intent.MOVE:
-		push_error("GameLoop: after skipped-heal attack should advance to move")
+	var support_ok := (
+		foe.next_intent == TacticalEnemyAiScript.Intent.HEAL
+		or foe.next_intent == TacticalEnemyAiScript.Intent.BUFF_ATK
+	)
+	if not support_ok:
+		push_error("GameLoop: after skipped-heal attack should advance to support")
 		return false
 	return true
 
@@ -416,30 +420,33 @@ func _test_wolf_melee_range_one() -> bool:
 		push_error("GameLoop: rider attack_range must be 1, got %d" % foe.def.attack_range)
 		return false
 
-	# 距 2：不可普攻，意图攻击应跳过（满血时落到移动或支援）。
+	# 距 2：当前 footprint 不可普攻（攻击距离仍为 1）。
 	player.cell = foe.cell + Vector2i(2, 0)
-	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
-	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
 	var far_cells := TacticalCombatScript.attackable_cells(board, foe)
 	if not far_cells.is_empty():
 		push_error("GameLoop: rider must not attack at chebyshev 2")
 		return false
+
+	# 距 4：移动攻击最多靠近 2 格后仍距 2，本段不应打出攻击。
+	player.cell = foe.cell + Vector2i(4, 0)
+	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
+	foe.next_intent = TacticalEnemyAiScript.Intent.MOVE_ATTACK
 	var far_events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
 	for ev in far_events:
 		if ev.get("kind", "") == "attack":
-			push_error("GameLoop: attack intent must not hit at range 2")
+			push_error("GameLoop: move-attack must not hit from chebyshev 4 in one action")
 			return false
 
 	# 邻格（距 1）：可攻。
 	player.cell = foe.cell + Vector2i(1, 0)
 	board.reset_side_turn_flags(TacticalFactionScript.Id.OPPONENT)
-	foe.next_intent = TacticalEnemyAiScript.Intent.ATTACK
+	foe.next_intent = TacticalEnemyAiScript.Intent.MOVE_ATTACK
 	var near_cells := TacticalCombatScript.attackable_cells(board, foe)
 	if near_cells.is_empty() or not near_cells.has(player.cell):
 		push_error("GameLoop: rider should attack adjacent cell")
 		return false
 	var near_events := TacticalEnemyAiScript.run_opponent_unit_actions(board, foe)
 	if near_events.is_empty() or near_events[0].get("kind", "") != "attack":
-		push_error("GameLoop: attack intent should fire at range 1")
+		push_error("GameLoop: move-attack intent should fire at range 1")
 		return false
 	return true

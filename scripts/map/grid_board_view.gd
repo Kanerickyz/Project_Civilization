@@ -102,7 +102,7 @@ var _overlay_drag_hover_kind: int = 0
 var _overlay_skill_release: Dictionary = {} # Vector2i -> true
 ## STS 风格曲线箭头：施法格 → 悬停释放格。
 var _skill_aim_arrow: Node2D = null
-## 点选狼骑：下回合意图虚影（路径线 / 攻击线 / 落点半透明精灵 / 回血加攻提示）。
+## 点选状态机敌方：下回合意图虚影（路径线 / 攻击线 / 落点半透明精灵 / 回血加攻召唤提示）。
 var _intent_preview_ghost: Sprite2D = null
 var _intent_preview_line: Line2D = null
 var _intent_preview_hint: Control = null
@@ -1450,21 +1450,21 @@ func _update_intent_icon(unit: TacticalUnitInstance) -> void:
 	root.visible = true
 	var gem := root.get_node("Gem") as ColorRect
 	var text := root.get_node("Text") as Label
-	# 占位意图角标：攻/移/血/加，颜色区分；不挡中央血攻读数。
+	# 占位意图角标：击/血/加/召，颜色区分；不挡中央血攻读数。
 	var tint := Color("e8f0ff")
 	match unit.next_intent:
-		TacticalEnemyAiScript.Intent.ATTACK:
-			text.text = "攻"
+		TacticalEnemyAiScript.Intent.MOVE_ATTACK:
+			text.text = "击"
 			tint = Color("ff8a7a")
-		TacticalEnemyAiScript.Intent.MOVE:
-			text.text = "移"
-			tint = Color("7ad0ff")
 		TacticalEnemyAiScript.Intent.HEAL:
 			text.text = "血"
 			tint = Color("7dff9a")
 		TacticalEnemyAiScript.Intent.BUFF_ATK:
 			text.text = "加"
 			tint = Color("ffe08a")
+		TacticalEnemyAiScript.Intent.SUMMON:
+			text.text = "召"
+			tint = Color("d4a0ff")
 		_:
 			text.text = "?"
 			tint = Color("e8f0ff")
@@ -1662,6 +1662,13 @@ func _sync_intent_preview(preview: Dictionary, unit: TacticalUnitInstance) -> vo
 		"buff_atk":
 			var buff_amt := int(preview.get("amount", TacticalEnemyAiScript.BUFF_ATK_AMOUNT))
 			_spawn_intent_hint(from_cell, "下回合·加攻+%d" % buff_amt, Color("ffe08a"))
+		"summon":
+			var n := int(preview.get("amount", TacticalEnemyAiScript.SUMMON_COUNT))
+			_spawn_intent_hint(from_cell, "下回合·召唤%d" % n, Color("d4a0ff"))
+			var summon_cells: Array = preview.get("summon_cells", []) as Array
+			for sc in summon_cells:
+				if sc is Vector2i:
+					_overlay_intent_path[sc as Vector2i] = true
 		_:
 			pass
 

@@ -4,16 +4,21 @@ extends RefCounted
 const GridMathScript := preload("res://scripts/units/grid_math.gd")
 const TacticalCombatScript := preload("res://scripts/units/tactical_combat.gd")
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
+const TacticalUnitInstanceScript := preload("res://scripts/units/tactical_unit_instance.gd")
 
-## 敌方狼骑兵行为状态机：攻击 → 移动 →（回血|加攻 随机）循环；各单位独立相位。
-## 「可攻击」一律走 TacticalCombat.attackable_cells（rider.attack_range=1 近战邻格 + LOS）。
+## 敌方行为状态机：移动攻击合一 →（支援相）循环；各单位独立相位。
+## 狼骑兵支援：回血 | 加攻；骷髅将军支援：回血 | 召唤骷髅兵。
+## 「可攻击」一律走 TacticalCombat.attackable_cells（近战邻格 + LOS）。
 
-enum Intent { ATTACK, MOVE, HEAL, BUFF_ATK }
+enum Intent { MOVE_ATTACK, HEAL, BUFF_ATK, SUMMON }
 
 const RIDER_ID := "rider"
+const SKELETON_GENERAL_ID := "skeleton_general"
+const SKELETON_SOLDIER_PATH := "res://resources/units/skeleton_soldier.tres"
 const HEAL_AMOUNT := 2
 const BUFF_ATK_AMOUNT := 2
-## 移动意图单次最多靠近格数（≠ 攻击距离；攻击距离见 rider.tres attack_range=1）。
+const SUMMON_COUNT := 2
+## 移动攻击意图中靠近步数上限（≠ 攻击距离；攻击距离见各单位 attack_range）。
 const MOVE_STEP_CAP := 2
 const _UNREACHABLE_BASE := 10000
 
@@ -24,42 +29,50 @@ static func uses_behavior_sm(unit: TacticalUnitInstance) -> bool:
 		and unit.is_alive()
 		and unit.faction == TacticalFactionScript.Id.OPPONENT
 		and unit.def != null
-		and unit.def.id == RIDER_ID
+		and is_sm_unit_id(unit.def.id)
 	)
+
+
+static func is_sm_unit_id(unit_id: String) -> bool:
+	return unit_id == RIDER_ID or unit_id == SKELETON_GENERAL_ID
+
+
+static func is_skeleton_general(unit: TacticalUnitInstance) -> bool:
+	return unit != null and unit.def != null and unit.def.id == SKELETON_GENERAL_ID
 
 
 static func intent_name(intent: int) -> String:
 	match intent:
-		Intent.ATTACK:
-			return "攻击"
-		Intent.MOVE:
-			return "移动"
+		Intent.MOVE_ATTACK:
+			return "移动攻击"
 		Intent.HEAL:
 			return "回血"
 		Intent.BUFF_ATK:
 			return "加攻"
+		Intent.SUMMON:
+			return "召唤"
 		_:
 			return "?"
 
 
-## 开战初始意图：每只狼骑兵独立从攻击 / 移动 /（回血|加攻）三相中随机起。
-## 落到支援相时再随机二选一写入 HEAL 或 BUFF_ATK。
-static func roll_initial_intent(rng: RandomNumberGenerator = null) -> int:
+## 开战初始意图：从「移动攻击」与支援相中随机；狼骑支援=回血|加攻，将军=回血|召唤。
+## 权重约 2:1（合并前攻/移各一档），避免全员同相。
+static func roll_initial_intent(
+	rng: RandomNumberGenerator = null, unit_id: String = RIDER_ID
+) -> int:
 	var local_rng := rng
 	if local_rng == null:
 		local_rng = RandomNumberGenerator.new()
 		local_rng.randomize()
 	match local_rng.randi_range(0, 2):
-		0:
-			return Intent.ATTACK
-		1:
-			return Intent.MOVE
+		0, 1:
+			return Intent.MOVE_ATTACK
 		_:
-			return _roll_support_intent(local_rng)
+			return _roll_support_intent(local_rng, unit_id)
 
 
-## 只读预览下一回合将实际执行的行为（含跳过 / 移动改攻击），不改写棋盘、移力与意图。
-## 返回：kind=attack|move|heal|buff_atk|idle；from/to；path（移动格序，含起终点）；amount。
+## 只读预览下一回合将实际执行的行为（含跳过），不改写棋盘、移力与意图。
+## 返回：kind=attack|move|heal|buff_atk|summon|idle；from/to；path；amount；summon_cells。
 static func preview_next_action(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:
 	var idle := _preview_idle(unit)
 	if board == null or not uses_behavior_sm(unit):
@@ -72,38 +85,44 @@ static func preview_next_action(board: TacticalBoard, unit: TacticalUnitInstance
 			return idle
 		scanned[intent] = true
 		match intent:
-			Intent.ATTACK:
+			Intent.MOVE_ATTACK:
 				var atk_to := _preview_attack_target(board, unit)
 				if atk_to.x >= 0:
-					return _preview_payload("attack", Intent.ATTACK, unit.cell, atk_to, [], 0)
-				intent = Intent.MOVE
-			Intent.MOVE:
-				var redirect := _preview_attack_target(board, unit)
-				if redirect.x >= 0:
-					return _preview_payload("attack", Intent.MOVE, unit.cell, redirect, [], 0)
+					return _preview_payload("attack", Intent.MOVE_ATTACK, unit.cell, atk_to, [], 0)
 				var dest := _preview_move_dest(board, unit)
 				if dest.x >= 0 and dest != unit.cell:
 					var path := _preview_move_path(board, unit, dest)
-					return _preview_payload("move", Intent.MOVE, unit.cell, dest, path, 0)
-				# 移动不可行时同回合会随机落到回血|加攻；预览取可执行者（满血则加攻）。
-				if unit.hp < unit.effective_max_hp():
-					intent = Intent.HEAL
-				else:
-					intent = Intent.BUFF_ATK
+					return _preview_payload("move", Intent.MOVE_ATTACK, unit.cell, dest, path, 0)
+				intent = _preview_preferred_support(unit)
 			Intent.HEAL:
 				var max_hp := unit.effective_max_hp()
 				if unit.hp < max_hp:
 					var gain := mini(HEAL_AMOUNT, max_hp - unit.hp)
 					return _preview_payload("heal", Intent.HEAL, unit.cell, unit.cell, [], gain)
-				intent = Intent.ATTACK
+				intent = Intent.MOVE_ATTACK
 			Intent.BUFF_ATK:
 				return _preview_payload(
 					"buff_atk", Intent.BUFF_ATK, unit.cell, unit.cell, [], BUFF_ATK_AMOUNT
 				)
+			Intent.SUMMON:
+				var cells := _preview_summon_cells(board, unit)
+				if not cells.is_empty():
+					var payload := _preview_payload(
+						"summon", Intent.SUMMON, unit.cell, cells[0], [], cells.size()
+					)
+					payload["summon_cells"] = cells
+					return payload
+				intent = Intent.MOVE_ATTACK
 			_:
 				idle["resolved_intent"] = intent
 				return idle
 	return idle
+
+
+static func _preview_preferred_support(unit: TacticalUnitInstance) -> int:
+	if is_skeleton_general(unit):
+		return Intent.HEAL if unit.hp < unit.effective_max_hp() else Intent.SUMMON
+	return Intent.HEAL if unit.hp < unit.effective_max_hp() else Intent.BUFF_ATK
 
 
 static func _preview_idle(unit: TacticalUnitInstance) -> Dictionary:
@@ -115,6 +134,7 @@ static func _preview_idle(unit: TacticalUnitInstance) -> Dictionary:
 		"to": Vector2i(-1, -1),
 		"path": [] as Array[Vector2i],
 		"amount": 0,
+		"summon_cells": [] as Array[Vector2i],
 	}
 
 
@@ -133,6 +153,7 @@ static func _preview_payload(
 		"to": to,
 		"path": path,
 		"amount": amount,
+		"summon_cells": [] as Array[Vector2i],
 	}
 
 
@@ -173,6 +194,10 @@ static func _preview_move_path(
 	if path.is_empty():
 		return [unit.cell, dest] as Array[Vector2i]
 	return path
+
+
+static func _preview_summon_cells(board: TacticalBoard, unit: TacticalUnitInstance) -> Array[Vector2i]:
+	return _collect_summon_cells(board, unit, SUMMON_COUNT)
 
 
 static func sorted_opponents(board: TacticalBoard) -> Array[TacticalUnitInstance]:
@@ -236,59 +261,75 @@ static func run_opponent_unit_actions(
 		scanned[intent] = true
 
 		match intent:
-			Intent.ATTACK:
-				var atk_ev := _try_attack_nearest(board, unit)
-				if not atk_ev.is_empty():
-					events.append(atk_ev)
+			Intent.MOVE_ATTACK:
+				var combo := _try_move_attack(board, unit)
+				if not combo.is_empty():
+					events.append_array(combo)
 					_advance_intent(unit, local_rng)
 					break
-				unit.next_intent = Intent.MOVE
-			Intent.MOVE:
-				# 已能打到玩家：跳过移动，改为攻击。
-				var redirect := _try_attack_nearest(board, unit)
-				if not redirect.is_empty():
-					events.append(redirect)
-					_advance_intent(unit, local_rng)
-					break
-				var move_evs := _try_move_toward_nearest(board, unit)
-				if not move_evs.is_empty():
-					events.append_array(move_evs)
-					_advance_intent(unit, local_rng)
-					break
-				unit.next_intent = _roll_support_intent(local_rng)
+				unit.next_intent = _roll_support_intent(local_rng, unit.def.id)
 			Intent.HEAL:
 				var heal_ev := _try_heal(board, unit)
 				if not heal_ev.is_empty():
 					events.append(heal_ev)
 					_advance_intent(unit, local_rng)
 					break
-				unit.next_intent = Intent.ATTACK
+				unit.next_intent = Intent.MOVE_ATTACK
 			Intent.BUFF_ATK:
 				var buff_ev := _try_buff_atk(board, unit)
 				if not buff_ev.is_empty():
 					events.append(buff_ev)
 					_advance_intent(unit, local_rng)
 					break
-				unit.next_intent = Intent.ATTACK
+				unit.next_intent = Intent.MOVE_ATTACK
+			Intent.SUMMON:
+				var summon_ev := _try_summon(board, unit)
+				if not summon_ev.is_empty():
+					events.append(summon_ev)
+					_advance_intent(unit, local_rng)
+					break
+				unit.next_intent = Intent.MOVE_ATTACK
 			_:
-				unit.next_intent = Intent.ATTACK
+				unit.next_intent = Intent.MOVE_ATTACK
 				break
+	return events
+
+
+## 移动攻击合一：能打则打；否则靠近，靠近后再尝试打。
+static func _try_move_attack(
+	board: TacticalBoard, unit: TacticalUnitInstance
+) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	var atk_now := _try_attack_nearest(board, unit)
+	if not atk_now.is_empty():
+		events.append(atk_now)
+		return events
+	var move_evs := _try_move_toward_nearest(board, unit)
+	if move_evs.is_empty():
+		return events
+	events.append_array(move_evs)
+	if unit.is_alive():
+		var atk_after := _try_attack_nearest(board, unit)
+		if not atk_after.is_empty():
+			events.append(atk_after)
 	return events
 
 
 static func _advance_intent(unit: TacticalUnitInstance, rng: RandomNumberGenerator) -> void:
 	match unit.next_intent:
-		Intent.ATTACK:
-			unit.next_intent = Intent.MOVE
-		Intent.MOVE:
-			unit.next_intent = _roll_support_intent(rng)
-		Intent.HEAL, Intent.BUFF_ATK:
-			unit.next_intent = Intent.ATTACK
+		Intent.MOVE_ATTACK:
+			unit.next_intent = _roll_support_intent(rng, unit.def.id if unit.def != null else RIDER_ID)
+		Intent.HEAL, Intent.BUFF_ATK, Intent.SUMMON:
+			unit.next_intent = Intent.MOVE_ATTACK
 		_:
-			unit.next_intent = Intent.ATTACK
+			unit.next_intent = Intent.MOVE_ATTACK
 
 
-static func _roll_support_intent(rng: RandomNumberGenerator) -> int:
+static func _roll_support_intent(rng: RandomNumberGenerator, unit_id: String) -> int:
+	if unit_id == SKELETON_GENERAL_ID:
+		if rng.randi_range(0, 1) == 0:
+			return Intent.HEAL
+		return Intent.SUMMON
 	if rng.randi_range(0, 1) == 0:
 		return Intent.HEAL
 	return Intent.BUFF_ATK
@@ -331,7 +372,7 @@ static func _try_move_toward_nearest(
 	var events: Array[Dictionary] = []
 	if unit.remaining_move_budget <= 0:
 		return events
-	# 本行为最多靠近 MOVE_STEP_CAP 格（狼骑移力池通常同为 2）。
+	# 本行为最多靠近 MOVE_STEP_CAP 格。
 	var budget_cap := mini(unit.remaining_move_budget, MOVE_STEP_CAP)
 	var saved_budget := unit.remaining_move_budget
 	unit.remaining_move_budget = budget_cap
@@ -341,7 +382,6 @@ static func _try_move_toward_nearest(
 		return events
 	if dest == unit.cell:
 		return events
-	# 已在最优却无法更近（无可达格）→ 不可执行。
 	var before := unit.cell
 	if not board.try_move(unit, dest):
 		return events
@@ -378,6 +418,59 @@ static func _try_buff_atk(board: TacticalBoard, unit: TacticalUnitInstance) -> D
 		"amount": BUFF_ATK_AMOUNT,
 		"log": "对手 %s 攻击 +%d" % [unit.def.display_name, BUFF_ATK_AMOUNT],
 	}
+
+
+static func _try_summon(board: TacticalBoard, unit: TacticalUnitInstance) -> Dictionary:
+	var soldier_def := load(SKELETON_SOLDIER_PATH) as TacticalUnitDef
+	if soldier_def == null:
+		return {}
+	var cells := _collect_summon_cells(board, unit, SUMMON_COUNT)
+	if cells.is_empty():
+		return {}
+	var spawned: Array[TacticalUnitInstance] = []
+	for cell in cells:
+		var minion := TacticalUnitInstanceScript.new(
+			soldier_def, TacticalFactionScript.Id.OPPONENT, cell
+		)
+		board.add_unit(minion)
+		spawned.append(minion)
+	return {
+		"kind": "summon",
+		"unit": unit,
+		"spawned": spawned,
+		"cells": cells,
+		"amount": spawned.size(),
+		"log": "对手 %s 召唤 %d 个骷髅兵" % [unit.def.display_name, spawned.size()],
+	}
+
+
+static func _collect_summon_cells(
+	board: TacticalBoard, unit: TacticalUnitInstance, want: int
+) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if board == null or unit == null or want <= 0:
+		return out
+	var candidates: Array[Vector2i] = []
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var cell := unit.cell + Vector2i(dx, dy)
+			if not board.is_passable(cell):
+				continue
+			if board.unit_at(cell) != null:
+				continue
+			candidates.append(cell)
+	candidates.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		if a.y != b.y:
+			return a.y < b.y
+		return a.x < b.x
+	)
+	for c in candidates:
+		out.append(c)
+		if out.size() >= want:
+			break
+	return out
 
 
 static func _legacy_unit_actions(
