@@ -71,8 +71,9 @@ func _initialize() -> void:
 			u.hp = 0
 	_vacate_around(board, [Vector2i(1, 2), Vector2i(2, 2), Vector2i(3, 2), Vector2i(2, 4), Vector2i(3, 4), Vector2i(1, 5), Vector2i(2, 5)])
 
-	# --- 帧1：移动 hop 中途（非瞬移）---
-	# 表现层：先 sync 旧格，再改逻辑格并 sync，触发 hop tween（不依赖 try_move 预算）。
+	_hide_chrome_for_capture(sandbox)
+
+	# --- 帧1：移动 hop 中途（非瞬移）；头顶应只有分段条、无「6/6 攻」数字 ---
 	var from_cell := Vector2i(1, 2)
 	var to_cell := Vector2i(3, 2)
 	mover.cell = from_cell
@@ -81,6 +82,9 @@ func _initialize() -> void:
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	await process_frame
 	await process_frame
+	if not _assert_hp_bar_no_digits(view, mover):
+		quit(1)
+		return
 	mover.cell = to_cell
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	await process_frame
@@ -102,16 +106,15 @@ func _initialize() -> void:
 		)
 		quit(1)
 		return
-	_zoom_on(view, from_cell, to_cell)
+	_zoom_on(view, from_cell, to_cell, 1.7)
 	await process_frame
 	var move_out := out_dir.path_join("pc-108-combat-anim-move.png")
 	if not _save_frame(move_out):
 		quit(1)
 		return
-	# 等 hop 结束，避免后续帧叠 tween。
 	await create_timer(view.unit_move_duration_sec() + 0.08, true, false, true).timeout
 
-	# --- 帧2：击杀 — 死亡冻结 + 剪影锚死亡位 ---
+	# --- 帧2：击杀死亡冻结（不播全屏红带，避免撑满屏）---
 	attacker.cell = Vector2i(2, 4)
 	foe.cell = Vector2i(3, 4)
 	foe.hp = 1
@@ -130,26 +133,31 @@ func _initialize() -> void:
 		push_error("pc108 capture: death tween missing")
 		quit(1)
 		return
-	# sync 不得拆尸体。
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	await process_frame
 	if not view._unit_sprites.has(foe) or not view.is_unit_dying(foe):
 		push_error("pc108 capture: dying sprite must survive sync")
 		quit(1)
 		return
-	if not sandbox.capture_play_kill_impact(null, foe):
-		push_error("pc108 capture: kill impact failed")
+	# 剪影锚点数学仍校验；截图只拍死亡淡出中途，避开红带。
+	var expected_anchor: Vector2 = sandbox._unit_kill_silhouette_anchor_local(foe)
+	if not expected_anchor.is_finite():
+		push_error("pc108 capture: death silhouette anchor not finite")
 		quit(1)
 		return
-	await create_timer(0.08, true, false, true).timeout
-	var fx: Control = sandbox._kill_impact as Control
-	var anchor: Vector2 = fx._anchor_local as Vector2
-	var expected: Vector2 = sandbox._unit_kill_silhouette_anchor_local(foe)
-	if anchor.distance_to(expected) > 3.0:
-		push_error("pc108 capture: kill silhouette misaligned %s vs %s" % [anchor, expected])
+	var frozen: Vector2 = view._frozen_death_world.get(foe, Vector2.INF) as Vector2
+	if not frozen.is_finite():
+		push_error("pc108 capture: missing frozen death world")
 		quit(1)
 		return
-	_zoom_on(view, attacker.cell, foe.cell)
+	# 淡出刚开始：尸体仍大、位置已冻，且未播红带。
+	await create_timer(0.05, true, false, true).timeout
+	var dying_spr: Sprite2D = view._unit_sprites[foe] as Sprite2D
+	if dying_spr == null or dying_spr.modulate.a >= 0.99:
+		push_error("pc108 capture: expected dying sprite mid-fade alpha")
+		quit(1)
+		return
+	_zoom_on(view, foe.cell, foe.cell, 2.0)
 	await process_frame
 	if not _save_frame(main_out):
 		quit(1)
@@ -162,20 +170,23 @@ func _initialize() -> void:
 		await death_tw.finished
 	await process_frame
 
-	# --- 帧3：冲刺中途（攻击 lunge，非瞬移）---
+	# --- 帧3：冲刺中途（攻击 lunge）---
 	foe.hp = maxi(3, foe.effective_max_hp())
 	foe.armor = 0
 	attacker.cell = Vector2i(1, 5)
 	foe.cell = Vector2i(2, 5)
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	await process_frame
+	if not _assert_hp_bar_no_digits(view, attacker):
+		quit(1)
+		return
 	var tw: Tween = view.play_unit_attack(attacker, foe.cell)
 	if tw == null:
 		push_error("pc108 capture: attack tween missing")
 		quit(1)
 		return
 	await create_timer(0.09, true, false, true).timeout
-	_zoom_on(view, attacker.cell, foe.cell)
+	_zoom_on(view, attacker.cell, foe.cell, 1.75)
 	await process_frame
 	var react_out := out_dir.path_join("pc-108-combat-anim-reaction.png")
 	if not _save_frame(react_out):
@@ -229,8 +240,8 @@ func _vacate_around(board: Variant, cells: Array) -> void:
 				break
 
 
-func _zoom_on(view: Variant, a: Vector2i, b: Vector2i) -> void:
-	view._set_zoom(1.35)
+func _zoom_on(view: Variant, a: Vector2i, b: Vector2i, zoom: float = 1.55) -> void:
+	view._set_zoom(zoom)
 	view._target = view._cell_ground_center(
 		Vector2i(
 			int(round((float(a.x) + float(b.x)) * 0.5)),
@@ -240,6 +251,40 @@ func _zoom_on(view: Variant, a: Vector2i, b: Vector2i) -> void:
 	)
 	view._clamp_target()
 	view._apply_camera()
+
+
+## 收起手牌/底栏，让棋盘单位与分段血条更清晰（截图专用）。
+func _hide_chrome_for_capture(sandbox: Control) -> void:
+	if sandbox.get("_hand_fan") != null:
+		(sandbox.get("_hand_fan") as CanvasItem).visible = false
+	if sandbox.get("_end_turn_button") != null:
+		(sandbox.get("_end_turn_button") as CanvasItem).visible = false
+	if sandbox.get("_cancel_target_button") != null:
+		(sandbox.get("_cancel_target_button") as CanvasItem).visible = false
+	if sandbox.get("_bottom_bar") != null:
+		(sandbox.get("_bottom_bar") as CanvasItem).visible = false
+	if sandbox.get("_side_panel") != null:
+		(sandbox.get("_side_panel") as CanvasItem).visible = false
+
+
+## PC-107：头顶 Text Label 须隐藏且无「攻」数字。
+func _assert_hp_bar_no_digits(view: Variant, unit: TacticalUnitInstance) -> bool:
+	if unit == null or not view._hp_bars.has(unit):
+		push_error("pc108 capture: missing hp bar for assert")
+		return false
+	var root: Control = view._hp_bars[unit] as Control
+	var legacy: Label = root.get_node_or_null("Text") as Label
+	if legacy != null and legacy.visible:
+		push_error("pc108 capture: legacy HP/ATK text still visible")
+		return false
+	if legacy != null and not str(legacy.text).is_empty():
+		push_error("pc108 capture: legacy HP/ATK text not cleared: %s" % legacy.text)
+		return false
+	var segs: Node = root.get_node_or_null("Segments")
+	if segs == null or segs.get_child_count() <= 0:
+		push_error("pc108 capture: expected segmented HP pips")
+		return false
+	return true
 
 
 func _save_frame(path: String) -> bool:
