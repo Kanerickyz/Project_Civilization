@@ -127,7 +127,9 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 	if not view._unit_sprites.has(unit):
 		push_error("death keep visual: expected sprite after sync")
 		return false
-	var world_before: Vector2 = view._unit_world_position(view._unit_sprites[unit] as Sprite2D)
+	var spr_alive: Sprite2D = view._unit_sprites[unit] as Sprite2D
+	var world_before: Vector2 = view._unit_world_position(spr_alive)
+	var scale_before: Vector2 = spr_alive.scale
 	unit.hp = 0
 	var death_tw: Tween = view.play_unit_death(unit)
 	if death_tw == null:
@@ -144,6 +146,17 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 		return false
 	if not view.is_unit_dying(unit):
 		push_error("death keep visual: expected is_unit_dying during fade")
+		return false
+	var spr_dying: Sprite2D = view._unit_sprites[unit] as Sprite2D
+	# 死亡不得放大：scale 须保持活着时基准（允许极小浮点误差）。
+	if spr_dying.scale.distance_to(scale_before) > 0.0001:
+		push_error(
+			"death keep visual: scale changed during death before=%s now=%s"
+			% [scale_before, spr_dying.scale]
+		)
+		return false
+	if absf(spr_dying.scale.x) > absf(scale_before.x) * 1.01 + 0.0001:
+		push_error("death keep visual: death enlarged sprite")
 		return false
 	var frozen: Vector2 = view._frozen_death_world.get(unit, Vector2.INF) as Vector2
 	if not frozen.is_finite() or frozen.distance_to(world_before) > 0.05:

@@ -121,6 +121,9 @@ func _initialize() -> void:
 	foe.armor = 0
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	await process_frame
+	var live_scale: Vector2 = (
+		view._unit_base_scales.get(foe, view._unit_sprites[foe].scale) as Vector2
+	)
 	var atk_res: Dictionary = TacticalCombatScript.try_basic_attack(
 		board, attacker, foe.cell, TacticalFactionScript.Id.PLAYER, true, 0, 0, false
 	)
@@ -150,11 +153,24 @@ func _initialize() -> void:
 		push_error("pc108 capture: missing frozen death world")
 		quit(1)
 		return
-	# 淡出刚开始：尸体仍大、位置已冻，且未播红带。
-	await create_timer(0.05, true, false, true).timeout
+	await create_timer(0.12, true, false, true).timeout
 	var dying_spr: Sprite2D = view._unit_sprites[foe] as Sprite2D
-	if dying_spr == null or dying_spr.modulate.a >= 0.99:
-		push_error("pc108 capture: expected dying sprite mid-fade alpha")
+	if dying_spr == null or dying_spr.modulate.a >= 0.99 or dying_spr.modulate.a <= 0.05:
+		push_error(
+			"pc108 capture: expected mid-fade alpha, got %s"
+			% (dying_spr.modulate.a if dying_spr != null else -1.0)
+		)
+		quit(1)
+		return
+	if dying_spr.scale.distance_to(live_scale) > 0.0005:
+		push_error(
+			"pc108 capture: death enlarged/changed scale live=%s dying=%s"
+			% [live_scale, dying_spr.scale]
+		)
+		quit(1)
+		return
+	if absf(dying_spr.scale.x) > absf(live_scale.x) * 1.01 + 0.0001:
+		push_error("pc108 capture: death sprite enlarged")
 		quit(1)
 		return
 	_zoom_on(view, foe.cell, foe.cell, 2.0)

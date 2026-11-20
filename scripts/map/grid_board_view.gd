@@ -1175,6 +1175,9 @@ func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	_end_unit_flash(spr)
+	# 选中/被动脉冲可能把 scale 抬高：先回到基准尺寸，死亡只淡出不改 scale。
+	# 旧实现 tween 到 Vector2(0.05,0.05)：单位基准 scale≈unit_h/贴图像素 ≪ 0.05，会先放大再缩。
+	_restore_unit_base_scale(unit)
 	# 浮到 units_root 并冻结世界坐标：后续 sync/格子变化不得带动尸体。
 	_float_unit_for_world_tween(spr)
 	_frozen_death_world[unit] = spr.position
@@ -1203,8 +1206,7 @@ func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 			blob.visible = false
 	var tw := create_tween()
 	_unit_death_tweens[unit] = tw
-	tw.set_parallel(true)
-	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), UNIT_DEATH_SEC)
+	# 只淡出 alpha；scale 保持活着时基准，禁止放大/缩小。
 	tw.tween_property(spr, "modulate:a", 0.0, UNIT_DEATH_SEC)
 	tw.finished.connect(
 		func() -> void:
