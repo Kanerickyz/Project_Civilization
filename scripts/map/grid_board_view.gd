@@ -4,6 +4,8 @@ extends Control
 
 
 signal cell_clicked(cell: Vector2i)
+## 指针悬停格变化（瞄准预览用）；离开棋盘时 cell 为 null。
+signal cell_hovered(cell: Variant)
 ## 长按单位约 0.38s（对照 autochess LONG_PRESS_MS）；松手发 unit_info_closed。
 signal unit_long_pressed(unit: TacticalUnitInstance, anchor_global: Vector2)
 signal unit_info_closed
@@ -67,6 +69,8 @@ const OVERLAY_COLORS := {
 	## 狼骑下一意图：路径格 / 攻击目标格（低于选中/红攻/绿移）。
 	"ip": Color(0.55, 0.88, 1.0, 0.38),
 	"it": Color(1.0, 0.62, 0.28, 0.52),
+	## 链路预览落点/击退格。
+	"pm": Color(1.0, 0.55, 0.25, 0.55),
 }
 const SKILL_ARROW_VALID := Color(0.98, 0.86, 0.42, 0.95)
 const SKILL_ARROW_INVALID := Color(0.82, 0.38, 0.4, 0.75)
@@ -94,6 +98,11 @@ var _overlay_move: Dictionary = {}
 var _overlay_attack: Dictionary = {}
 var _overlay_intent_path: Dictionary = {} # Vector2i -> true
 var _overlay_intent_target: Dictionary = {} # Vector2i -> true
+## 拖移动卡预览可达（与正式瞄准绿格同色，可并存）。
+var _overlay_preview_move: Dictionary = {} # Vector2i -> true
+## 拖攻击卡预览攻距 / 链路落点标记。
+var _overlay_preview_attack: Dictionary = {} # Vector2i -> true
+var _overlay_preview_mark: Dictionary = {} # Vector2i -> true（击退落点等）
 ## 拖牌悬停当前格；(-1,-1) 表示无。
 var _overlay_drag_hover: Vector2i = Vector2i(-1, -1)
 ## 0=空白/中性，1=可落单位，-1=不可落单位。
@@ -111,7 +120,7 @@ var _intent_preview_unit: TacticalUnitInstance = null
 var _last_unit_cells: Dictionary = {}
 var _unit_move_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
-var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Label（常驻 HP + 攻）
+var _hp_bars: Dictionary = {} # TacticalUnitInstance -> Control（数字 + 分段血条）
 var _burn_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 燃N）
 var _frenzy_badges: Dictionary = {} # TacticalUnitInstance -> Control（色菱形 + 狂N）
 var _intent_icons: Dictionary = {} # TacticalUnitInstance -> Control（狼骑下一意图角标）
@@ -120,6 +129,31 @@ var _overlay_burn: Dictionary = {} # Vector2i -> true
 var _burn_pulse_tween: Tween
 var _unit_blobs: Dictionary = {} # TacticalUnitInstance -> Sprite2D
 var _blob_texture: Texture2D
+## 拖牌/瞄准链路预览：unit -> {hp,max_hp,armor,hp_delta,armor_delta}
+var _action_preview_deltas: Dictionary = {}
+var _action_preview_ghosts: Array = [] # Sprite2D
+var _action_preview_line: Line2D = null
+var _action_preview_mod_backup: Dictionary = {} # unit -> Color
+var _pointer_hover_cell: Vector2i = Vector2i(-999, -999)
+const HP_SEG_MAX_PIP := 12
+const HP_SEG_W := 7.0
+const HP_SEG_H := 6.0
+const HP_SEG_GAP := 1.0
+const HP_FILL := Color("3dd68c")
+const HP_EMPTY := Color("2a3340")
+const HP_PREVIEW_LOSS := Color("ff5a5a")
+const HP_PREVIEW_GAIN := Color("7dff9a")
+const ARMOR_FILL := Color("6eb6ff")
+const PREVIEW_GHOST_ALPHA := 0.48
+const PREVIEW_HL := {
+	"damage": Color(1.0, 0.52, 0.48, 1.0),
+	"heal": Color(0.62, 1.0, 0.72, 1.0),
+	"buff": Color(0.7, 0.88, 1.0, 1.0),
+	"kill": Color(0.28, 0.28, 0.32, 1.0),
+	"caster": Color(1.0, 0.92, 0.55, 1.0),
+	"stealth": Color(0.72, 0.78, 0.95, 0.55),
+}
+
 ## 待机浮动只改 offset，不碰 position，避免挡移动/冲刺/受击 Tween 与格子点选。
 var _unit_idle_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
 var _unit_base_offsets: Dictionary = {} # TacticalUnitInstance -> Vector2
@@ -413,10 +447,11 @@ func _rebuild_board() -> void:
 	_unit_sprites.clear()
 	_unit_blobs.clear()
 	for key in _hp_bars.keys():
-		var hp_lbl: Label = _hp_bars[key] as Label
-		if hp_lbl != null and is_instance_valid(hp_lbl):
-			hp_lbl.queue_free()
+		var hp_root: Control = _hp_bars[key] as Control
+		if hp_root != null and is_instance_valid(hp_root):
+			hp_root.queue_free()
 	_hp_bars.clear()
+	clear_action_preview()
 	for key in _burn_badges.keys():
 		var burn_root: Control = _burn_badges[key] as Control
 		if burn_root != null and is_instance_valid(burn_root):
@@ -720,9 +755,10 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 		(_unit_blobs[unit] as Node).queue_free()
 		_unit_blobs.erase(unit)
 	if _hp_bars.has(unit):
-		var bar: Label = _hp_bars[unit] as Label
+		var bar: Control = _hp_bars[unit] as Control
 		bar.queue_free()
 		_hp_bars.erase(unit)
+	_action_preview_deltas.erase(unit)
 	if _burn_badges.has(unit):
 		var badge: Control = _burn_badges[unit] as Control
 		badge.queue_free()
@@ -1227,18 +1263,30 @@ func _process(_delta: float) -> void:
 
 
 func _ensure_hp_bar(unit: TacticalUnitInstance) -> void:
-	var bar: Label
+	var root: Control
 	if _hp_bars.has(unit):
-		bar = _hp_bars[unit] as Label
+		root = _hp_bars[unit] as Control
 	else:
-		bar = Label.new()
-		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		bar.add_theme_color_override("font_outline_color", Color("0a1018"))
-		bar.add_theme_constant_override("outline_size", 3)
-		_labels_root.add_child(bar)
-		_hp_bars[unit] = bar
-	_apply_ui_label_font(bar, 12)
+		root = Control.new()
+		root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.name = "HpBar"
+		var segs := HBoxContainer.new()
+		segs.name = "Segments"
+		segs.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		segs.add_theme_constant_override("separation", int(HP_SEG_GAP))
+		root.add_child(segs)
+		var armor_row := HBoxContainer.new()
+		armor_row.name = "ArmorSegments"
+		armor_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		armor_row.add_theme_constant_override("separation", int(HP_SEG_GAP))
+		root.add_child(armor_row)
+		_labels_root.add_child(root)
+		_hp_bars[unit] = root
+	# 旧版头顶曾有 HP/攻 数字 Label；统一隐藏，只留分段条。
+	var legacy_text := root.get_node_or_null("Text") as Label
+	if legacy_text != null:
+		legacy_text.visible = false
+		legacy_text.text = ""
 	_update_hp_bar(unit)
 	_ensure_burn_badge(unit)
 	_ensure_frenzy_badge(unit)
@@ -1284,32 +1332,291 @@ func _apply_ui_label_font(lbl: Label, font_size: int) -> void:
 func _update_hp_bar(unit: TacticalUnitInstance) -> void:
 	if not _hp_bars.has(unit) or not _unit_sprites.has(unit):
 		return
-	var bar := _hp_bars[unit] as Label
-	_apply_ui_label_font(bar, 12)
+	var root := _hp_bars[unit] as Control
+	var segs := root.get_node("Segments") as HBoxContainer
+	var armor_row := root.get_node("ArmorSegments") as HBoxContainer
+	var legacy_text := root.get_node_or_null("Text") as Label
+	if legacy_text != null:
+		legacy_text.visible = false
+		legacy_text.text = ""
 	var spr := _unit_sprites[unit] as Sprite2D
-	# 常驻：当前/上限血量 + 有效战斗力（含 atk_bonus）；有护甲时附「甲N」；隐身附「隐」。
-	var bits: PackedStringArray = [
-		"%d/%d" % [unit.hp, unit.effective_max_hp()],
-		"攻%d" % unit.effective_attack(),
-	]
-	if unit.armor > 0:
-		bits.append("甲%d" % unit.armor)
-	if unit.is_stealthed():
-		bits.append("隐")
-	bar.text = " ".join(bits)
-	# 节点在脚点；读数放在头顶（整段身高之上）。
+	var cur_hp := unit.hp
+	var max_hp := maxi(1, unit.effective_max_hp())
+	var armor_now := unit.armor
+	var preview: Dictionary = _action_preview_deltas.get(unit, {}) as Dictionary
+	var preview_hp := cur_hp
+	var preview_armor := armor_now
+	var has_preview := not preview.is_empty()
+	if has_preview:
+		preview_hp = int(preview.get("hp", cur_hp))
+		preview_armor = int(preview.get("armor", armor_now))
+	# 头顶只留分段血条（+甲段）；生命/攻数字不显示，预览靠段色变化。
+	var show_armor := preview_armor if has_preview else armor_now
+	_rebuild_hp_segments(segs, cur_hp, max_hp, preview_hp if has_preview else -1)
+	_rebuild_armor_segments(armor_row, show_armor)
+	var seg_w := segs.get_combined_minimum_size().x
+	var armor_w := armor_row.get_combined_minimum_size().x if armor_row.visible else 0.0
+	var width := maxf(seg_w, armor_w)
+	var height := HP_SEG_H
+	if armor_row.visible:
+		height += HP_SEG_H + 1.0
+	root.size = Vector2(maxf(width, 1.0), height)
+	segs.position = Vector2((width - seg_w) * 0.5, 0.0)
+	if armor_row.visible:
+		armor_row.position = Vector2((width - armor_w) * 0.5, HP_SEG_H + 1.0)
 	var head_off := Vector2(0.0, -config.unit_world_height * 1.12)
-	_position_world_on_label(bar, _unit_world_position(spr) + head_off)
-	if unit.hp <= unit.effective_max_hp() / 3:
-		bar.modulate = Color("ff6666")
-	elif unit.is_stealthed():
-		bar.modulate = Color("b8c4d8")
-	elif unit.armor > 0:
-		bar.modulate = Color("9ad0ff")
-	elif unit.atk_bonus > 0:
-		bar.modulate = Color("ffe08a")
-	else:
-		bar.modulate = Color("e8f0ff")
+	_position_world_on_label(root, _unit_world_position(spr) + head_off)
+
+
+func _rebuild_hp_segments(
+	row: HBoxContainer, cur_hp: int, max_hp: int, preview_hp: int = -1
+) -> void:
+	while row.get_child_count() > 0:
+		var ch := row.get_child(0)
+		row.remove_child(ch)
+		ch.queue_free()
+	var pip_count := mini(maxi(1, max_hp), HP_SEG_MAX_PIP)
+	var scale := float(max_hp) / float(pip_count)
+	for i in range(pip_count):
+		var pip := ColorRect.new()
+		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pip.custom_minimum_size = Vector2(HP_SEG_W, HP_SEG_H)
+		# 每段覆盖的血量区间（向上取整边界）。
+		var lo := int(floor(float(i) * scale))
+		var hi := int(ceil(float(i + 1) * scale))
+		var filled_now := cur_hp > lo
+		var filled_preview := preview_hp < 0 or preview_hp > lo
+		if preview_hp >= 0 and filled_now and not filled_preview:
+			pip.color = HP_PREVIEW_LOSS
+		elif preview_hp >= 0 and not filled_now and filled_preview:
+			pip.color = HP_PREVIEW_GAIN
+		elif filled_now:
+			pip.color = HP_FILL
+		else:
+			pip.color = HP_EMPTY
+		# 高血上限时用透明度暗示聚合段。
+		if max_hp > HP_SEG_MAX_PIP and hi - lo > 1:
+			pip.modulate.a = 0.92
+		row.add_child(pip)
+
+
+func _rebuild_armor_segments(row: HBoxContainer, armor: int) -> void:
+	while row.get_child_count() > 0:
+		var ch := row.get_child(0)
+		row.remove_child(ch)
+		ch.queue_free()
+	if armor <= 0:
+		row.visible = false
+		return
+	row.visible = true
+	var n := mini(armor, HP_SEG_MAX_PIP)
+	for _i in range(n):
+		var pip := ColorRect.new()
+		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pip.custom_minimum_size = Vector2(HP_SEG_W, HP_SEG_H)
+		pip.color = ARMOR_FILL
+		row.add_child(pip)
+
+
+## 拖牌/瞄准伤害链路预览（视觉）：血条预减、单位染色、击退/位移幽灵、攻线。
+func set_action_preview(preview: Dictionary) -> void:
+	_clear_action_preview_visuals(true)
+	_action_preview_deltas.clear()
+	if preview == null or preview.is_empty() or not bool(preview.get("ok", false)):
+		_overlay_preview_mark.clear()
+		for u in _hp_bars.keys():
+			_update_hp_bar(u as TacticalUnitInstance)
+		_refresh_preview_overlays()
+		return
+	var deltas: Dictionary = preview.get("unit_deltas", {}) as Dictionary
+	for key in deltas.keys():
+		if key is TacticalUnitInstance:
+			_action_preview_deltas[key] = deltas[key]
+	for u in _hp_bars.keys():
+		_update_hp_bar(u as TacticalUnitInstance)
+	_apply_preview_highlights(preview.get("highlights", {}) as Dictionary)
+	_spawn_preview_ghosts(preview.get("ghosts", []) as Array)
+	_spawn_preview_lines(preview.get("lines", []) as Array)
+	_set_preview_mark_cells(preview.get("mark_cells", []) as Array)
+	_refresh_preview_overlays()
+
+
+## GUI：强制展示一条预览（截图用）。
+func capture_set_action_preview(preview: Dictionary) -> void:
+	set_action_preview(preview)
+
+
+func clear_action_preview() -> void:
+	if (
+		_action_preview_deltas.is_empty()
+		and _action_preview_ghosts.is_empty()
+		and _action_preview_line == null
+		and _action_preview_mod_backup.is_empty()
+		and _overlay_preview_move.is_empty()
+		and _overlay_preview_attack.is_empty()
+		and _overlay_preview_mark.is_empty()
+	):
+		return
+	_action_preview_deltas.clear()
+	_overlay_preview_move.clear()
+	_overlay_preview_attack.clear()
+	_overlay_preview_mark.clear()
+	_clear_action_preview_visuals(true)
+	for u in _hp_bars.keys():
+		_update_hp_bar(u as TacticalUnitInstance)
+	_refresh_preview_overlays()
+
+
+## 拖移动卡到单位时临时叠绿可达格（不改写正式瞄准 overlay）。
+func set_preview_move_cells(cells: Array) -> void:
+	var prev := _overlay_preview_move.duplicate()
+	_overlay_preview_move.clear()
+	for c in cells:
+		if c is Vector2i:
+			_overlay_preview_move[c as Vector2i] = true
+	for cell in prev.keys():
+		_apply_overlay(cell as Vector2i)
+	for cell in _overlay_preview_move.keys():
+		_apply_overlay(cell as Vector2i)
+
+
+func set_preview_attack_cells(cells: Array) -> void:
+	var prev := _overlay_preview_attack.duplicate()
+	_overlay_preview_attack.clear()
+	for c in cells:
+		if c is Vector2i:
+			_overlay_preview_attack[c as Vector2i] = true
+	for cell in prev.keys():
+		_apply_overlay(cell as Vector2i)
+	for cell in _overlay_preview_attack.keys():
+		_apply_overlay(cell as Vector2i)
+
+
+func _set_preview_mark_cells(cells: Array) -> void:
+	var prev := _overlay_preview_mark.duplicate()
+	_overlay_preview_mark.clear()
+	for c in cells:
+		if c is Vector2i:
+			_overlay_preview_mark[c as Vector2i] = true
+	for cell in prev.keys():
+		_apply_overlay(cell as Vector2i)
+	for cell in _overlay_preview_mark.keys():
+		_apply_overlay(cell as Vector2i)
+
+
+func _refresh_preview_overlays() -> void:
+	for cell in _overlay_nodes.keys():
+		_apply_overlay(cell as Vector2i)
+
+
+func _clear_action_preview_visuals(restore_modulate: bool) -> void:
+	for g in _action_preview_ghosts:
+		if g != null and is_instance_valid(g):
+			(g as Node).queue_free()
+	_action_preview_ghosts.clear()
+	if _action_preview_line != null and is_instance_valid(_action_preview_line):
+		_action_preview_line.queue_free()
+	_action_preview_line = null
+	if restore_modulate:
+		for u in _action_preview_mod_backup.keys():
+			var unit := u as TacticalUnitInstance
+			if unit == null or not _unit_sprites.has(unit):
+				continue
+			var spr := _unit_sprites[unit] as Sprite2D
+			if spr == null or not is_instance_valid(spr):
+				continue
+			spr.modulate = _action_preview_mod_backup[u] as Color
+		_action_preview_mod_backup.clear()
+
+
+func _apply_preview_highlights(highlights: Dictionary) -> void:
+	for key in highlights.keys():
+		if not (key is TacticalUnitInstance):
+			continue
+		var unit := key as TacticalUnitInstance
+		if not _unit_sprites.has(unit):
+			continue
+		var spr := _unit_sprites[unit] as Sprite2D
+		if spr == null:
+			continue
+		if not _action_preview_mod_backup.has(unit):
+			_action_preview_mod_backup[unit] = spr.modulate
+		var kind := str(highlights[key])
+		var tint: Color = PREVIEW_HL.get(kind, PREVIEW_HL["damage"]) as Color
+		var base: Color = _action_preview_mod_backup[unit] as Color
+		spr.modulate = Color(
+			base.r * tint.r,
+			base.g * tint.g,
+			base.b * tint.b,
+			base.a * tint.a
+		)
+
+
+func _spawn_preview_ghosts(ghosts: Array) -> void:
+	if config == null or _units_root == null:
+		return
+	for g in ghosts:
+		if not (g is Dictionary):
+			continue
+		var unit: TacticalUnitInstance = (g as Dictionary).get("unit") as TacticalUnitInstance
+		var cell: Vector2i = (g as Dictionary).get("cell", Vector2i(-1, -1)) as Vector2i
+		if unit == null or unit.def == null or cell.x < 0:
+			continue
+		var tex: Texture2D = (
+			unit.def.texture_red
+			if unit.faction == TacticalFactionScript.Id.OPPONENT
+			else unit.def.texture_blue
+		)
+		if tex == null:
+			tex = unit.def.texture_blue
+		if tex == null:
+			continue
+		var kind := str((g as Dictionary).get("kind", "knockback"))
+		var spr := Sprite2D.new()
+		spr.name = "ActionPreviewGhost"
+		spr.centered = true
+		spr.texture = tex
+		var tint := Color(1.0, 0.55, 0.35, PREVIEW_GHOST_ALPHA)
+		if kind == "move" or kind == "charge":
+			tint = Color(0.55, 0.95, 0.75, PREVIEW_GHOST_ALPHA)
+		spr.modulate = tint
+		spr.z_as_relative = false
+		var metrics := _texture_content_metrics(tex)
+		var content_h: float = metrics.content_h
+		var vis := unit.def.visual_scale if unit.def.visual_scale > 0.0 else 1.0
+		var s := (config.unit_world_height / content_h) * vis if content_h > 0.0 else 1.0
+		spr.scale = Vector2(s, s)
+		spr.offset = Vector2(0.0, metrics.offset_y)
+		spr.position = _cell_to_world(cell, config.cell_size)
+		spr.z_index = UNIT_Z_BASE + int(round(spr.position.y * 100.0)) + 3
+		_units_root.add_child(spr)
+		_action_preview_ghosts.append(spr)
+
+
+func _spawn_preview_lines(lines: Array) -> void:
+	if config == null or _units_root == null or lines.is_empty():
+		return
+	# 多条时合并到一根 Line2D 分段不方便；取首条主攻/位移线。
+	var first: Dictionary = lines[0] as Dictionary
+	var from_cell: Vector2i = first.get("from", Vector2i(-1, -1)) as Vector2i
+	var to_cell: Vector2i = first.get("to", Vector2i(-1, -1)) as Vector2i
+	if from_cell.x < 0 or to_cell.x < 0 or from_cell == to_cell:
+		return
+	var kind := str(first.get("kind", "attack"))
+	var line := Line2D.new()
+	line.name = "ActionPreviewLine"
+	line.width = maxf(config.cell_size * 0.14, 0.1)
+	line.default_color = (
+		INTENT_PATH_LINE_COLOR if kind == "move" else INTENT_ATK_LINE_COLOR
+	)
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.z_as_relative = false
+	line.z_index = UNIT_Z_BASE - 16
+	line.add_point(_cell_to_world(from_cell, config.cell_size))
+	line.add_point(_cell_to_world(to_cell, config.cell_size))
+	_units_root.add_child(line)
+	_action_preview_line = line
 
 
 func _update_burn_badge(unit: TacticalUnitInstance) -> void:
@@ -1596,11 +1903,13 @@ func _apply_overlay(cell: Vector2i) -> void:
 			tag = "hx"
 		else:
 			tag = "h"
-	elif _overlay_attack.has(cell):
+	elif _overlay_attack.has(cell) or _overlay_preview_attack.has(cell):
 		tag = "a"
+	elif _overlay_preview_mark.has(cell):
+		tag = "pm"
 	elif _overlay_skill_release.has(cell):
 		tag = "sk"
-	elif _overlay_move.has(cell):
+	elif _overlay_move.has(cell) or _overlay_preview_move.has(cell):
 		tag = "m"
 	elif _overlay_intent_target.has(cell):
 		tag = "it"
@@ -1932,6 +2241,7 @@ func clear_skill_drag_preview() -> void:
 func clear_card_drag_hover() -> void:
 	set_card_drag_hover(null, null, false)
 	clear_skill_drag_preview()
+	clear_action_preview()
 
 
 func _clear_skill_aim_arrow() -> void:
@@ -2371,6 +2681,8 @@ func _gui_input(event: InputEvent) -> void:
 		if _dragging and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			_continue_press_motion(mm.position)
 			accept_event()
+		else:
+			_emit_pointer_hover(mm.position)
 
 
 func _set_zoom(value: float) -> void:
@@ -2760,6 +3072,20 @@ func _handle_click(local_pos: Vector2) -> void:
 ## 供手牌拖放：把全局屏幕坐标映射到格子（越界返回 null）。
 func pick_cell_at_global(global_pos: Vector2) -> Variant:
 	return _pick_cell(get_global_transform_with_canvas().affine_inverse() * global_pos)
+
+
+func _emit_pointer_hover(local_pos: Vector2) -> void:
+	var cell_v: Variant = _pick_cell(local_pos)
+	var key := Vector2i(-999, -999)
+	if cell_v is Vector2i:
+		key = cell_v as Vector2i
+	if key == _pointer_hover_cell:
+		return
+	_pointer_hover_cell = key
+	if cell_v is Vector2i:
+		cell_hovered.emit(cell_v)
+	else:
+		cell_hovered.emit(null)
 
 
 func _pick_cell(local_pos: Vector2) -> Variant:

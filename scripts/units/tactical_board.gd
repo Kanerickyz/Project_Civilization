@@ -17,6 +17,34 @@ var _terrain: Dictionary = {}
 var _catalog: TerrainCatalog = TerrainCatalog.load_default()
 ## 视觉：最近一次燃爆/爆燃 AoE 涉及的格子（含空格）；段开始燃烧结算后清除。
 var _ignited_aoe_cells: Dictionary = {}
+## 试算预览时压制 changed，避免沙盘中途 refresh。
+var _preview_mute_changed: bool = false
+
+
+func begin_preview_mute() -> void:
+	_preview_mute_changed = true
+
+
+func end_preview_mute() -> void:
+	_preview_mute_changed = false
+
+
+func _emit_changed() -> void:
+	if _preview_mute_changed:
+		return
+	changed.emit()
+
+
+## 供试算快照/还原点燃视觉格。
+func ignited_aoe_cells_snapshot() -> Dictionary:
+	return _ignited_aoe_cells.duplicate()
+
+
+func restore_ignited_aoe_cells(cells: Dictionary) -> void:
+	_ignited_aoe_cells.clear()
+	for key in cells.keys():
+		if key is Vector2i:
+			_ignited_aoe_cells[key as Vector2i] = true
 
 
 func setup(p_width: int, p_height: int) -> void:
@@ -32,7 +60,7 @@ func set_terrain_cells(cells: Dictionary) -> void:
 	for key in cells:
 		if key is Vector2i:
 			_terrain[key] = _catalog.resolve_id(StringName(cells[key]))
-	changed.emit()
+	_emit_changed()
 
 
 func set_terrain(map_data: MapData) -> void:
@@ -123,7 +151,7 @@ func shortest_path(
 
 func add_unit(instance: TacticalUnitInstance) -> void:
 	units.append(instance)
-	changed.emit()
+	_emit_changed()
 
 
 func unit_at(cell: Vector2i) -> TacticalUnitInstance:
@@ -151,7 +179,7 @@ func reset_side_turn_flags(active_faction: TacticalFaction.Id) -> void:
 				u.remaining_move_budget = 0
 			else:
 				u.remaining_move_budget = u.def.action_move_budget()
-	changed.emit()
+	_emit_changed()
 
 
 func reachable_move_cells(unit: TacticalUnitInstance) -> Array[Vector2i]:
@@ -288,7 +316,7 @@ func apply_heal_potion(
 			healed.size(),
 			heal_amt,
 		]
-	changed.emit()
+	_emit_changed()
 	return result
 
 
@@ -325,7 +353,7 @@ func apply_inspire_frenzy(drummer: TacticalUnitInstance, radius: int = 1) -> Dic
 		result["log"] = "%s 鼓舞：周围无友方可叠狂暴" % drummer.def.display_name
 	else:
 		result["log"] = "%s 鼓舞：%d 名周围友方 +1 狂暴" % [drummer.def.display_name, buffed]
-	changed.emit()
+	_emit_changed()
 	return result
 
 
@@ -391,7 +419,7 @@ func apply_damage(target: TacticalUnitInstance, amount: int, source: TacticalUni
 	result["ok"] = true
 	result["log"] = " · ".join(hurt_logs) if hurt_logs.size() > 0 else ""
 	result["passive_fx"] = passive_fx
-	changed.emit()
+	_emit_changed()
 	return result
 
 
@@ -427,7 +455,7 @@ func apply_burn_aoe(
 				}
 			)
 	_mark_ignited_aoe(origin, radius)
-	changed.emit()
+	_emit_changed()
 	return n
 
 
@@ -508,7 +536,7 @@ func process_burn_ticks(faction: TacticalFaction.Id) -> Array[Dictionary]:
 	var had_ignited := not _ignited_aoe_cells.is_empty()
 	_ignited_aoe_cells.clear()
 	if events.size() > 0 or had_ignited:
-		changed.emit()
+		_emit_changed()
 	return events
 
 
@@ -545,7 +573,7 @@ func try_move(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		unit.moved_this_side_turn = true
 	_apply_terrain_enter_effects(unit)
 	TacticalAbilitySystem.process_unit_move_end(self, unit)
-	changed.emit()
+	_emit_changed()
 	return true
 
 
@@ -561,7 +589,7 @@ func force_displace(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		return false
 	unit.cell = dest
 	_apply_terrain_enter_effects(unit)
-	changed.emit()
+	_emit_changed()
 	return true
 
 
@@ -613,7 +641,7 @@ func try_deploy_place(unit: TacticalUnitInstance, dest: Vector2i) -> bool:
 		occupant.cell = from
 		_apply_terrain_enter_effects(unit)
 		_apply_terrain_enter_effects(occupant)
-	changed.emit()
+	_emit_changed()
 	return true
 
 
@@ -632,7 +660,7 @@ func apply_grant_stealth(caster: TacticalUnitInstance, target: TacticalUnitInsta
 	result["passive_fx"] = [
 		{"cell": target.cell, "text": "隐身", "color": Color("c8b4ff")},
 	]
-	changed.emit()
+	_emit_changed()
 	return result
 
 
