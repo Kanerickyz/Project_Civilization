@@ -12,7 +12,7 @@
 | 配置 | 资源 | 阵容 |
 |------|------|------|
 | A | `enemy_config_a.tres` | 6× 狼骑兵（`rider.tres`，攻 2 / 血 10） |
-| B | `enemy_config_b.tres` | 1× 骷髅将军（`skeleton_general.tres`，攻 5 / 血 30） |
+| B | `enemy_config_b.tres` | 1× 骷髅将军（`skeleton_general.tres`，攻 5 / 血 30）+ 2× 骷髅兵（`skeleton_soldier.tres`，攻 2 / 血 4） |
 
 ## 骷髅将军状态机
 
@@ -34,4 +34,4 @@
 ## 验收
 
 - 轻量：`bash tools/run_light_verify.sh`
-- 效果：多次进沙盘可见配置 A（六狼骑）或配置 B（一骷髅将军）；将军可回血/召唤；狼骑攻移为同一意图。
+- 效果：多次进沙盘可见配置 A（六狼骑）或配置 B（一骷髅将军 + 两骷髅兵）；将军可回血/召唤；狼骑攻移为同一意图。
