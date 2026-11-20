@@ -1759,6 +1759,43 @@ func _await_presentation_idle_async() -> void:
 		guard += 1
 
 
+## 从一批对手事件里收集攻击结算已击杀、但仍需等攻击表现的目标。
+func _collect_attack_event_kill_victims(events: Array) -> Array[TacticalUnitInstance]:
+	var out: Array[TacticalUnitInstance] = []
+	var seen: Dictionary = {}
+	for ev in events:
+		if str(ev.get("kind", "")) != "attack":
+			continue
+		var res: Dictionary = ev.get("result", {}) as Dictionary
+		_append_attack_kill_victim(out, seen, res.get("target"), bool(res.get("killed", false)))
+		_append_attack_kill_victim(
+			out, seen, res.get("collision_target"), bool(res.get("collision_killed", false))
+		)
+		for hit in res.get("volley_hits", []) as Array:
+			if not (hit is Dictionary):
+				continue
+			var hd: Dictionary = hit as Dictionary
+			_append_attack_kill_victim(
+				out, seen, hd.get("unit"), bool(hd.get("killed", false))
+			)
+	return out
+
+
+func _append_attack_kill_victim(
+	out: Array[TacticalUnitInstance],
+	seen: Dictionary,
+	unit_v: Variant,
+	killed: bool
+) -> void:
+	if not killed:
+		return
+	var unit := unit_v as TacticalUnitInstance
+	if unit == null or seen.has(unit):
+		return
+	seen[unit] = true
+	out.append(unit)
+
+
 func _heal_potion_aim_cells(caster: TacticalUnitInstance) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	if caster == null or caster.def == null or _board == null:
@@ -1840,7 +1877,11 @@ func _run_opponent_turn_async() -> void:
 	for unit in opponents:
 		if not unit.is_alive():
 			continue
+		# AI 一批内先逻辑结算（可含移动+击杀）；表现须先走完再攻/死。
 		var events := TacticalEnemyAiScript.run_opponent_unit_actions(_board, unit)
+		# 后续攻击事件里已死的目标：移动 refresh 前 hold，禁止提前拆精灵。
+		for victim in _collect_attack_event_kill_victims(events):
+			_board_view.hold_dead_unit_visual(victim)
 		for ev in events:
 			var kind: String = ev.get("kind", "")
 			if kind == "move":
@@ -1849,7 +1890,9 @@ func _run_opponent_turn_async() -> void:
 					mover.def.display_name, mover.remaining_move_budget
 				]
 				_refresh_all()
-				await get_tree().create_timer(_board_view.unit_move_duration_sec()).timeout
+				# 等 hop Tween 真正播完，再进入攻击/伤害/死亡（勿只靠固定短时）。
+				await get_tree().process_frame
+				await _await_presentation_idle_async()
 			elif kind == "attack":
 				var res: Dictionary = ev["result"]
 				var cell: Vector2i = ev["cell"]

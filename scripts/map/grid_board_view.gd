@@ -123,6 +123,8 @@ var _last_move_tween_sec: float = UNIT_MOVE_HOP_SEC
 ## 死亡淡出期间保留精灵；sync 不得拆掉，剪影锚冻结在死亡世界坐标。
 var _dying_units: Dictionary = {} # TacticalUnitInstance -> true
 var _unit_death_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
+## 逻辑已死、死亡表现未开：sync 仍保留精灵（对手先移动再攻击时用）。
+var _held_dead_visuals: Dictionary = {} # TacticalUnitInstance -> true
 var _frozen_death_world: Dictionary = {} # TacticalUnitInstance -> Vector2
 ## 受击/冲刺 Tween；死亡时须杀掉，避免 finished 里 snap 把尸体挪格。
 var _unit_hit_tweens: Dictionary = {} # TacticalUnitInstance -> Tween
@@ -443,6 +445,7 @@ func _rebuild_board() -> void:
 	for key in atk_keys:
 		_kill_unit_attack_tween(key as TacticalUnitInstance)
 	_dying_units.clear()
+	_held_dead_visuals.clear()
 	_frozen_death_world.clear()
 	_drag_select_unit = null
 	_drag_select_valid = false
@@ -573,8 +576,12 @@ func sync_tactical_units(
 	for key in _unit_sprites.keys():
 		if alive.has(key):
 			continue
-		# 死亡淡出未完：保留节点，避免 sync 瞬删导致剪影错位/瞬移消失。
-		if _dying_units.has(key) or _unit_death_tweens.has(key):
+		# 死亡淡出未完，或对手移动段尚未播到攻击：保留节点，禁止提前拆精灵。
+		if (
+			_dying_units.has(key)
+			or _unit_death_tweens.has(key)
+			or _held_dead_visuals.has(key)
+		):
 			continue
 		_remove_unit_visual(key)
 	_sync_intent_preview(intent_preview, intent_unit)
@@ -795,6 +802,7 @@ func _remove_unit_visual(unit: TacticalUnitInstance) -> void:
 	_kill_unit_attack_tween(unit)
 	_kill_unit_death_tween(unit)
 	_dying_units.erase(unit)
+	_held_dead_visuals.erase(unit)
 	_frozen_death_world.erase(unit)
 	_unit_base_offsets.erase(unit)
 	_unit_base_scales.erase(unit)
@@ -1157,13 +1165,30 @@ func unit_hit_flash_amount(unit: TacticalUnitInstance) -> float:
 	return float(mat.get_shader_parameter("flash_amount"))
 
 
-## 死亡表现：先冻结世界坐标，再淡出；sync 保留节点至 tween 结束再拆。
+## 逻辑已死但攻击表现未到：sync 保留精灵，避免对手移动刷新时提前消失。
+func hold_dead_unit_visual(unit: TacticalUnitInstance) -> void:
+	if unit == null or not _unit_sprites.has(unit):
+		return
+	_held_dead_visuals[unit] = true
+
+
+func clear_held_dead_unit_visual(unit: TacticalUnitInstance) -> void:
+	_held_dead_visuals.erase(unit)
+
+
+func is_dead_unit_visual_held(unit: TacticalUnitInstance) -> bool:
+	return unit != null and _held_dead_visuals.has(unit)
+
+
+## 死亡表现：留在棋盘格深度（不 reparent 到 Units 层），scale→0.05 + 淡出。
+## 勿 `_float_unit_for_world_tween`：浮到 units_root 会破坏格深度/排序，观感像飞向镜头。
 ## 返回 Tween 供调用方 await；已在死亡中则返回现有 tween。
 func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 	if unit == null or not _unit_sprites.has(unit):
 		return null
 	if _unit_death_tweens.has(unit):
 		return _unit_death_tweens[unit] as Tween
+	_held_dead_visuals.erase(unit)
 	_kill_unit_idle(unit)
 	_kill_unit_move_tween(unit)
 	_kill_unit_hit_tween(unit)
@@ -1175,12 +1200,13 @@ func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	_end_unit_flash(spr)
-	# 选中/被动脉冲可能把 scale 抬高：先回到基准尺寸，死亡只淡出不改 scale。
-	# 旧实现 tween 到 Vector2(0.05,0.05)：单位基准 scale≈unit_h/贴图像素 ≪ 0.05，会先放大再缩。
+	# 先回到基准 scale；保持挂在死亡格 tile 上（格心、格深度），禁止飞层。
 	_restore_unit_base_scale(unit)
-	# 浮到 units_root 并冻结世界坐标：后续 sync/格子变化不得带动尸体。
-	_float_unit_for_world_tween(spr)
-	_frozen_death_world[unit] = spr.position
+	_mount_unit_on_tile(unit)
+	spr.position = Vector2.ZERO
+	_apply_unit_draw_depth(unit)
+	# 冻结世界坐标供剪影锚点；精灵本身仍挂 tile。
+	_frozen_death_world[unit] = _cell_to_world(unit.cell, config.cell_size)
 	_dying_units[unit] = true
 	_last_unit_cells[unit] = unit.cell
 	# 死亡时收起血条/角标，避免悬空读数。
@@ -1206,7 +1232,9 @@ func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 			blob.visible = false
 	var tw := create_tween()
 	_unit_death_tweens[unit] = tw
-	# 只淡出 alpha；scale 保持活着时基准，禁止放大/缩小。
+	tw.set_parallel(true)
+	# 可接受：缩小到 0.05；不可接受：飞向镜头（已用留格挂载避免）。
+	tw.tween_property(spr, "scale", Vector2(0.05, 0.05), UNIT_DEATH_SEC)
 	tw.tween_property(spr, "modulate:a", 0.0, UNIT_DEATH_SEC)
 	tw.finished.connect(
 		func() -> void:
