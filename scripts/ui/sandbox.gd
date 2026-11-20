@@ -13,6 +13,7 @@ const TacticalEnemyAiScript := preload("res://scripts/units/tactical_enemy_ai.gd
 const TacticalFactionScript := preload("res://scripts/units/tactical_faction.gd")
 const TacticalCardDeckScript := preload("res://scripts/cards/tactical_card_deck.gd")
 const TacticalActionCardScript := preload("res://scripts/cards/tactical_action_card.gd")
+const TacticalActionPreviewScript := preload("res://scripts/units/tactical_action_preview.gd")
 const ActionHandFanScript := preload("res://scripts/ui/action_hand_fan.gd")
 const TacticalUnitInfoCardScript := preload("res://scripts/ui/tactical_unit_info_card.gd")
 const KillImpactFxScript := preload("res://scripts/ui/kill_impact_fx.gd")
@@ -210,6 +211,7 @@ func _build() -> void:
 	_board_view.setup(_board_config)
 	_board_view.set_terrain_cells(_board.terrain_cells())
 	_board_view.cell_clicked.connect(_on_cell_clicked)
+	_board_view.cell_hovered.connect(_on_cell_hovered)
 	_board_view.unit_long_pressed.connect(_on_unit_long_pressed)
 	_board_view.unit_info_closed.connect(_hide_unit_info_card)
 	_board_view.unit_deploy_dropped.connect(_on_unit_deploy_dropped)
@@ -452,6 +454,7 @@ func _clear_pending_target(keep_move_focus: bool = true) -> void:
 	_pending_kind = PendingKind.NONE
 	if _board_view != null:
 		_board_view.clear_skill_drag_preview()
+		_board_view.clear_action_preview()
 	# 取消瞄准：已打牌不回手，清空该单位全部攻击授权（含连拖叠加）。
 	if _focus_unit != null and _deck.is_attack_authorized(_focus_unit):
 		_deck.clear_attack_authorization(_focus_unit)
@@ -712,6 +715,7 @@ func _on_unit_deploy_dropped(unit: TacticalUnitInstance, cell: Vector2i) -> void
 
 
 ## 拖牌跟手：高亮当前格；悬停单位播选中脉冲（可落/不可落不同态）。
+## 技能/治疗：悬停目标时预览整条伤害/触发链路（A）；移动卡：授权+可达提示。
 func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 	if _board_view == null:
 		return
@@ -748,6 +752,10 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 			_board_view.set_skill_drag_preview(caster.cell, cell, release_cells, in_release)
 		else:
 			_board_view.set_skill_drag_preview(null, null, release_cells, false)
+		if in_release:
+			_board_view.set_action_preview(_preview_for_skill_drag(peek, caster, cell))
+		else:
+			_board_view.clear_action_preview()
 		return
 	elif unit != null and unit.is_alive():
 		hover_unit = unit
@@ -758,6 +766,162 @@ func _on_hand_card_drag_moved(index: int, global_pos: Vector2) -> void:
 		)
 	_board_view.clear_skill_drag_preview()
 	_board_view.set_card_drag_hover(cell, hover_unit, valid)
+	if valid and peek != null:
+		_board_view.set_action_preview(_preview_for_unit_targeted_card(peek, unit))
+	else:
+		_board_view.clear_action_preview()
+
+
+## 瞄准悬停（B）：攻击/冲撞/药水/移动落点预览整条链路。
+func _on_cell_hovered(cell: Variant) -> void:
+	if _board_view == null:
+		return
+	if (
+		_in_deployment
+		or _input_locked
+		or _game_over
+		or not _clock.player_active
+		or _pending_kind == PendingKind.NONE
+		or _focus_unit == null
+	):
+		return
+	# 拖牌中由 _on_hand_card_drag_moved 负责预览。
+	if _hand_fan != null and _hand_fan.is_busy():
+		return
+	if cell == null or not (cell is Vector2i):
+		_board_view.clear_action_preview()
+		return
+	var c: Vector2i = cell as Vector2i
+	var preview := _preview_for_pending_aim(c)
+	if bool(preview.get("ok", false)):
+		_board_view.set_action_preview(preview)
+	else:
+		_board_view.clear_action_preview()
+
+
+func _preview_for_unit_targeted_card(
+	card: TacticalActionCard, unit: TacticalUnitInstance
+) -> Dictionary:
+	if card == null or unit == null:
+		return {}
+	if card.kind == TacticalActionCardScript.Kind.MOVE:
+		var prev := TacticalActionPreviewScript.preview_move_authorize(unit)
+		var cells := _board.preview_reachable_move_cells(unit)
+		_board_view.set_preview_move_cells(cells)
+		return prev
+	_board_view.set_preview_move_cells([])
+	match card.kind:
+		TacticalActionCardScript.Kind.SKILL_ARMOR:
+			return TacticalActionPreviewScript.preview_armor(unit, card.armor_grant)
+		TacticalActionCardScript.Kind.ATTACK, TacticalActionCardScript.Kind.SKILL_STRONG_ATTACK:
+			# 攻击卡拖到己方仅授权；链路在瞄准悬停时展开（B）。
+			return {
+				"ok": true,
+				"log": "攻击授权",
+				"steps": [{"text": "选定攻击者", "kind": "info"}, {"text": "再点红圈目标", "kind": "info"}],
+				"chain_text": "选定攻击者 → 再点红圈目标",
+				"unit_deltas": {},
+				"hover_cell": unit.cell,
+			}
+		_:
+			return {}
+
+
+func _preview_for_skill_drag(
+	card: TacticalActionCard, caster: TacticalUnitInstance, cell: Vector2i
+) -> Dictionary:
+	if card == null:
+		return {}
+	_board_view.set_preview_move_cells([])
+	match card.kind:
+		TacticalActionCardScript.Kind.SKILL_HEAL_POTION:
+			if caster == null:
+				return {}
+			return TacticalActionPreviewScript.preview_heal_potion(_board, caster, cell)
+		TacticalActionCardScript.Kind.SKILL_INSPIRE:
+			if caster == null:
+				return {}
+			return TacticalActionPreviewScript.preview_inspire(_board, caster)
+		TacticalActionCardScript.Kind.SKILL_DRAW:
+			return TacticalActionPreviewScript.preview_skill_draw()
+		TacticalActionCardScript.Kind.SKILL_STEALTH:
+			var t := _board.unit_at(cell)
+			if t == null:
+				return {}
+			return TacticalActionPreviewScript.preview_stealth(t)
+		TacticalActionCardScript.Kind.SKILL_CHARGE:
+			if caster == null:
+				return {}
+			return TacticalActionPreviewScript.preview_charge(_board, caster, cell)
+		TacticalActionCardScript.Kind.SKILL_VOLLEY, TacticalActionCardScript.Kind.SKILL_BURN_ATTACK:
+			if caster == null:
+				return {}
+			var target := _board.unit_at(cell)
+			if target == null or target == caster:
+				return {
+					"ok": true,
+					"log": "瞄准中",
+					"steps": [{"text": "点红圈目标结算", "kind": "info"}],
+					"chain_text": "点红圈目标结算",
+					"unit_deltas": {},
+					"hover_cell": cell,
+				}
+			var is_volley := card.kind == TacticalActionCardScript.Kind.SKILL_VOLLEY
+			return TacticalActionPreviewScript.preview_basic_attack(
+				_board,
+				caster,
+				cell,
+				card.attack_bonus_damage,
+				card.aoe_burn_stacks,
+				is_volley,
+				true
+			)
+		_:
+			return {}
+
+
+func _preview_for_pending_aim(cell: Vector2i) -> Dictionary:
+	if _focus_unit == null:
+		return {}
+	match _pending_kind:
+		PendingKind.ATTACK:
+			var target := _board.unit_at(cell)
+			if target == null or target == _focus_unit:
+				return {}
+			var dist := GridMathScript.chebyshev(_focus_unit.cell, cell)
+			if not _focus_unit.def.is_chebyshev_in_attack_band(dist):
+				return {}
+			if not _board.has_attack_los(_focus_unit.cell, cell):
+				return {}
+			return TacticalActionPreviewScript.preview_basic_attack(
+				_board,
+				_focus_unit,
+				cell,
+				_deck.pending_attack_bonus,
+				_deck.pending_aoe_burn_stacks,
+				_deck.pending_volley,
+				true
+			)
+		PendingKind.CHARGE:
+			var charge_cells: Array[Vector2i] = TacticalCombatScript.charge_preview_cells(
+				_board, _focus_unit.cell
+			)
+			if not (cell in charge_cells):
+				return {}
+			return TacticalActionPreviewScript.preview_charge(_board, _focus_unit, cell)
+		PendingKind.HEAL_POTION:
+			if not (cell in _heal_potion_aim_cells(_focus_unit)):
+				return {}
+			return TacticalActionPreviewScript.preview_heal_potion(_board, _focus_unit, cell)
+		PendingKind.MOVE:
+			return TacticalActionPreviewScript.preview_move_step(_board, _focus_unit, cell)
+		PendingKind.STEALTH:
+			var st := _board.unit_at(cell)
+			if st == null:
+				return {}
+			return TacticalActionPreviewScript.preview_stealth(st)
+		_:
+			return {}
 
 
 ## 短按：非通用技自由打出；通用卡短按无效。
@@ -1856,8 +2020,43 @@ func capture_skill_drag_preview(kind_name: String, hover_unit_id: String = "") -
 				break
 	_board_view.set_card_drag_hover(hover_cell, _board.unit_at(hover_cell), true)
 	_board_view.set_skill_drag_preview(caster.cell, hover_cell, release_cells, true)
+	_board_view.set_action_preview(_preview_for_skill_drag(peek, caster, hover_cell))
 	_last_log = "拖技预览：%s → %s" % [peek.display_label(), hover_cell]
 	_refresh_hand_ui()
+	return true
+
+
+## GUI：授权攻击后悬停目标，展示伤害链路预览（PC-107）。
+func capture_attack_aim_preview(attacker_id: String, target_id: String) -> bool:
+	if _board == null or _board_view == null or _deck == null:
+		return false
+	var attacker: TacticalUnitInstance = null
+	var target: TacticalUnitInstance = null
+	for u in _board.living_units():
+		if u.def == null:
+			continue
+		if attacker == null and u.faction == TacticalFactionScript.Id.PLAYER and u.def.id == attacker_id:
+			attacker = u
+		if target == null and u.def.id == target_id and u != attacker:
+			target = u
+	if attacker == null or target == null:
+		return false
+	_deck.authorize_attack(attacker, 0, 0, false)
+	_focus_unit = attacker
+	_pending_kind = PendingKind.ATTACK
+	_selected_unit = attacker
+	_refresh_all()
+	var preview: Dictionary = TacticalActionPreviewScript.preview_basic_attack(
+		_board, attacker, target.cell, 0, 0, false, true
+	)
+	if not bool(preview.get("ok", false)):
+		return false
+	_board_view.set_action_preview(preview)
+	_last_log = "攻击预览：%s → %s · %s" % [
+		attacker.def.display_name,
+		target.def.display_name,
+		str(preview.get("chain_text", "")),
+	]
 	return true
 
 
