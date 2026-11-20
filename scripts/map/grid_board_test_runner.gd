@@ -64,6 +64,9 @@ func _initialize() -> void:
 	if not await _test_death_keeps_visual_until_tween_ends():
 		quit(1)
 		return
+	if not await _test_held_dead_survives_sync_until_death():
+		quit(1)
+		return
 	print("GRID_BOARD_OK")
 	quit(0)
 
@@ -128,8 +131,8 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 		push_error("death keep visual: expected sprite after sync")
 		return false
 	var spr_alive: Sprite2D = view._unit_sprites[unit] as Sprite2D
+	var cell_world: Vector2 = view._cell_to_world(unit.cell, view.config.cell_size)
 	var world_before: Vector2 = view._unit_world_position(spr_alive)
-	var scale_before: Vector2 = spr_alive.scale
 	unit.hp = 0
 	var death_tw: Tween = view.play_unit_death(unit)
 	if death_tw == null:
@@ -148,15 +151,23 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 		push_error("death keep visual: expected is_unit_dying during fade")
 		return false
 	var spr_dying: Sprite2D = view._unit_sprites[unit] as Sprite2D
-	# 死亡不得放大：scale 须保持活着时基准（允许极小浮点误差）。
-	if spr_dying.scale.distance_to(scale_before) > 0.0001:
+	# 须留在死亡格 tile 上，不可浮到 Units 层（飞向镜头）。
+	var tile: Node2D = view._tile_nodes.get(unit.cell) as Node2D
+	if tile == null or spr_dying.get_parent() != tile:
 		push_error(
-			"death keep visual: scale changed during death before=%s now=%s"
-			% [scale_before, spr_dying.scale]
+			"death keep visual: dying sprite must stay on death tile, parent=%s"
+			% spr_dying.get_parent()
 		)
 		return false
-	if absf(spr_dying.scale.x) > absf(scale_before.x) * 1.01 + 0.0001:
-		push_error("death keep visual: death enlarged sprite")
+	if spr_dying.position.length() > 0.05:
+		push_error("death keep visual: dying sprite left cell center pos=%s" % spr_dying.position)
+		return false
+	var world_now: Vector2 = view._unit_world_position(spr_dying)
+	if world_now.distance_to(cell_world) > 0.05:
+		push_error(
+			"death keep visual: world pos flew off cell cell=%s now=%s"
+			% [cell_world, world_now]
+		)
 		return false
 	var frozen: Vector2 = view._frozen_death_world.get(unit, Vector2.INF) as Vector2
 	if not frozen.is_finite() or frozen.distance_to(world_before) > 0.05:
@@ -172,6 +183,67 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 		return false
 	if view.is_combat_presentation_busy():
 		push_error("death keep visual: busy should clear after death")
+		return false
+	return true
+
+
+## PC-109：逻辑已死但攻击未播时 hold，移动段 sync 不得拆精灵；死亡后解除 hold。
+func _test_held_dead_survives_sync_until_death() -> bool:
+	var cfg := (load("res://resources/map/board_config.tres") as BoardConfig).duplicate() as BoardConfig
+	cfg.grid_width = 4
+	cfg.grid_height = 4
+	var host := Control.new()
+	host.size = Vector2(480, 360)
+	root.add_child(host)
+	var view: GridBoardView = GridBoardViewScript.new()
+	host.add_child(view)
+	view.setup(cfg)
+	var def := load("res://resources/units/knight.tres") as TacticalUnitDef
+	if def == null:
+		push_error("held dead: knight.tres missing")
+		return false
+	var UnitInstScript := preload("res://scripts/units/tactical_unit_instance.gd")
+	var FactionScript := preload("res://scripts/units/tactical_faction.gd")
+	var victim: TacticalUnitInstance = UnitInstScript.new(
+		def, FactionScript.Id.PLAYER, Vector2i(1, 1)
+	)
+	var mover: TacticalUnitInstance = UnitInstScript.new(
+		def, FactionScript.Id.OPPONENT, Vector2i(2, 2)
+	)
+	view.sync_tactical_units([victim, mover], Vector2i(-1, -1), [], [])
+	await process_frame
+	victim.hp = 0
+	view.hold_dead_unit_visual(victim)
+	if not view.is_dead_unit_visual_held(victim):
+		push_error("held dead: expected hold flag")
+		return false
+	# hold 本身不得闩 busy（否则移动后会空等攻击）。
+	if view.is_combat_presentation_busy():
+		push_error("held dead: hold alone must not latch presentation busy")
+		return false
+	# 模拟对手移动 refresh：存活列表只有 mover，held victim 须保留。
+	mover.cell = Vector2i(3, 3)
+	view.sync_tactical_units([mover], Vector2i(-1, -1), [], [])
+	await process_frame
+	if not view._unit_sprites.has(victim):
+		push_error("held dead: sync removed victim before death presentation")
+		return false
+	var death_tw: Tween = view.play_unit_death(victim)
+	if death_tw == null:
+		push_error("held dead: play_unit_death missing")
+		return false
+	if view.is_dead_unit_visual_held(victim):
+		push_error("held dead: death should clear hold")
+		return false
+	var spr: Sprite2D = view._unit_sprites[victim] as Sprite2D
+	var tile: Node2D = view._tile_nodes.get(victim.cell) as Node2D
+	if tile == null or spr.get_parent() != tile:
+		push_error("held dead: dying sprite must stay on tile (no fly layer)")
+		return false
+	await death_tw.finished
+	await process_frame
+	if view._unit_sprites.has(victim):
+		push_error("held dead: sprite should be gone after death")
 		return false
 	return true
 

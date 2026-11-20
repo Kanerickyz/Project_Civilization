@@ -121,9 +121,8 @@ func _initialize() -> void:
 	foe.armor = 0
 	view.sync_tactical_units(board.living_units(), Vector2i(-1, -1), [], [])
 	await process_frame
-	var live_scale: Vector2 = (
-		view._unit_base_scales.get(foe, view._unit_sprites[foe].scale) as Vector2
-	)
+	var death_cell: Vector2i = foe.cell
+	var cell_world: Vector2 = view._cell_to_world(death_cell, view.config.cell_size)
 	var atk_res: Dictionary = TacticalCombatScript.try_basic_attack(
 		board, attacker, foe.cell, TacticalFactionScript.Id.PLAYER, true, 0, 0, false
 	)
@@ -162,18 +161,21 @@ func _initialize() -> void:
 		)
 		quit(1)
 		return
-	if dying_spr.scale.distance_to(live_scale) > 0.0005:
+	# 须留在死亡格：挂 tile、世界坐标贴近格心（证明未飞向镜头）。
+	var tile: Node2D = view._tile_nodes.get(death_cell) as Node2D
+	if tile == null or dying_spr.get_parent() != tile:
+		push_error("pc108 capture: dying sprite left death tile (flew layer)")
+		quit(1)
+		return
+	var world_now: Vector2 = view._unit_world_position(dying_spr)
+	if world_now.distance_to(cell_world) > 0.08:
 		push_error(
-			"pc108 capture: death enlarged/changed scale live=%s dying=%s"
-			% [live_scale, dying_spr.scale]
+			"pc108 capture: dying sprite flew off cell cell=%s now=%s"
+			% [cell_world, world_now]
 		)
 		quit(1)
 		return
-	if absf(dying_spr.scale.x) > absf(live_scale.x) * 1.01 + 0.0001:
-		push_error("pc108 capture: death sprite enlarged")
-		quit(1)
-		return
-	_zoom_on(view, foe.cell, foe.cell, 2.0)
+	_zoom_on(view, death_cell, death_cell, 2.0)
 	await process_frame
 	if not _save_frame(main_out):
 		quit(1)
