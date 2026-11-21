@@ -1191,6 +1191,13 @@ func is_dead_unit_visual_held(unit: TacticalUnitInstance) -> bool:
 	return unit != null and _held_dead_visuals.has(unit)
 
 
+## 表现格：hold 期间用旧格，否则用逻辑格。一切 mount/受击/血条锚点必须走这里。
+func _presentation_cell(unit: TacticalUnitInstance) -> Vector2i:
+	if unit != null and _held_presentation_cells.has(unit):
+		return _held_presentation_cells[unit] as Vector2i
+	return unit.cell if unit != null else Vector2i(-1, -1)
+
+
 ## 逻辑格已变（击退），表现未到：钉在 visual_cell，sync 不得提前 tween。
 func hold_unit_visual_at_cell(unit: TacticalUnitInstance, visual_cell: Vector2i) -> void:
 	if unit == null or not _unit_sprites.has(unit) or config == null:
@@ -1220,35 +1227,32 @@ func is_unit_presentation_held(unit: TacticalUnitInstance) -> bool:
 func _pin_unit_to_held_presentation_cell(unit: TacticalUnitInstance) -> void:
 	if not _held_presentation_cells.has(unit) or not _unit_sprites.has(unit):
 		return
-	var cell: Vector2i = _held_presentation_cells[unit] as Vector2i
-	var spr := _unit_sprites[unit] as Sprite2D
-	var tile: Node2D = _tile_nodes.get(cell) as Node2D
-	if tile == null:
-		return
-	if spr.get_parent() != tile:
-		# keep_global：换父时先保住屏幕尺寸，再钉到格心并恢复基准 scale。
-		if spr.get_parent() != null:
-			spr.reparent(tile, true)
-		else:
-			tile.add_child(spr)
-	spr.position = Vector2.ZERO
-	_restore_unit_base_scale(unit)
-	# 深度按视觉格，而非已击退的逻辑格。
-	var screen_y := _cell_to_world(cell, config.cell_size).y
-	spr.z_as_relative = false
-	spr.z_index = UNIT_Z_BASE + int(round(screen_y * 100.0))
+	# mount 已按 presentation_cell；此处只强制基准 scale / 深度。
+	_mount_unit_on_tile(unit)
 	_place_unit_blob(unit)
 
 
-## 死亡表现：留在棋盘格深度（不 reparent 到 Units 层）；缩到基准 scale 的 5% + 淡出。
-## 禁止写死绝对 Vector2(0.05,0.05)：单位基准 scale≈unit_h/贴图像素 ≪ 0.05，会先放大。
-## 勿 `_float_unit_for_world_tween`：浮到 units_root 会破坏格深度/排序，观感像飞向镜头。
-## 返回 Tween 供调用方 await；已在死亡中则返回现有 tween。
+func _compute_unit_base_scale(unit: TacticalUnitInstance) -> Vector2:
+	if unit == null or unit.def == null or config == null:
+		return Vector2.ONE
+	var tex: Texture2D = unit.def.texture_blue
+	if unit.faction == TacticalFactionScript.Id.OPPONENT:
+		tex = unit.def.texture_red
+	var metrics := _texture_content_metrics(tex)
+	var content_h: float = metrics.content_h
+	var vis := unit.def.visual_scale if unit.def.visual_scale > 0.0 else 1.0
+	var s := (config.unit_world_height / content_h) * vis if content_h > 0.0 else 1.0
+	return Vector2(s, s)
+
+
+## 死亡：留在表现格 tile（禁止 float 到 Units）；按贴图重算基准 scale，只缩到 5% + 淡出。
+## 勿把世界坐标写进仍挂在 tile 下的 local position（会像飞向镜头/巨大化）。
 func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 	if unit == null or not _unit_sprites.has(unit):
 		return null
 	if _unit_death_tweens.has(unit):
 		return _unit_death_tweens[unit] as Tween
+	var death_cell := _presentation_cell(unit)
 	_held_dead_visuals.erase(unit)
 	_held_presentation_cells.erase(unit)
 	_kill_unit_idle(unit)
@@ -1262,15 +1266,23 @@ func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 		_kill_unit_select_tween(unit)
 	var spr := _unit_sprites[unit] as Sprite2D
 	_end_unit_flash(spr)
-	# 先回到基准 scale；keep_global 换挂到死亡格 tile，再强制局部归零 + 基准 scale。
-	var base_scale: Vector2 = _unit_base_scales.get(unit, spr.scale) as Vector2
+	# 重算棋盘基准 scale（勿信可能被 keep_global/脉冲污染的缓存或当前 local scale）。
+	var base_scale := _compute_unit_base_scale(unit)
 	_unit_base_scales[unit] = base_scale
-	_mount_unit_on_tile(unit)
-	spr.position = Vector2.ZERO
-	spr.scale = base_scale
-	_apply_unit_draw_depth(unit)
-	# 冻结世界坐标供剪影锚点；精灵本身仍挂 tile。
-	_frozen_death_world[unit] = _cell_to_world(unit.cell, config.cell_size)
+	var tile: Node2D = _tile_nodes.get(death_cell) as Node2D
+	if tile != null:
+		if spr.get_parent() != tile:
+			# 仅当不在死亡格时换挂；keep_global 后再强制局部归零 + 基准 scale。
+			if spr.get_parent() != null:
+				spr.reparent(tile, true)
+			else:
+				tile.add_child(spr)
+		spr.position = Vector2.ZERO
+		spr.scale = base_scale
+	var screen_y := _cell_to_world(death_cell, config.cell_size).y
+	spr.z_as_relative = false
+	spr.z_index = UNIT_Z_BASE + int(round(screen_y * 100.0))
+	_frozen_death_world[unit] = _cell_to_world(death_cell, config.cell_size)
 	_dying_units[unit] = true
 	_last_unit_cells[unit] = unit.cell
 	# 死亡时收起血条/角标，避免悬空读数。
@@ -1297,7 +1309,9 @@ func play_unit_death(unit: TacticalUnitInstance) -> Tween:
 	var tw := create_tween()
 	_unit_death_tweens[unit] = tw
 	tw.set_parallel(true)
-	# 缩到活着时尺寸的 5%（相对），不是绝对 0.05 世界 scale。
+	# 相对基准缩小；硬限制起点不超过基准，杜绝放大。
+	if spr.scale.x > base_scale.x * 1.001:
+		spr.scale = base_scale
 	var death_scale := base_scale * 0.05
 	tw.tween_property(spr, "scale", death_scale, UNIT_DEATH_SEC)
 	tw.tween_property(spr, "modulate:a", 0.0, UNIT_DEATH_SEC)
@@ -1324,9 +1338,13 @@ func _kill_unit_death_tween(unit: TacticalUnitInstance) -> void:
 
 func _unit_combat_home(unit: TacticalUnitInstance, spr: Sprite2D) -> Vector2:
 	if _dying_units.has(unit) and _frozen_death_world.has(unit):
+		# 死亡中：若仍挂 tile，只用局部原点；禁止把冻结世界坐标写进 tile 本地 position。
+		if spr.get_parent() != _units_root:
+			return Vector2.ZERO
 		return _frozen_death_world[unit] as Vector2
-	if spr.get_parent() == _units_root:
-		return _cell_to_world(unit.cell, config.cell_size)
+	# 受击/冲刺 home：必须留在表现格（hold 时为命中格），禁止跳到已击退逻辑格。
+	if spr.get_parent() == _units_root and not _held_presentation_cells.has(unit):
+		return _cell_to_world(_presentation_cell(unit), config.cell_size)
 	_mount_unit_on_tile(unit)
 	return Vector2.ZERO
 
@@ -2644,7 +2662,9 @@ func _mount_unit_on_tile(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites.get(unit) as Sprite2D
 	if spr == null:
 		return
-	var tile: Node2D = _tile_nodes.get(unit.cell) as Node2D
+	# hold 期间钉表现格，避免受击/snap/refresh 跳到已结算的击退落点。
+	var cell := _presentation_cell(unit)
+	var tile: Node2D = _tile_nodes.get(cell) as Node2D
 	if tile == null:
 		return
 	if spr.get_parent() != tile:
@@ -2653,6 +2673,7 @@ func _mount_unit_on_tile(unit: TacticalUnitInstance) -> void:
 			spr.reparent(tile, true)
 		else:
 			tile.add_child(spr)
+	# 换父后必须清零本地位移并恢复基准 scale（禁止残留世界坐标 → 飞向镜头）。
 	spr.position = Vector2.ZERO
 	if _unit_base_scales.has(unit):
 		spr.scale = _unit_base_scales[unit] as Vector2
@@ -2662,17 +2683,16 @@ func _mount_unit_on_tile(unit: TacticalUnitInstance) -> void:
 func _float_unit_for_world_tween(spr: Sprite2D) -> void:
 	if spr.get_parent() == _units_root:
 		return
-	var world := _unit_world_position(spr)
-	spr.reparent(_units_root, false)
-	spr.position = world
+	# keep_global：世界坐标与屏幕尺寸一并保住，供 hop/冲刺在 Units 层补间。
+	spr.reparent(_units_root, true)
 
 
 func _apply_unit_draw_depth(unit: TacticalUnitInstance) -> void:
 	var spr := _unit_sprites.get(unit) as Sprite2D
 	if spr == null or config == null:
 		return
-	# 绝对层级：高于全部地块；更靠屏幕下方的单位后画。
-	var screen_y := _cell_to_world(unit.cell, config.cell_size).y
+	# 绝对层级：高于全部地块；按表现格（hold 时为旧格）排序。
+	var screen_y := _cell_to_world(_presentation_cell(unit), config.cell_size).y
 	spr.z_as_relative = false
 	spr.z_index = UNIT_Z_BASE + int(round(screen_y * 100.0))
 
