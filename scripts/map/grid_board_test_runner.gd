@@ -166,12 +166,16 @@ func _test_death_keeps_visual_until_tween_ends() -> bool:
 	if spr_dying.position.length() > 0.05:
 		push_error("death keep visual: dying sprite left cell center pos=%s" % spr_dying.position)
 		return false
-	# 死亡 scale 相对基准缩小，绝不可大于活着时基准（绝对 0.05 会放大）。
-	if spr_dying.scale.x > base_scale.x * 1.001 + 0.0001:
+	# 死亡 scale 相对重算基准缩小，绝不可大于基准。
+	var recomputed: Vector2 = view._compute_unit_base_scale(unit)
+	if spr_dying.scale.x > recomputed.x * 1.001 + 0.0001:
 		push_error(
 			"death keep visual: death enlarged scale base=%s dying=%s"
-			% [base_scale, spr_dying.scale]
+			% [recomputed, spr_dying.scale]
 		)
+		return false
+	if spr_dying.get_parent() == view._units_root:
+		push_error("death keep visual: dying sprite floated to Units layer")
 		return false
 	var world_now: Vector2 = view._unit_world_position(spr_dying)
 	if world_now.distance_to(cell_world) > 0.05:
@@ -302,6 +306,19 @@ func _test_knockback_hold_defers_tween_until_release() -> bool:
 	var from_tile: Node2D = view._tile_nodes.get(from_cell) as Node2D
 	if from_tile == null or spr.get_parent() != from_tile:
 		push_error("knockback hold: sprite must stay on hit cell tile")
+		return false
+	# 受击不得把 hold 目标 snap 到逻辑落点。
+	view.hold_unit_visual_at_cell(target, from_cell)
+	var hit_tw: Tween = view.play_unit_hit(target)
+	await process_frame
+	spr = view._unit_sprites[target] as Sprite2D
+	if spr.get_parent() != from_tile:
+		push_error("knockback hold: play_unit_hit remounted off hit cell")
+		return false
+	if hit_tw != null and is_instance_valid(hit_tw):
+		await hit_tw.finished
+	if spr.get_parent() != from_tile:
+		push_error("knockback hold: hit finished snap left hit cell")
 		return false
 	view.release_held_unit_visual(target, from_cell)
 	view.sync_tactical_units([target, mover], Vector2i(-1, -1), [], [])

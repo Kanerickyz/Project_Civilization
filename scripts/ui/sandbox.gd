@@ -1461,6 +1461,13 @@ func _run_player_attack_async(target_cell: Vector2i, target: TacticalUnitInstanc
 		return
 	# 成功后消耗队首授权（玩家无 attacked_this_side_turn 预算）。
 	_deck.consume_attack_authorization(attacker)
+	# 逻辑可能已击退/击杀：表现 hold 旧格，等冲刺+受击后再 release。
+	if bool(atk.get("killed", false)):
+		_board_view.hold_dead_unit_visual(target)
+	elif bool(atk.get("knockback_moved", false)):
+		var kb_from: Vector2i = atk.get("knockback_from", Vector2i(-1, -1)) as Vector2i
+		if kb_from.x >= 0:
+			_board_view.hold_unit_visual_at_cell(target, kb_from)
 	# 先播攻击冲刺/命中/击退/猎召等，再结算「当攻击牌打出时」加成（鼓手等）。
 	var tw := _board_view.play_unit_attack(attacker, target_cell)
 	if tw != null:
@@ -1488,13 +1495,14 @@ const SKILL_PLAY_INTERVAL_SEC := 0.4
 func _feedback_from_attack(
 	target: TacticalUnitInstance, res: Dictionary, hit_cell: Vector2i = Vector2i(-1, -1)
 ) -> void:
+	# 表现序：受击（仍 hold 在命中格）→ 死亡淡出 → 再 release 击退。禁止先改格可视化。
 	var dmg: int = int(res.get("damage", 0))
 	var popup_cell := hit_cell
 	if popup_cell.x < 0:
 		var from_kb: Vector2i = res.get("knockback_from", Vector2i(-1, -1)) as Vector2i
 		popup_cell = from_kb if from_kb.x >= 0 else target.cell
 	_board_view.play_damage_popup(popup_cell, dmg)
-	_board_view.play_unit_hit(target)
+	var hit_tw: Tween = _board_view.play_unit_hit(target)
 	var killed_now: Array = []
 	if res.get("killed", false):
 		_purge_dead_unit_cards(target)
@@ -1505,12 +1513,15 @@ func _feedback_from_attack(
 		if _focus_unit == target:
 			_focus_unit = null
 			_pending_kind = PendingKind.NONE
+	# 主目标受击播完再播碰撞/齐发/击退，避免 hold 被 snap 到落点。
+	if hit_tw != null and is_instance_valid(hit_tw):
+		await hit_tw.finished
 	var col: TacticalUnitInstance = res.get("collision_target") as TacticalUnitInstance
 	var col_dmg: int = int(res.get("collision_damage", 0))
 	if col != null and col_dmg > 0:
 		await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 		_board_view.play_damage_popup(col.cell, col_dmg)
-		_board_view.play_unit_hit(col)
+		var col_hit: Tween = _board_view.play_unit_hit(col)
 		if res.get("collision_killed", false):
 			_purge_dead_unit_cards(col)
 			_board_view.play_unit_death(col)
@@ -1520,6 +1531,8 @@ func _feedback_from_attack(
 			if _focus_unit == col:
 				_focus_unit = null
 				_pending_kind = PendingKind.NONE
+		if col_hit != null and is_instance_valid(col_hit):
+			await col_hit.finished
 	var volley_hits: Array = res.get("volley_hits", []) as Array
 	for hit in volley_hits:
 		if not (hit is Dictionary):
@@ -1531,7 +1544,7 @@ func _feedback_from_attack(
 			continue
 		await get_tree().create_timer(SKILL_PLAY_INTERVAL_SEC).timeout
 		_board_view.play_damage_popup(vcell if vcell.x >= 0 else vu.cell, vdmg)
-		_board_view.play_unit_hit(vu)
+		var vhit: Tween = _board_view.play_unit_hit(vu)
 		if bool((hit as Dictionary).get("killed", false)):
 			_purge_dead_unit_cards(vu)
 			_board_view.play_unit_death(vu)
@@ -1541,9 +1554,11 @@ func _feedback_from_attack(
 			if _focus_unit == vu:
 				_focus_unit = null
 				_pending_kind = PendingKind.NONE
+		if vhit != null and is_instance_valid(vhit):
+			await vhit.finished
 	# 同次结算多死：伤害可分拍，击杀红带+剪影一次同闪（各锚死亡位）。
 	_play_kill_impacts(killed_now)
-	# 击退成功：解除表现 hold（若有），再 refresh 播从命中格到落点的 tween。
+	# 击退：敌已到格且攻击/受击播完后，再 release + refresh 播位移。
 	if res.get("knockback_moved", false) and target != null and target.is_alive():
 		var kb_from: Vector2i = res.get("knockback_from", Vector2i(-1, -1)) as Vector2i
 		if kb_from.x >= 0:
@@ -1900,13 +1915,13 @@ func _run_opponent_turn_async() -> void:
 	for unit in opponents:
 		if not unit.is_alive():
 			continue
-		# AI 一批内先逻辑结算（可含移动+击杀/击退）；表现须先走完再攻/死/击退。
+		# AI 可先数值结算；表现必须 hold→移动→攻击→受击/死/击退，禁止 refresh 抢先反映终态。
 		var events := TacticalEnemyAiScript.run_opponent_unit_actions(_board, unit)
-		# 后续攻击事件里已死的目标：移动 refresh 前 hold，禁止提前拆精灵。
-		for victim in _collect_attack_event_kill_victims(events):
+		var pending_kills := _collect_attack_event_kill_victims(events)
+		var pending_knockbacks := _collect_attack_event_knockbacks(events)
+		for victim in pending_kills:
 			_board_view.hold_dead_unit_visual(victim)
-		# 已逻辑击退的目标：钉在命中格，禁止对手移动段提前播击退 tween。
-		for kb in _collect_attack_event_knockbacks(events):
+		for kb in pending_knockbacks:
 			_board_view.hold_unit_visual_at_cell(
 				kb.get("unit") as TacticalUnitInstance,
 				kb.get("from") as Vector2i
@@ -1918,14 +1933,28 @@ func _run_opponent_turn_async() -> void:
 				_last_log = "对手 %s 移动 · 剩余移力 %d" % [
 					mover.def.display_name, mover.remaining_move_budget
 				]
+				# 移动前再钉一次 hold，防止中途被其它 refresh 冲掉。
+				for kb2 in pending_knockbacks:
+					_board_view.hold_unit_visual_at_cell(
+						kb2.get("unit") as TacticalUnitInstance,
+						kb2.get("from") as Vector2i
+					)
+				for victim2 in pending_kills:
+					_board_view.hold_dead_unit_visual(victim2)
 				_refresh_all()
-				# 等 hop Tween 真正播完，再进入攻击/伤害/死亡（勿只靠固定短时）。
 				await get_tree().process_frame
 				await _await_presentation_idle_async()
 			elif kind == "attack":
 				var res: Dictionary = ev["result"]
 				var cell: Vector2i = ev["cell"]
 				var attacker := ev["unit"] as TacticalUnitInstance
+				# 攻击前确保目标仍 hold 在命中格。
+				for kb3 in pending_knockbacks:
+					var ku: TacticalUnitInstance = kb3.get("unit") as TacticalUnitInstance
+					if ku != null:
+						_board_view.hold_unit_visual_at_cell(ku, kb3.get("from") as Vector2i)
+				for victim3 in pending_kills:
+					_board_view.hold_dead_unit_visual(victim3)
 				var tw := _board_view.play_unit_attack(attacker, cell)
 				if tw != null:
 					await tw.finished
